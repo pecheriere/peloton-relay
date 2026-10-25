@@ -1,7 +1,10 @@
 //! macOS login helper that obtains Peloton tokens for the relay.
 
+pub mod capture;
+pub mod check;
 pub mod output;
 pub mod paste;
+pub mod session;
 #[cfg(target_os = "macos")]
 pub mod window;
 

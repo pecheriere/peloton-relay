@@ -13,9 +13,11 @@ peloton = { path = "../peloton", version = "0.1.0" }
 reqwest.workspace = true
 rpassword = "7"
 secrecy.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["time"] }
 url.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
