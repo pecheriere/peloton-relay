@@ -7,6 +7,7 @@ use std::path::{Component, Path, PathBuf};
 
 use peloton::endpoints;
 use peloton::ids::PelotonId;
+use secrecy::SecretString;
 use serde::Deserialize;
 
 use crate::check::parse_me;
@@ -153,34 +154,84 @@ pub fn run(session: &Session, dir: &Path, count: u32) -> Result<(), String> {
     )?;
     save(&dir, &format!("workouts-{}.json", me.id), &list)?;
 
+    let mut tally = Tally::default();
+    // me.json and the workouts list are already saved.
+    tally.saved += 2;
     for id in workout_ids(&list)? {
-        session.pause();
-        let workout = session.get(access, &format!("{}?{JOINS}", endpoints::workout(&id)))?;
-        save(&dir, &format!("workout-{id}.json"), &workout)?;
-
-        session.pause();
-        let graph = session.get(
-            access,
-            &format!("{}?every_n=1", endpoints::performance_graph(&id)),
-        )?;
-        save(&dir, &format!("performance_graph-{id}.json"), &graph)?;
-
-        if let Some(ride) = ride_id(&workout) {
+        let fetch = |query: String, name: String, tally: &mut Tally| {
             session.pause();
-            let details = session.get(access, &endpoints::ride_details(&ride))?;
-            save(&dir, &format!("ride_details-{ride}.json"), &details)?;
+            fetch_and_save(session, access, &dir, &query, &name, tally)
+        };
+        let workout = fetch(
+            format!("{}?{JOINS}", endpoints::workout(&id)),
+            format!("workout-{id}.json"),
+            &mut tally,
+        )?;
+        fetch(
+            format!("{}?every_n=1", endpoints::performance_graph(&id)),
+            format!("performance_graph-{id}.json"),
+            &mut tally,
+        )?;
+        let Some(workout) = workout else { continue };
+        if let Some(ride) = ride_id(&workout) {
+            fetch(
+                endpoints::ride_details(&ride),
+                format!("ride_details-{ride}.json"),
+                &mut tally,
+            )?;
         } else {
             eprintln!("workout {id}: no valid ride id, skipping ride details");
         }
     }
+    eprintln!("{}", tally.summary());
+    if tally.failed > 0 {
+        return Err("some requests failed".to_owned());
+    }
     Ok(())
+}
+
+/// Counts of saved and failed per-workout requests.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Tally {
+    saved: u32,
+    failed: u32,
+}
+
+impl Tally {
+    fn summary(&self) -> String {
+        format!("{} saved, {} failed", self.saved, self.failed)
+    }
+}
+
+/// Fetches `query` and saves it as `name`. A failed request is reported on
+/// stderr (path and status only) and counted; only a failed write aborts.
+fn fetch_and_save(
+    session: &Session,
+    access: &SecretString,
+    dir: &Path,
+    query: &str,
+    name: &str,
+    tally: &mut Tally,
+) -> Result<Option<Vec<u8>>, String> {
+    match session.get(access, query) {
+        Ok(body) => {
+            save(dir, name, &body)?;
+            tally.saved += 1;
+            Ok(Some(body))
+        }
+        Err(message) => {
+            eprintln!("failed: {message}");
+            tally.failed += 1;
+            Ok(None)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use super::{guard_dir, ride_id, workout_ids};
+    use super::{Tally, guard_dir, ride_id, workout_ids};
 
     const ID: &str = "0123456789abcdef0123456789abcdef";
 
@@ -216,5 +267,14 @@ mod tests {
     fn workout_ids_drop_invalid() {
         let body = format!(r#"{{"data":[{{"id":"{ID}"}},{{"id":"../x"}}]}}"#);
         assert_eq!(workout_ids(body.as_bytes()).expect("list").len(), 1);
+    }
+
+    #[test]
+    fn tally_summary_counts() {
+        let tally = Tally {
+            saved: 7,
+            failed: 2,
+        };
+        assert_eq!(tally.summary(), "7 saved, 2 failed");
     }
 }
