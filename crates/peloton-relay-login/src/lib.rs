@@ -3,7 +3,6 @@
 pub mod capture;
 pub mod check;
 pub mod output;
-pub mod paste;
 pub mod session;
 #[cfg(target_os = "macos")]
 pub mod window;
@@ -17,7 +16,4 @@ pub enum LoginError {
     /// The login window could not be created or run.
     #[error("login window failed: {0}")]
     Window(String),
-    /// Reading the pasted callback URL failed.
-    #[error("could not read the callback URL")]
-    Input(#[from] std::io::Error),
 }

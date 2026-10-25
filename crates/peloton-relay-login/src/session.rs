@@ -7,7 +7,6 @@ use peloton::oauth::{AUTH_DOMAIN, AuthClient, AuthRequest, TokenSet, parse_callb
 use secrecy::{ExposeSecret as _, SecretString};
 use url::Url;
 
-use crate::paste;
 #[cfg(target_os = "macos")]
 use crate::window;
 
@@ -49,20 +48,15 @@ impl Session {
         })
     }
 
-    /// Runs the interactive login (window or paste) and exchanges the code.
+    /// Runs the interactive login in the login window and exchanges the code.
     ///
     /// # Errors
     ///
     /// Returns a message without secrets when any step fails.
-    pub fn login(&self, paste: bool) -> Result<TokenSet, String> {
+    pub fn login(&self) -> Result<TokenSet, String> {
         let request = AuthRequest::generate();
         let authorize_url = request.authorize_url(&self.auth_base);
-        let callback = if paste {
-            paste::read_callback(&authorize_url)
-        } else {
-            capture_in_window(&authorize_url)
-        }
-        .map_err(|e| e.to_string())?;
+        let callback = capture_in_window(&authorize_url).map_err(|e| e.to_string())?;
         let code = parse_callback(&callback, &request.state).map_err(|e| e.to_string())?;
         self.runtime
             .block_on(self.auth.exchange_code(&code, &request))
@@ -123,7 +117,7 @@ fn capture_in_window(authorize_url: &Url) -> Result<String, crate::LoginError> {
 #[cfg(not(target_os = "macos"))]
 fn capture_in_window(_authorize_url: &Url) -> Result<String, crate::LoginError> {
     Err(crate::LoginError::Window(
-        "window mode needs macOS; use --paste".to_owned(),
+        "the login window needs macOS".to_owned(),
     ))
 }
 

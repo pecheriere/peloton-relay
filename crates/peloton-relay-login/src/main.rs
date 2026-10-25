@@ -20,18 +20,9 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Log in and print the token set (the default).
-    Login {
-        /// Log in with your own browser and paste the callback URL instead of
-        /// opening a window.
-        #[arg(long)]
-        paste: bool,
-    },
+    Login,
     /// Log in, call /me, refresh once and report non-secret facts.
-    Check {
-        /// Log in with your own browser and paste the callback URL.
-        #[arg(long)]
-        paste: bool,
-    },
+    Check,
     /// Log in and save raw Peloton responses for building fixtures.
     Capture {
         /// Directory to write into: outside the git work tree, or `<work tree>/captures`.
@@ -40,15 +31,12 @@ enum Command {
         /// How many recent workouts to capture.
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..=100))]
         workouts: u32,
-        /// Log in with your own browser and paste the callback URL.
-        #[arg(long)]
-        paste: bool,
     },
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    match run(cli.command.unwrap_or(Command::Login { paste: false })) {
+    match run(cli.command.unwrap_or(Command::Login)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("error: {message}");
@@ -59,21 +47,17 @@ fn main() -> ExitCode {
 
 fn run(command: Command) -> Result<(), String> {
     match command {
-        Command::Login { paste } => login(paste),
-        Command::Check { paste } => check::run(&Session::new()?, paste),
-        Command::Capture {
-            dir,
-            workouts,
-            paste,
-        } => capture::run(&Session::new()?, paste, &dir, workouts),
+        Command::Login => login(),
+        Command::Check => check::run(&Session::new()?),
+        Command::Capture { dir, workouts } => capture::run(&Session::new()?, &dir, workouts),
     }
 }
 
-fn login(paste: bool) -> Result<(), String> {
+fn login() -> Result<(), String> {
     if stdout().is_terminal() {
         return Err("stdout is a terminal; pipe or redirect it to receive the tokens".to_owned());
     }
-    let tokens = Session::new()?.login(paste)?;
+    let tokens = Session::new()?.login()?;
     write_tokens(&tokens, stdout(), false).map_err(|e| e.to_string())?;
     eprintln!("Login succeeded.");
     Ok(())

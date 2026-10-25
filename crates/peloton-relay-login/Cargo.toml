@@ -11,7 +11,6 @@ publish.workspace = true
 clap.workspace = true
 peloton = { path = "../peloton", version = "0.1.0" }
 reqwest.workspace = true
-rpassword = "7"
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true

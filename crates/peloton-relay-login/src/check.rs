@@ -31,8 +31,8 @@ pub fn parse_me(body: &[u8]) -> Result<Me, String> {
 /// # Errors
 ///
 /// Returns a message without secrets when any step fails.
-pub fn run(session: &Session, paste: bool) -> Result<(), String> {
-    let first = session.login(paste)?;
+pub fn run(session: &Session) -> Result<(), String> {
+    let first = session.login()?;
     let lifetime = (first.expires_at - OffsetDateTime::now_utc()).whole_seconds();
     let me = parse_me(&session.get(&first.access_token, &endpoints::me())?)?;
 

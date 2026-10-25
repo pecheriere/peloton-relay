@@ -91,7 +91,7 @@ impl AuthRequest {
     }
 }
 
-/// Why a pasted redirect URL could not be turned into an authorization code.
+/// Why a redirect URL could not be turned into an authorization code.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CallbackError {
     /// The URL is not the registered redirect URI.

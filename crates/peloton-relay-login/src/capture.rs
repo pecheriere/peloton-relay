@@ -131,12 +131,12 @@ fn save(dir: &Path, name: &str, body: &[u8]) -> Result<(), String> {
 /// # Errors
 ///
 /// Returns a message without secrets when any step fails.
-pub fn run(session: &Session, paste: bool, dir: &Path, count: u32) -> Result<(), String> {
+pub fn run(session: &Session, dir: &Path, count: u32) -> Result<(), String> {
     let dir = resolve_dir(dir)?;
     guard_dir(&dir, find_worktree(&dir).as_deref())?;
     prepare_dir(&dir)?;
 
-    let tokens = session.login(paste)?;
+    let tokens = session.login()?;
     let access = &tokens.access_token;
 
     let me_body = session.get(access, &endpoints::me())?;
