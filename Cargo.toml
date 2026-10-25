@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["crates/peloton", "crates/peloton-relay", "crates/peloton-relay-login"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+clap = { version = "4", features = ["derive"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }

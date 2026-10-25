@@ -1,0 +1,14 @@
+[package]
+name = "peloton-relay-login"
+description = "macOS login helper that obtains Peloton tokens for the relay"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+clap.workspace = true
+
+[lints]
+workspace = true
