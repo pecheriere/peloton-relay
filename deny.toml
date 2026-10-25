@@ -1,12 +1,13 @@
 [graph]
 all-features = true
+# The default audit covers what the relay ships for. The macOS-only login
+# helper is audited separately with `--target aarch64-apple-darwin`; mixing
+# both would leak wry/tao's Linux GTK edges into the graph.
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
 
 [advisories]
 version = 2
 yanked = "deny"
-ignore = [
-    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is a build-time dependency of wry/tao's GTK backend, which is only compiled on Linux; the login helper is macOS-only and CI never builds it elsewhere" },
-]
 
 [licenses]
 version = 2
@@ -14,7 +15,6 @@ unused-allowed-license = "allow"
 allow = [
     "MIT",
     "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
     "Unicode-3.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
