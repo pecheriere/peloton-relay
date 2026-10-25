@@ -11,6 +11,8 @@ use crate::paste;
 #[cfg(target_os = "macos")]
 use crate::window;
 
+const PAUSE: Duration = Duration::from_millis(400);
+
 /// An HTTP client, a runtime and the auth endpoint shared by all subcommands.
 pub struct Session {
     runtime: tokio::runtime::Runtime,
@@ -108,8 +110,7 @@ impl Session {
 
     /// Sleeps briefly so sequential requests stay gentle.
     pub fn pause(&self) {
-        self.runtime
-            .block_on(tokio::time::sleep(Duration::from_millis(400)));
+        std::thread::sleep(PAUSE);
     }
 }
 
@@ -124,4 +125,15 @@ fn capture_in_window(_authorize_url: &Url) -> Result<String, crate::LoginError> 
     Err(crate::LoginError::Window(
         "window mode needs macOS; use --paste".to_owned(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Session;
+
+    #[test]
+    fn pause_works_outside_the_runtime_context() {
+        let session = Session::new().expect("session");
+        session.pause();
+    }
 }
