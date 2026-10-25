@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use peloton_relay_login::output::write_tokens;
 use peloton_relay_login::session::Session;
-use peloton_relay_login::{capture, check};
+use peloton_relay_login::{capture, check, scrub};
 
 /// macOS login helper that obtains Peloton tokens for the relay.
 ///
@@ -32,6 +32,13 @@ enum Command {
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..=100))]
         workouts: u32,
     },
+    /// Scrub captures into fixtures that are safe to publish (no login, no network).
+    Scrub {
+        /// Directory holding the raw captures.
+        in_dir: PathBuf,
+        /// Directory to write the scrubbed files into.
+        out_dir: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -50,6 +57,7 @@ fn run(command: Command) -> Result<(), String> {
         Command::Login => login(),
         Command::Check => check::run(&Session::new()?),
         Command::Capture { dir, workouts } => capture::run(&Session::new()?, &dir, workouts),
+        Command::Scrub { in_dir, out_dir } => scrub::run(&in_dir, &out_dir),
     }
 }
 

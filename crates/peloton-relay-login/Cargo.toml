@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 clap.workspace = true
 peloton = { path = "../peloton", version = "0.1.0" }
+rand.workspace = true
 reqwest.workspace = true
 secrecy.workspace = true
 serde.workspace = true

@@ -1,0 +1,2175 @@
+{
+  "averages": {
+    "average_avg_cadence": 77,
+    "average_avg_power": 101,
+    "average_avg_resistance": 38,
+    "average_avg_speed": 15.6,
+    "average_calories": 83,
+    "average_distance": 2.57,
+    "average_effort_score": null,
+    "average_total_work": 60,
+    "total_heart_rate_zone_durations": null
+  },
+  "class_types": [
+    {
+      "id": "00000000000000000000000000000f69",
+      "name": "Low Impact"
+    }
+  ],
+  "default_album_images": {
+    "default_class_detail_image_url": "https://example.invalid/redacted",
+    "default_in_class_image_url": "https://example.invalid/redacted"
+  },
+  "disabled_leaderboard_filters": {
+    "age_and_gender": false,
+    "following": false,
+    "just_me": false
+  },
+  "events": {
+    "data": []
+  },
+  "excluded_platforms": [],
+  "instructor_cues": [
+    {
+      "cadence_range": {
+        "lower": 80,
+        "upper": 100
+      },
+      "offsets": {
+        "end": 70,
+        "start": 60
+      },
+      "resistance_range": {
+        "lower": 25,
+        "upper": 35
+      }
+    },
+    {
+      "cadence_range": {
+        "lower": 90,
+        "upper": 100
+      },
+      "offsets": {
+        "end": 152,
+        "start": 71
+      },
+      "resistance_range": {
+        "lower": 25,
+        "upper": 35
+      }
+    },
+    {
+      "cadence_range": {
+        "lower": 90,
+        "upper": 100
+      },
+      "offsets": {
+        "end": 175,
+        "start": 153
+      },
+      "resistance_range": {
+        "lower": 27,
+        "upper": 38
+      }
+    },
+    {
+      "cadence_range": {
+        "lower": 90,
+        "upper": 100
+      },
+      "offsets": {
+        "end": 211,
+        "start": 176
+      },
+      "resistance_range": {
+        "lower": 26,
+        "upper": 35
+      }
+    },
+    {
+      "cadence_range": {
+        "lower": 90,
+        "upper": 100
+      },
+      "offsets": {
+        "end": 232,
+        "start": 212
+      },
+      "resistance_range": {
+        "lower": 28,
+        "upper": 38
+      }
+    },
+    {
+      "cadence_range": {
+        "lower": 90,
+        "upper": 100
+      },
+      "offsets": {
+        "end": 277,
+        "start": 233
+      },
+      "resistance_range": {
+        "lower": 26,
+        "upper": 35
+      }
+    },
+    {
+      "cadence_range": {
+        "lower": 70,
+        "upper": 80
+      },
+      "offsets": {
+        "end": 348,
+        "start": 278
+      },
+      "resistance_range": {
+        "lower": 40,
+        "upper": 50
+      }
+    },
+    {
+      "cadence_range": {
+        "lower": 70,
+        "upper": 80
+      },
+      "offsets": {
+        "end": 376,
+        "start": 349
+      },
+      "resistance_range": {
+        "lower": 45,
+        "upper": 50
+      }
+    },
+    {
+      "cadence_range": {
+        "lower": 70,
+        "upper": 80
+      },
+      "offsets": {
+        "end": 409,
+        "start": 377
+      },
+      "resistance_range": {
+        "lower": 40,
+        "upper": 50
+      }
+    },
+    {
+      "cadence_range": {
+        "lower": 70,
+        "upper": 80
+      },
+      "offsets": {
+        "end": 438,
+        "start": 410
+      },
+      "resistance_range": {
+        "lower": 45,
+        "upper": 50
+      }
+    },
+    {
+      "cadence_range": {
+        "lower": 70,
+        "upper": 80
+      },
+      "offsets": {
+        "end": 498,
+        "start": 439
+      },
+      "resistance_range": {
+        "lower": 40,
+        "upper": 50
+      }
+    },
+    {
+      "cadence_range": {
+        "lower": 80,
+        "upper": 90
+      },
+      "offsets": {
+        "end": 599,
+        "start": 499
+      },
+      "resistance_range": {
+        "lower": 35,
+        "upper": 45
+      }
+    },
+    {
+      "cadence_range": {
+        "lower": 80,
+        "upper": 90
+      },
+      "offsets": {
+        "end": 660,
+        "start": 600
+      },
+      "resistance_range": {
+        "lower": 20,
+        "upper": 30
+      }
+    }
+  ],
+  "is_ftp_test": false,
+  "is_power_zone_class": false,
+  "lanebreak_info": null,
+  "last_time_metrics": null,
+  "pace_target_type": null,
+  "playlist": {
+    "id": "0000000000000000000000000000f195",
+    "is_in_class_music_shown": true,
+    "is_playlist_shown": true,
+    "is_top_artists_shown": true,
+    "ride_id": "0000000000000000000000000000f194",
+    "songs": [
+      {
+        "album": {
+          "id": "0000000000000000000000000000f196",
+          "image_url": "https://example.invalid/redacted",
+          "name": "Voices"
+        },
+        "artists": [
+          {
+            "artist_alias_id": "0000000000000000000000000000f17a",
+            "artist_id": "0000000000000000000000000000f17b",
+            "artist_name": "Phantogram",
+            "image_url": "https://example.invalid/redacted",
+            "num_rides_with_song_played": 61
+          }
+        ],
+        "cue_time_offset": 60,
+        "explicit_rating": 0,
+        "genres": [
+          {
+            "name": "indie"
+          },
+          {
+            "name": "pop"
+          },
+          {
+            "name": "electronic"
+          },
+          {
+            "name": "alternative"
+          },
+          {
+            "name": "classic rock"
+          }
+        ],
+        "id": "0000000000000000000000000000f197",
+        "index": 0,
+        "liked": false,
+        "popularity": 58,
+        "start_time_offset": 60,
+        "title": "Black Out Days"
+      },
+      {
+        "album": {
+          "id": "0000000000000000000000000000f198",
+          "image_url": "https://example.invalid/redacted",
+          "name": "Pocketful Of Sunshine"
+        },
+        "artists": [
+          {
+            "artist_alias_id": "0000000000000000000000000000f199",
+            "artist_id": "0000000000000000000000000000f19a",
+            "artist_name": "Natasha Bedingfield",
+            "image_url": "https://example.invalid/redacted",
+            "num_rides_with_song_played": 319
+          },
+          {
+            "artist_alias_id": "0000000000000000000000000000f19b",
+            "artist_id": "0000000000000000000000000000f19c",
+            "artist_name": "Sean Kingston",
+            "image_url": "https://example.invalid/redacted",
+            "num_rides_with_song_played": 102
+          }
+        ],
+        "cue_time_offset": 282,
+        "explicit_rating": 1,
+        "genres": [
+          {
+            "name": "pop"
+          },
+          {
+            "name": "r&b"
+          },
+          {
+            "name": "electronic"
+          },
+          {
+            "name": "hip hop"
+          }
+        ],
+        "id": "0000000000000000000000000000f19d",
+        "index": 1,
+        "liked": false,
+        "popularity": 0,
+        "start_time_offset": 282,
+        "title": "redacted Like This (feat. Sean Kingston)"
+      },
+      {
+        "album": {
+          "id": "0000000000000000000000000000f19e",
+          "image_url": "https://example.invalid/redacted",
+          "name": "Fleetwood Mac"
+        },
+        "artists": [
+          {
+            "artist_alias_id": "0000000000000000000000000000f18a",
+            "artist_id": "0000000000000000000000000000f18b",
+            "artist_name": "Fleetwood Mac",
+            "image_url": "https://example.invalid/redacted",
+            "num_rides_with_song_played": 842
+          }
+        ],
+        "cue_time_offset": 494,
+        "explicit_rating": 0,
+        "genres": [
+          {
+            "name": "rock"
+          },
+          {
+            "name": "pop"
+          },
+          {
+            "name": "classic rock"
+          }
+        ],
+        "id": "0000000000000000000000000000f19f",
+        "index": 2,
+        "liked": false,
+        "popularity": 76,
+        "start_time_offset": 494,
+        "title": "Landslide"
+      },
+      {
+        "album": {
+          "id": "0000000000000000000000000000f1a0",
+          "image_url": "https://example.invalid/redacted",
+          "name": "Goddess (Deluxe)"
+        },
+        "artists": [
+          {
+            "artist_alias_id": "0000000000000000000000000000f1a1",
+            "artist_id": "0000000000000000000000000000f1a2",
+            "artist_name": "BANKS",
+            "image_url": "https://example.invalid/redacted",
+            "num_rides_with_song_played": 149
+          }
+        ],
+        "cue_time_offset": 683,
+        "explicit_rating": 0,
+        "genres": [
+          {
+            "name": "alternative"
+          }
+        ],
+        "id": "0000000000000000000000000000f1a3",
+        "index": 3,
+        "liked": false,
+        "popularity": 0,
+        "start_time_offset": 683,
+        "title": "Warm Water"
+      }
+    ],
+    "stream_id": "0000000000000000000000000000f1a4",
+    "stream_url": null,
+    "top_albums": [
+      {
+        "id": "0000000000000000000000000000f19e",
+        "image_url": "https://example.invalid/redacted",
+        "name": "Fleetwood Mac"
+      },
+      {
+        "id": "0000000000000000000000000000f1a0",
+        "image_url": "https://example.invalid/redacted",
+        "name": "Goddess (Deluxe)"
+      },
+      {
+        "id": "0000000000000000000000000000f198",
+        "image_url": "https://example.invalid/redacted",
+        "name": "Pocketful Of Sunshine"
+      },
+      {
+        "id": "0000000000000000000000000000f196",
+        "image_url": "https://example.invalid/redacted",
+        "name": "Voices"
+      }
+    ],
+    "top_artists": [
+      {
+        "artist_alias_id": "0000000000000000000000000000f18a",
+        "artist_id": "0000000000000000000000000000f18b",
+        "artist_name": "Fleetwood Mac",
+        "image_url": "https://example.invalid/redacted",
+        "num_rides_with_song_played": 842
+      },
+      {
+        "artist_alias_id": "0000000000000000000000000000f199",
+        "artist_id": "0000000000000000000000000000f19a",
+        "artist_name": "Natasha Bedingfield",
+        "image_url": "https://example.invalid/redacted",
+        "num_rides_with_song_played": 319
+      },
+      {
+        "artist_alias_id": "0000000000000000000000000000f1a1",
+        "artist_id": "0000000000000000000000000000f1a2",
+        "artist_name": "BANKS",
+        "image_url": "https://example.invalid/redacted",
+        "num_rides_with_song_played": 149
+      },
+      {
+        "artist_alias_id": "0000000000000000000000000000f19b",
+        "artist_id": "0000000000000000000000000000f19c",
+        "artist_name": "Sean Kingston",
+        "image_url": "https://example.invalid/redacted",
+        "num_rides_with_song_played": 102
+      }
+    ]
+  },
+  "related_rides": {
+    "display_name": "Default Name",
+    "id": "Default Ride ID",
+    "name": "Default Name",
+    "rides": [
+      {
+        "content_format": "video",
+        "content_provider": "peloton",
+        "fitness_discipline": "cycling",
+        "id": "0000000000000000000000000000f1a5",
+        "image_url": "https://example.invalid/redacted",
+        "instructor_id": "0000000000000000000000000000f147",
+        "language": "english",
+        "origin_locale": "en-US",
+        "original_air_time": 1630155210,
+        "scheduled_start_time": 1630155513,
+        "title": "30 min Low Impact Ride"
+      },
+      {
+        "content_format": "video",
+        "content_provider": "peloton",
+        "fitness_discipline": "cycling",
+        "id": "0000000000000000000000000000f1a6",
+        "image_url": "https://example.invalid/redacted",
+        "instructor_id": "0000000000000000000000000000f1a7",
+        "language": "english",
+        "origin_locale": "en-US",
+        "original_air_time": 1627145607,
+        "scheduled_start_time": 1627145913,
+        "title": "30 min Low Impact Ride"
+      },
+      {
+        "content_format": "video",
+        "content_provider": "peloton",
+        "fitness_discipline": "cycling",
+        "id": "0000000000000000000000000000f1a8",
+        "image_url": "https://example.invalid/redacted",
+        "instructor_id": "0000000000000000000000000000f1a9",
+        "language": "english",
+        "origin_locale": "en-US",
+        "original_air_time": 1637868283,
+        "scheduled_start_time": 1637868513,
+        "title": "30 min Low Impact Ride"
+      },
+      {
+        "content_format": "video",
+        "content_provider": "peloton",
+        "fitness_discipline": "cycling",
+        "id": "0000000000000000000000000000f1aa",
+        "image_url": "https://example.invalid/redacted",
+        "instructor_id": "00000000000000000000000000000f94",
+        "language": "english",
+        "origin_locale": "en-US",
+        "original_air_time": 1639889921,
+        "scheduled_start_time": 1639889913,
+        "title": "30 min Low Impact Ride"
+      }
+    ]
+  },
+  "ride": {
+    "availability": {
+      "is_available": true,
+      "reason": null
+    },
+    "captions": [
+      "en-US",
+      "es-ES"
+    ],
+    "class_type_ids": [
+      "00000000000000000000000000000f69"
+    ],
+    "content_availability": "digital_and_above",
+    "content_availability_level": "digital_and_above",
+    "content_format": "video",
+    "content_provider": "peloton",
+    "description": "This class is spent primarily in the saddle to give your joints a smooth ride while still giving you a good sweat. Perfect for all levels, especially those recovering from an injury.",
+    "difficulty_estimate": 5.006346144082856,
+    "difficulty_level": null,
+    "difficulty_rating_avg": 5.006346144082856,
+    "difficulty_rating_count": 19697,
+    "distance": null,
+    "distance_display_value": null,
+    "distance_unit": null,
+    "duration": 600,
+    "dynamic_video_recorded_speed_in_mph": null,
+    "equipment_ids": [
+      "00000000000000000000000000000f95"
+    ],
+    "equipment_tags": [
+      {
+        "icon_url": "https://example.invalid/redacted",
+        "id": "00000000000000000000000000000f95",
+        "name": "Any indoor bike",
+        "slug": "any_indoor_bike"
+      }
+    ],
+    "explicit_rating": 0,
+    "extra_images": [],
+    "fitness_discipline": "cycling",
+    "fitness_discipline_display_name": "Cycling",
+    "flags": [],
+    "free_for_limited_time": false,
+    "has_closed_captions": true,
+    "has_free_mode": false,
+    "has_pedaling_metrics": true,
+    "has_tread_pace_target": false,
+    "home_peloton_id": "0000000000000000000000000000f1ab",
+    "id": "0000000000000000000000000000f194",
+    "image_url": "https://example.invalid/redacted",
+    "individual_instructor_ids": [],
+    "instructor": {
+      "about_image_url": "about_image_url-2",
+      "background": "background-2",
+      "bike_instructor_list_display_image_url": null,
+      "bio": "redacted",
+      "coach_type": "peloton_coach",
+      "default_cross_fade": 10,
+      "default_cue_delay": 5,
+      "facebook_fan_page": "",
+      "featured_profile": true,
+      "film_link": "",
+      "first_name": "first_name-3",
+      "fitness_disciplines": [
+        "cycling",
+        "strength"
+      ],
+      "id": "00000000000000000000000000000fb5",
+      "image_url": "image_url-3",
+      "individual_instructor_ids": [],
+      "instagram_profile": "",
+      "instructor_hero_image_url": "instructor_hero_image_url-2",
+      "instructor_page_destination_url": "instructor_page_destination_url-2",
+      "ios_instructor_list_display_image_url": "ios_instructor_list_display_image_url-2",
+      "is_active": true,
+      "is_announced": true,
+      "is_filterable": true,
+      "is_instructor_group": false,
+      "is_visible": true,
+      "jumbotron_url": null,
+      "jumbotron_url_dark": "jumbotron_url_dark-2",
+      "jumbotron_url_ios": "jumbotron_url_ios-2",
+      "last_name": "last_name-3",
+      "life_style_image_url": "life_style_image_url-2",
+      "list_order": 55,
+      "music_bio": "music_bio-2",
+      "name": "name-3",
+      "ordered_q_and_as": [],
+      "quote": "quote-2",
+      "short_bio": "short_bio-2",
+      "spotify_playlist_uri": "",
+      "strava_profile": "",
+      "twitter_profile": "",
+      "user_id": "00000000000000000000000000000fb6",
+      "username": "username-3",
+      "web_instructor_list_display_image_url": "web_instructor_list_display_image_url-2",
+      "web_instructor_list_gif_image_url": null,
+      "workout_share_images": [
+        {
+          "fitness_discipline": "bike_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cardio",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "circuit",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cycling",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "meditation",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "running",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "strength",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "stretching",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "walking",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "yoga",
+          "image_url": "https://example.invalid/redacted"
+        }
+      ]
+    },
+    "instructor_id": "00000000000000000000000000000fb5",
+    "is_archived": true,
+    "is_closed_caption_shown": true,
+    "is_dynamic_video_eligible": false,
+    "is_explicit": false,
+    "is_favorite": false,
+    "is_fixed_distance": false,
+    "is_limited_ride": false,
+    "is_live_in_studio_only": true,
+    "is_outdoor": false,
+    "join_tokens": {
+      "on_demand": "redacted"
+    },
+    "language": "english",
+    "leaderboard_filter_type": null,
+    "length": 722,
+    "live_stream_id": "0000000000000000000000000000f194-live",
+    "live_stream_url": null,
+    "location": "redacted",
+    "membership_tiering_info": {
+      "limited_classes_reset_date": null,
+      "limited_classes_taken": null,
+      "limited_classes_total": null,
+      "tier_type": "no_membership"
+    },
+    "metrics": [
+      "heart_rate",
+      "cadence",
+      "calories"
+    ],
+    "muscle_group_score": [
+      {
+        "bucket": 1,
+        "display_name": "Biceps",
+        "muscle_group": "biceps",
+        "percentage": 6,
+        "score": 600.0
+      },
+      {
+        "bucket": 2,
+        "display_name": "Calves",
+        "muscle_group": "calves",
+        "percentage": 11,
+        "score": 1200.0
+      },
+      {
+        "bucket": 2,
+        "display_name": "Core",
+        "muscle_group": "core",
+        "percentage": 11,
+        "score": 1200.0
+      },
+      {
+        "bucket": 3,
+        "display_name": "Glutes",
+        "muscle_group": "glutes",
+        "percentage": 17,
+        "score": 1800.0
+      },
+      {
+        "bucket": 3,
+        "display_name": "Hamstrings",
+        "muscle_group": "hamstrings",
+        "percentage": 17,
+        "score": 1800.0
+      },
+      {
+        "bucket": 2,
+        "display_name": "Hips",
+        "muscle_group": "hips",
+        "percentage": 11,
+        "score": 1200.0
+      },
+      {
+        "bucket": 3,
+        "display_name": "Quads",
+        "muscle_group": "quads",
+        "percentage": 17,
+        "score": 1800.0
+      },
+      {
+        "bucket": 1,
+        "display_name": "Shoulders",
+        "muscle_group": "shoulders",
+        "percentage": 5,
+        "score": 600.0
+      },
+      {
+        "bucket": 1,
+        "display_name": "Triceps",
+        "muscle_group": "triceps",
+        "percentage": 5,
+        "score": 600.0
+      }
+    ],
+    "origin_locale": "en-US",
+    "original_air_time": 1483891113,
+    "overall_estimate": 0.998362156173226,
+    "overall_rating_avg": 0.998362156173226,
+    "overall_rating_count": 20759,
+    "pedaling_duration": 600,
+    "pedaling_end_offset": 660,
+    "pedaling_start_offset": 60,
+    "preview_stream_url": "https://example.invalid/redacted",
+    "rating": 0,
+    "ride_type_id": "00000000000000000000000000000f69",
+    "ride_type_ids": [
+      "00000000000000000000000000000f69"
+    ],
+    "sample_preview_stream_url": null,
+    "sample_vod_stream_url": null,
+    "scheduled_start_time": 1483891113,
+    "series_id": "00000000000000000000000000000f98",
+    "sold_out": false,
+    "studio_peloton_id": "0000000000000000000000000000f1ac",
+    "thumbnail_location": null,
+    "thumbnail_title": null,
+    "title": "10 min Low Impact Ride",
+    "total_following_workouts": 0,
+    "total_in_progress_workouts": 0,
+    "total_ratings": 109448,
+    "total_user_workouts": 1,
+    "total_workouts": 150000,
+    "user_caption_locales": [
+      {
+        "locale": "en-US",
+        "slugs": [
+          {
+            "display_name": "English",
+            "display_names": {
+              "de-DE": "Englisch",
+              "en-US": "English",
+              "es-ES": "Ingles",
+              "fr-CA": "Anglais",
+              "fr-FR": "Anglais"
+            },
+            "type": "English"
+          }
+        ]
+      },
+      {
+        "locale": "es-ES",
+        "slugs": [
+          {
+            "display_name": "Spanish",
+            "display_names": {
+              "de-DE": "Spanisch",
+              "en-US": "Spanish",
+              "es-ES": "Espa\u00f1ol",
+              "fr-CA": "Espagnol",
+              "fr-FR": "Espagnol"
+            },
+            "type": "Espa\u00f1ol"
+          }
+        ]
+      }
+    ],
+    "vod_stream_id": "0000000000000000000000000000f194-vod",
+    "vod_stream_url": null
+  },
+  "sampled_top_tags": null,
+  "segments": {
+    "conflicted_movement_count": 0,
+    "conflicted_movement_preferences": [],
+    "flagged_movements_not_available": false,
+    "movement_patterns": [],
+    "movements_by_weight_category": {},
+    "segment_body_focus_distribution": {
+      "cardio": "1.0"
+    },
+    "segment_category_distribution": {
+      "Cycling Cool Down": "0.1",
+      "Cycling Warmup": "0.3616666666666667",
+      "cycling": "0.5383333333333333"
+    },
+    "segment_list": [
+      {
+        "icon_name": "warmup",
+        "icon_slug": "warmup",
+        "icon_url": "https://example.invalid/redacted",
+        "id": "00000000000000000000000000000f1c",
+        "intensity_in_mets": 3.5,
+        "is_drill": false,
+        "is_transition": false,
+        "length": 217,
+        "metrics_type": "cycling",
+        "name": "Warm Up",
+        "start_time_offset": 0,
+        "subsegments_v2": [
+          {
+            "conflict_with_movement_preferences": false,
+            "display_name": "Flat Road",
+            "id": "0000000000000000000000000000f1ad",
+            "length": 217,
+            "movements": [
+              {
+                "conflict_with_movement_preferences": false,
+                "id": "0000000000000000000000000000f16a",
+                "image_url": null,
+                "is_rest": false,
+                "long_video_url": null,
+                "movement_preference_slugs": [],
+                "movement_videos": [],
+                "muscle_groups": [
+                  {
+                    "display_name": "Glutes",
+                    "muscle_group": "glutes",
+                    "ranking": 3
+                  },
+                  {
+                    "display_name": "Hamstrings",
+                    "muscle_group": "hamstrings",
+                    "ranking": 3
+                  },
+                  {
+                    "display_name": "Quads",
+                    "muscle_group": "quads",
+                    "ranking": 3
+                  },
+                  {
+                    "display_name": "Calves",
+                    "muscle_group": "calves",
+                    "ranking": 2
+                  },
+                  {
+                    "display_name": "Hips",
+                    "muscle_group": "hips",
+                    "ranking": 2
+                  },
+                  {
+                    "display_name": "Core",
+                    "muscle_group": "core",
+                    "ranking": 2
+                  },
+                  {
+                    "display_name": "Triceps",
+                    "muscle_group": "triceps",
+                    "ranking": 1
+                  },
+                  {
+                    "display_name": "Biceps",
+                    "muscle_group": "biceps",
+                    "ranking": 1
+                  },
+                  {
+                    "display_name": "Shoulders",
+                    "muscle_group": "shoulders",
+                    "ranking": 1
+                  }
+                ],
+                "name": "Flat Road",
+                "note": null,
+                "short_video_url": null,
+                "skill_level": "intermediate",
+                "slug": null,
+                "talkback_description": "A movement for Warm Ups, Active Recoveries, Descending Recoveries."
+              }
+            ],
+            "offset": 0,
+            "rounds": null,
+            "scheduled_offset": 0,
+            "trackable_movements_disabled": true,
+            "type": "movement"
+          }
+        ]
+      },
+      {
+        "icon_name": "cycling",
+        "icon_slug": "cycling",
+        "icon_url": "https://example.invalid/redacted",
+        "id": "00000000000000000000000000000f1d",
+        "intensity_in_mets": 6.0,
+        "is_drill": false,
+        "is_transition": false,
+        "length": 323,
+        "metrics_type": "cycling",
+        "name": "Cycling",
+        "start_time_offset": 217,
+        "subsegments_v2": [
+          {
+            "conflict_with_movement_preferences": false,
+            "display_name": "Climb",
+            "id": "0000000000000000000000000000f1ae",
+            "length": 218,
+            "movements": [
+              {
+                "conflict_with_movement_preferences": false,
+                "id": "0000000000000000000000000000f171",
+                "image_url": null,
+                "is_rest": false,
+                "long_video_url": null,
+                "movement_preference_slugs": [],
+                "movement_videos": [],
+                "muscle_groups": [
+                  {
+                    "display_name": "Glutes",
+                    "muscle_group": "glutes",
+                    "ranking": 3
+                  },
+                  {
+                    "display_name": "Hamstrings",
+                    "muscle_group": "hamstrings",
+                    "ranking": 3
+                  },
+                  {
+                    "display_name": "Quads",
+                    "muscle_group": "quads",
+                    "ranking": 3
+                  },
+                  {
+                    "display_name": "Calves",
+                    "muscle_group": "calves",
+                    "ranking": 2
+                  },
+                  {
+                    "display_name": "Core",
+                    "muscle_group": "core",
+                    "ranking": 2
+                  },
+                  {
+                    "display_name": "Hips",
+                    "muscle_group": "hips",
+                    "ranking": 2
+                  },
+                  {
+                    "display_name": "Biceps",
+                    "muscle_group": "biceps",
+                    "ranking": 1
+                  },
+                  {
+                    "display_name": "Shoulders",
+                    "muscle_group": "shoulders",
+                    "ranking": 1
+                  },
+                  {
+                    "display_name": "Triceps",
+                    "muscle_group": "triceps",
+                    "ranking": 1
+                  }
+                ],
+                "name": "Climb",
+                "note": null,
+                "short_video_url": null,
+                "skill_level": "intermediate",
+                "slug": null,
+                "talkback_description": "A movement that matches higher resistances with lower cadences in order to simulate the sensation of riding uphill."
+              }
+            ],
+            "offset": 217,
+            "rounds": null,
+            "scheduled_offset": 217,
+            "trackable_movements_disabled": false,
+            "type": "movement"
+          },
+          {
+            "conflict_with_movement_preferences": false,
+            "display_name": "Flat Road",
+            "id": "0000000000000000000000000000f1af",
+            "length": 105,
+            "movements": [
+              {
+                "conflict_with_movement_preferences": false,
+                "id": "0000000000000000000000000000f16a",
+                "image_url": null,
+                "is_rest": false,
+                "long_video_url": null,
+                "movement_preference_slugs": [],
+                "movement_videos": [],
+                "muscle_groups": [
+                  {
+                    "display_name": "Glutes",
+                    "muscle_group": "glutes",
+                    "ranking": 3
+                  },
+                  {
+                    "display_name": "Hamstrings",
+                    "muscle_group": "hamstrings",
+                    "ranking": 3
+                  },
+                  {
+                    "display_name": "Quads",
+                    "muscle_group": "quads",
+                    "ranking": 3
+                  },
+                  {
+                    "display_name": "Calves",
+                    "muscle_group": "calves",
+                    "ranking": 2
+                  },
+                  {
+                    "display_name": "Hips",
+                    "muscle_group": "hips",
+                    "ranking": 2
+                  },
+                  {
+                    "display_name": "Core",
+                    "muscle_group": "core",
+                    "ranking": 2
+                  },
+                  {
+                    "display_name": "Triceps",
+                    "muscle_group": "triceps",
+                    "ranking": 1
+                  },
+                  {
+                    "display_name": "Biceps",
+                    "muscle_group": "biceps",
+                    "ranking": 1
+                  },
+                  {
+                    "display_name": "Shoulders",
+                    "muscle_group": "shoulders",
+                    "ranking": 1
+                  }
+                ],
+                "name": "Flat Road",
+                "note": null,
+                "short_video_url": null,
+                "skill_level": "intermediate",
+                "slug": null,
+                "talkback_description": "A movement for Warm Ups, Active Recoveries, Descending Recoveries."
+              }
+            ],
+            "offset": 435,
+            "rounds": null,
+            "scheduled_offset": 429,
+            "trackable_movements_disabled": false,
+            "type": "movement"
+          }
+        ]
+      },
+      {
+        "icon_name": "cooldown",
+        "icon_slug": "cooldown",
+        "icon_url": "https://example.invalid/redacted",
+        "id": "00000000000000000000000000000f1e",
+        "intensity_in_mets": 3.5,
+        "is_drill": false,
+        "is_transition": false,
+        "length": 60,
+        "metrics_type": "cycling",
+        "name": "Cool Down",
+        "start_time_offset": 540,
+        "subsegments_v2": [
+          {
+            "conflict_with_movement_preferences": false,
+            "display_name": "Flat Road",
+            "id": "0000000000000000000000000000f1b0",
+            "length": 60,
+            "movements": [
+              {
+                "conflict_with_movement_preferences": false,
+                "id": "0000000000000000000000000000f16a",
+                "image_url": null,
+                "is_rest": false,
+                "long_video_url": null,
+                "movement_preference_slugs": [],
+                "movement_videos": [],
+                "muscle_groups": [
+                  {
+                    "display_name": "Glutes",
+                    "muscle_group": "glutes",
+                    "ranking": 3
+                  },
+                  {
+                    "display_name": "Hamstrings",
+                    "muscle_group": "hamstrings",
+                    "ranking": 3
+                  },
+                  {
+                    "display_name": "Quads",
+                    "muscle_group": "quads",
+                    "ranking": 3
+                  },
+                  {
+                    "display_name": "Calves",
+                    "muscle_group": "calves",
+                    "ranking": 2
+                  },
+                  {
+                    "display_name": "Hips",
+                    "muscle_group": "hips",
+                    "ranking": 2
+                  },
+                  {
+                    "display_name": "Core",
+                    "muscle_group": "core",
+                    "ranking": 2
+                  },
+                  {
+                    "display_name": "Triceps",
+                    "muscle_group": "triceps",
+                    "ranking": 1
+                  },
+                  {
+                    "display_name": "Biceps",
+                    "muscle_group": "biceps",
+                    "ranking": 1
+                  },
+                  {
+                    "display_name": "Shoulders",
+                    "muscle_group": "shoulders",
+                    "ranking": 1
+                  }
+                ],
+                "name": "Flat Road",
+                "note": null,
+                "short_video_url": null,
+                "skill_level": "intermediate",
+                "slug": null,
+                "talkback_description": "A movement for Warm Ups, Active Recoveries, Descending Recoveries."
+              }
+            ],
+            "offset": 540,
+            "rounds": null,
+            "scheduled_offset": 546,
+            "trackable_movements_disabled": false,
+            "type": "movement"
+          }
+        ]
+      }
+    ]
+  },
+  "target_class_metrics": {
+    "target_graph_metrics": [
+      {
+        "average": 84,
+        "graph_data": {
+          "average": [
+            90,
+            90,
+            90,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            95,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85,
+            85
+          ],
+          "lower": [
+            80,
+            80,
+            80,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80
+          ],
+          "upper": [
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            80,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90
+          ]
+        },
+        "max": 100,
+        "min": 70,
+        "type": "cadence"
+      },
+      {
+        "average": 37,
+        "graph_data": {
+          "average": [
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            32,
+            32,
+            32,
+            32,
+            32,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            33,
+            33,
+            33,
+            33,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            47,
+            47,
+            47,
+            47,
+            47,
+            47,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            47,
+            47,
+            47,
+            47,
+            47,
+            47,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "lower": [
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            27,
+            27,
+            27,
+            27,
+            27,
+            26,
+            26,
+            26,
+            26,
+            26,
+            26,
+            26,
+            28,
+            28,
+            28,
+            28,
+            26,
+            26,
+            26,
+            26,
+            26,
+            26,
+            26,
+            26,
+            26,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            20,
+            20,
+            20,
+            20,
+            20,
+            20,
+            20,
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "upper": [
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            38,
+            38,
+            38,
+            38,
+            38,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            38,
+            38,
+            38,
+            38,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            35,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            45,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30,
+            30
+          ]
+        },
+        "max": 50,
+        "min": 20,
+        "type": "resistance"
+      }
+    ],
+    "total_expected_output": {
+      "expected_lower_output": 44,
+      "expected_upper_output": 91
+    }
+  },
+  "target_metrics_data": {
+    "target_metrics": [
+      {
+        "metrics": [
+          {
+            "lower": 25.0,
+            "name": "resistance",
+            "upper": 35.0
+          },
+          {
+            "lower": 80.0,
+            "name": "cadence",
+            "upper": 100.0
+          }
+        ],
+        "offsets": {
+          "end": 70,
+          "start": 60
+        },
+        "segment_type": "cycling"
+      },
+      {
+        "metrics": [
+          {
+            "lower": 25.0,
+            "name": "resistance",
+            "upper": 35.0
+          },
+          {
+            "lower": 90.0,
+            "name": "cadence",
+            "upper": 100.0
+          }
+        ],
+        "offsets": {
+          "end": 152,
+          "start": 71
+        },
+        "segment_type": "cycling"
+      },
+      {
+        "metrics": [
+          {
+            "lower": 27.0,
+            "name": "resistance",
+            "upper": 38.0
+          },
+          {
+            "lower": 90.0,
+            "name": "cadence",
+            "upper": 100.0
+          }
+        ],
+        "offsets": {
+          "end": 175,
+          "start": 153
+        },
+        "segment_type": "cycling"
+      },
+      {
+        "metrics": [
+          {
+            "lower": 26.0,
+            "name": "resistance",
+            "upper": 35.0
+          },
+          {
+            "lower": 90.0,
+            "name": "cadence",
+            "upper": 100.0
+          }
+        ],
+        "offsets": {
+          "end": 211,
+          "start": 176
+        },
+        "segment_type": "cycling"
+      },
+      {
+        "metrics": [
+          {
+            "lower": 28.0,
+            "name": "resistance",
+            "upper": 38.0
+          },
+          {
+            "lower": 90.0,
+            "name": "cadence",
+            "upper": 100.0
+          }
+        ],
+        "offsets": {
+          "end": 232,
+          "start": 212
+        },
+        "segment_type": "cycling"
+      },
+      {
+        "metrics": [
+          {
+            "lower": 26.0,
+            "name": "resistance",
+            "upper": 35.0
+          },
+          {
+            "lower": 90.0,
+            "name": "cadence",
+            "upper": 100.0
+          }
+        ],
+        "offsets": {
+          "end": 277,
+          "start": 233
+        },
+        "segment_type": "cycling"
+      },
+      {
+        "metrics": [
+          {
+            "lower": 40.0,
+            "name": "resistance",
+            "upper": 50.0
+          },
+          {
+            "lower": 70.0,
+            "name": "cadence",
+            "upper": 80.0
+          }
+        ],
+        "offsets": {
+          "end": 348,
+          "start": 278
+        },
+        "segment_type": "cycling"
+      },
+      {
+        "metrics": [
+          {
+            "lower": 45.0,
+            "name": "resistance",
+            "upper": 50.0
+          },
+          {
+            "lower": 70.0,
+            "name": "cadence",
+            "upper": 80.0
+          }
+        ],
+        "offsets": {
+          "end": 376,
+          "start": 349
+        },
+        "segment_type": "cycling"
+      },
+      {
+        "metrics": [
+          {
+            "lower": 40.0,
+            "name": "resistance",
+            "upper": 50.0
+          },
+          {
+            "lower": 70.0,
+            "name": "cadence",
+            "upper": 80.0
+          }
+        ],
+        "offsets": {
+          "end": 409,
+          "start": 377
+        },
+        "segment_type": "cycling"
+      },
+      {
+        "metrics": [
+          {
+            "lower": 45.0,
+            "name": "resistance",
+            "upper": 50.0
+          },
+          {
+            "lower": 70.0,
+            "name": "cadence",
+            "upper": 80.0
+          }
+        ],
+        "offsets": {
+          "end": 438,
+          "start": 410
+        },
+        "segment_type": "cycling"
+      },
+      {
+        "metrics": [
+          {
+            "lower": 40.0,
+            "name": "resistance",
+            "upper": 50.0
+          },
+          {
+            "lower": 70.0,
+            "name": "cadence",
+            "upper": 80.0
+          }
+        ],
+        "offsets": {
+          "end": 498,
+          "start": 439
+        },
+        "segment_type": "cycling"
+      },
+      {
+        "metrics": [
+          {
+            "lower": 35.0,
+            "name": "resistance",
+            "upper": 45.0
+          },
+          {
+            "lower": 80.0,
+            "name": "cadence",
+            "upper": 90.0
+          }
+        ],
+        "offsets": {
+          "end": 599,
+          "start": 499
+        },
+        "segment_type": "cycling"
+      },
+      {
+        "metrics": [
+          {
+            "lower": 20.0,
+            "name": "resistance",
+            "upper": 30.0
+          },
+          {
+            "lower": 80.0,
+            "name": "cadence",
+            "upper": 90.0
+          }
+        ],
+        "offsets": {
+          "end": 660,
+          "start": 600
+        },
+        "segment_type": "cycling"
+      }
+    ],
+    "total_expected_output": {
+      "expected_lower_output": 43,
+      "expected_upper_output": 89
+    }
+  }
+}

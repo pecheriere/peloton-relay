@@ -1,0 +1,181 @@
+{
+  "accessibility": {
+    "caption_settings": {
+      "caption_custom_details": {
+        "background_color": 0,
+        "edge_color": 0,
+        "edge_type": 0,
+        "foreground_color": 4294967295,
+        "window_color": 255
+      },
+      "caption_font_scale": 1.0,
+      "caption_preset": 0
+    },
+    "font_scale": 1.0,
+    "is_color_inverted": false,
+    "is_magnification_enabled": false,
+    "is_set_by_user": false
+  },
+  "account_creation_method": "email",
+  "allow_marketing": true,
+  "animated_badge_url": null,
+  "badge_level": null,
+  "badge_url": null,
+  "bio": null,
+  "birthday": 631152000,
+  "block_explicit": false,
+  "block_prenatal": true,
+  "can_charge": true,
+  "confirmed_country": null,
+  "contract_agreements": [],
+  "corporate_wellness_group": null,
+  "created_at": 1436160621,
+  "created_country": "created_country-1",
+  "customized_heart_rate_zones": [],
+  "customized_max_heart_rate": 0,
+  "cycling_ftp": 200,
+  "cycling_ftp_source": "ftp_workout_source",
+  "cycling_ftp_workout_id": "000000000000000000000000000000f1",
+  "cycling_workout_ftp": 200,
+  "default_heart_rate_zones": [
+    0.0,
+    120.25,
+    138.75,
+    157.25,
+    175.75
+  ],
+  "default_max_heart_rate": 185,
+  "disable_explicit_warning": false,
+  "email": "redacted",
+  "estimated_cycling_ftp": 200,
+  "external_music_auth_list": [],
+  "facebook_access_token": null,
+  "facebook_id": null,
+  "feed_privacy": "my_followers",
+  "first_name": "first_name-1",
+  "gender": "gender-1",
+  "hardware_settings": null,
+  "has_active_device_subscription": false,
+  "has_active_digital_subscription": false,
+  "has_signed_waiver": false,
+  "height": 70.0,
+  "height_unit": "metric",
+  "id": "000000000000000000000000000000f2",
+  "image_url": "image_url-1",
+  "instructor_id": null,
+  "is_complete_profile": true,
+  "is_demo": false,
+  "is_effort_score_enabled": true,
+  "is_email_verified": false,
+  "is_external_beta_tester": false,
+  "is_fitbit_authenticated": false,
+  "is_internal_beta_tester": false,
+  "is_profile_image_default": false,
+  "is_profile_private": true,
+  "is_provisional": false,
+  "is_strava_authenticated": false,
+  "labels": [],
+  "last_name": "last_name-1",
+  "last_workout_at": null,
+  "locale": "en-US",
+  "location": "redacted",
+  "member_groups": [],
+  "middle_initial": "",
+  "name": "name-1",
+  "no_mask_badge_url": null,
+  "obfuscated_email": "redacted",
+  "paired_devices": [],
+  "phone_number": null,
+  "power_zone_always_on": true,
+  "quick_hits": {
+    "incline_shortcuts": null,
+    "quick_hits_enabled": true,
+    "speed_shortcuts": null
+  },
+  "referrals_made": 0,
+  "social_connections": [],
+  "total_followers": 1,
+  "total_following": 1,
+  "total_non_pedaling_metric_workouts": 35,
+  "total_pedaling_metric_workouts": 167,
+  "total_pending_followers": 0,
+  "total_workouts": 202,
+  "username": "username-1",
+  "v1_referrals_made": 0,
+  "weight": 170.0,
+  "weight_unit": "metric",
+  "workout_counts": [
+    {
+      "count": 0,
+      "icon_url": "https://example.invalid/redacted",
+      "name": "Bike Bootcamp",
+      "slug": "bike_bootcamp"
+    },
+    {
+      "count": 0,
+      "icon_url": "https://example.invalid/redacted",
+      "name": "Rowing",
+      "slug": "caesar"
+    },
+    {
+      "count": 0,
+      "icon_url": "https://example.invalid/redacted",
+      "name": "Row Bootcamp",
+      "slug": "caesar_bootcamp"
+    },
+    {
+      "count": 0,
+      "icon_url": "https://example.invalid/redacted",
+      "name": "Cardio",
+      "slug": "cardio"
+    },
+    {
+      "count": 0,
+      "icon_url": "https://example.invalid/redacted",
+      "name": "Tread Bootcamp",
+      "slug": "circuit"
+    },
+    {
+      "count": 167,
+      "icon_url": "https://example.invalid/redacted",
+      "name": "Cycling",
+      "slug": "cycling"
+    },
+    {
+      "count": 0,
+      "icon_url": "https://example.invalid/redacted",
+      "name": "Meditation",
+      "slug": "meditation"
+    },
+    {
+      "count": 0,
+      "icon_url": "https://example.invalid/redacted",
+      "name": "Running",
+      "slug": "running"
+    },
+    {
+      "count": 7,
+      "icon_url": "https://example.invalid/redacted",
+      "name": "Strength",
+      "slug": "strength"
+    },
+    {
+      "count": 25,
+      "icon_url": "https://example.invalid/redacted",
+      "name": "Stretching",
+      "slug": "stretching"
+    },
+    {
+      "count": 0,
+      "icon_url": "https://example.invalid/redacted",
+      "name": "Walking",
+      "slug": "walking"
+    },
+    {
+      "count": 3,
+      "icon_url": "https://example.invalid/redacted",
+      "name": "Yoga",
+      "slug": "yoga"
+    }
+  ]
+}

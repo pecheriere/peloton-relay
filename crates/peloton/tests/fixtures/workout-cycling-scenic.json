@@ -1,0 +1,297 @@
+{
+  "achievement_templates": [
+    {
+      "achievement_count": 1,
+      "animated_image_url": null,
+      "description": "Awarded for taking an all-new Peloton Scenic class.",
+      "id": "0000000000000000000000000000f440",
+      "image_url": "https://example.invalid/redacted",
+      "kinetic_token_background": null,
+      "list_order": 170,
+      "name": "Peloton Scenic 2021",
+      "slug": "peloton_scenic_2021"
+    }
+  ],
+  "average_effort_score": null,
+  "calories": 381.36,
+  "created": 1492918851,
+  "created_at": 1492918851,
+  "device_time_created_at": 1492918851,
+  "device_type": "home_bike_plus",
+  "device_type_display_name": "Bike+",
+  "distance": 7.88,
+  "end_time": 1492920718,
+  "feed_post_url": null,
+  "fitbit_id": null,
+  "fitness_discipline": "cycling",
+  "ftp_info": {
+    "ftp": 200,
+    "ftp_source": "ftp_workout_source",
+    "ftp_workout_id": "000000000000000000000000000000f1"
+  },
+  "has_leaderboard_metrics": true,
+  "has_paused": false,
+  "has_pedaling_metrics": true,
+  "hr_total_points": null,
+  "id": "00000000000000000000000000000f14",
+  "is_3p_fit_feed_workout": false,
+  "is_first_party_or_partner_3p_workout": true,
+  "is_non_partner_3p_fit_feed_workout": false,
+  "is_outdoor": false,
+  "is_pause_available": false,
+  "is_paused": false,
+  "is_peloton_originated_workout": true,
+  "is_skip_intro_available": true,
+  "is_total_work_personal_record": false,
+  "leaderboard_distance_rank": null,
+  "leaderboard_rank": 1000,
+  "metadata": {
+    "playlist_type": "synced"
+  },
+  "metrics_type": "cycling",
+  "name": "Scenic Ride",
+  "pace_target_type": null,
+  "pause_time_elapsed": null,
+  "pause_time_remaining": null,
+  "peloton_id": "0000000000000000000000000000f441",
+  "platform": "home_bike",
+  "ratings": {
+    "perceived_effort_rating": null
+  },
+  "ride": {
+    "availability": {
+      "is_available": false,
+      "reason": "This class is not currently available on-demand."
+    },
+    "captions": [
+      "de-DE",
+      "en-US",
+      "es-ES"
+    ],
+    "class_avg_follow_along_score": 0.0,
+    "class_type_ids": [
+      "0000000000000000000000000000f320"
+    ],
+    "content_availability": "all_access_only",
+    "content_availability_level": "all_access_only",
+    "content_format": "video",
+    "content_provider": "virtual_active",
+    "description": "Join redacted as the takes us on an epic ride alongside the Pacific Ocean in Big Sur. Filmed by professionals on a closed course. Do not attempt to recreate.",
+    "difficulty_estimate": 0.0,
+    "difficulty_level": null,
+    "difficulty_rating_avg": 0.0,
+    "difficulty_rating_count": 0,
+    "distance": null,
+    "distance_display_value": null,
+    "distance_unit": null,
+    "duration": 1800,
+    "dynamic_video_recorded_speed_in_mph": null,
+    "equipment_ids": [],
+    "equipment_tags": [],
+    "excluded_platforms": [
+      "studio_tread",
+      "home_tread",
+      "lg",
+      "android_tv",
+      "roku",
+      "sky_tv",
+      "comcast_x1",
+      "fire_tv",
+      "samsung",
+      "apple_tv",
+      "android",
+      "fire_tablet",
+      "iOS_app",
+      "tiger",
+      "apple_watch",
+      "web",
+      "commercial_caesar",
+      "wear_os"
+    ],
+    "explicit_rating": 0,
+    "extra_images": [],
+    "fitness_discipline": "cycling",
+    "fitness_discipline_display_name": "Cycling",
+    "flags": [],
+    "free_for_limited_time": false,
+    "has_closed_captions": true,
+    "has_free_mode": false,
+    "has_pedaling_metrics": true,
+    "has_tread_pace_target": false,
+    "home_peloton_id": null,
+    "id": "0000000000000000000000000000f31f",
+    "image_url": "https://example.invalid/redacted",
+    "individual_instructor_ids": [],
+    "instructor": {
+      "about_image_url": "about_image_url-3",
+      "background": "background-3",
+      "bike_instructor_list_display_image_url": null,
+      "bio": "redacted",
+      "coach_type": "peloton_coach",
+      "default_cross_fade": 10,
+      "default_cue_delay": 5,
+      "facebook_fan_page": "",
+      "featured_profile": true,
+      "film_link": "",
+      "first_name": "first_name-4",
+      "fitness_disciplines": [
+        "cycling",
+        "strength",
+        "stretching",
+        "yoga"
+      ],
+      "id": "00000000000000000000000000000fda",
+      "image_url": "image_url-4",
+      "individual_instructor_ids": [],
+      "instagram_profile": "",
+      "instructor_hero_image_url": "instructor_hero_image_url-3",
+      "instructor_page_destination_url": "instructor_page_destination_url-3",
+      "ios_instructor_list_display_image_url": "ios_instructor_list_display_image_url-3",
+      "is_active": true,
+      "is_announced": true,
+      "is_filterable": true,
+      "is_instructor_group": false,
+      "is_visible": true,
+      "jumbotron_url": null,
+      "jumbotron_url_dark": "jumbotron_url_dark-3",
+      "jumbotron_url_ios": "jumbotron_url_ios-3",
+      "last_name": "last_name-4",
+      "life_style_image_url": "life_style_image_url-3",
+      "list_order": 54,
+      "music_bio": "music_bio-3",
+      "name": "name-4",
+      "ordered_q_and_as": [],
+      "quote": "quote-3",
+      "short_bio": "short_bio-3",
+      "spotify_playlist_uri": "",
+      "strava_profile": "",
+      "twitter_profile": "",
+      "user_id": "00000000000000000000000000000fdb",
+      "username": "username-4",
+      "web_instructor_list_display_image_url": "web_instructor_list_display_image_url-3",
+      "web_instructor_list_gif_image_url": null,
+      "workout_share_images": [
+        {
+          "fitness_discipline": "bike_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cardio",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "circuit",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cycling",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "meditation",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "running",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "strength",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "stretching",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "walking",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "yoga",
+          "image_url": "https://example.invalid/redacted"
+        }
+      ]
+    },
+    "instructor_id": "00000000000000000000000000000fda",
+    "is_archived": false,
+    "is_closed_caption_shown": true,
+    "is_dynamic_video_eligible": false,
+    "is_explicit": false,
+    "is_fixed_distance": false,
+    "is_limited_ride": false,
+    "is_live_in_studio_only": false,
+    "is_outdoor": false,
+    "join_tokens": {
+      "on_demand": "redacted"
+    },
+    "language": "english",
+    "length": 1997,
+    "live_stream_id": "0000000000000000000000000000f31f-live",
+    "live_stream_url": null,
+    "location": "redacted",
+    "metrics": [
+      "heart_rate",
+      "cadence",
+      "calories"
+    ],
+    "muscle_group_score": [],
+    "origin_locale": "en-US",
+    "original_air_time": 1468948713,
+    "overall_estimate": 0.9851155904794444,
+    "overall_rating_avg": 0.9851155904794444,
+    "overall_rating_count": 87810,
+    "pedaling_duration": 1800,
+    "pedaling_end_offset": 1867,
+    "pedaling_start_offset": 67,
+    "preview_stream_url": "https://example.invalid/redacted",
+    "rating": 0,
+    "ride_type_id": "0000000000000000000000000000f320",
+    "ride_type_ids": [
+      "0000000000000000000000000000f320"
+    ],
+    "sample_preview_stream_url": null,
+    "sample_vod_stream_url": null,
+    "scheduled_start_time": 1468948713,
+    "series_id": "0000000000000000000000000000f34a",
+    "sold_out": false,
+    "studio_peloton_id": null,
+    "thumbnail_location": "California, USA",
+    "thumbnail_title": "Big Sur ",
+    "title": "30 min Big Sur Ride",
+    "total_in_progress_workouts": 0,
+    "total_ratings": 87810,
+    "total_workouts": 1000000,
+    "user_caption_locales": [],
+    "vod_stream_id": "0000000000000000000000000000f31f-vod",
+    "vod_stream_url": null
+  },
+  "service_id": null,
+  "start_time": 1492918919,
+  "status": "COMPLETE",
+  "strava_id": null,
+  "strength_plan_id": null,
+  "strength_plan_overlay_metadata": null,
+  "timezone": "Etc/UTC",
+  "title": null,
+  "total_heart_rate_zone_durations": null,
+  "total_leaderboard_distance_users": null,
+  "total_leaderboard_users": 10000,
+  "total_music_audio_buffer_seconds": null,
+  "total_music_audio_play_seconds": null,
+  "total_video_buffering_seconds": 0,
+  "total_video_watch_time_seconds": 0,
+  "total_work": 172579.24,
+  "user_id": "000000000000000000000000000000f2",
+  "v2_total_video_buffering_seconds": 1,
+  "v2_total_video_watch_time_seconds": 1985,
+  "workout_type": "scenic"
+}

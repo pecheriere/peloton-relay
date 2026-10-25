@@ -100,7 +100,7 @@ pub fn find_worktree(path: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-fn prepare_dir(dir: &Path) -> Result<(), String> {
+pub(crate) fn prepare_dir(dir: &Path) -> Result<(), String> {
     DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -110,7 +110,7 @@ fn prepare_dir(dir: &Path) -> Result<(), String> {
         .map_err(|e| format!("could not secure {}: {e}", dir.display()))
 }
 
-fn save(dir: &Path, name: &str, body: &[u8]) -> Result<(), String> {
+pub(crate) fn save(dir: &Path, name: &str, body: &[u8]) -> Result<(), String> {
     let path = dir.join(name);
     let mut file = OpenOptions::new()
         .write(true)

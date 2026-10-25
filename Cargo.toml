@@ -22,6 +22,7 @@ thiserror = "2"
 time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 url = "2"
+utoipa = { version = "5", features = ["time"] }
 wiremock = "0.6"
 
 [workspace.lints.rust]

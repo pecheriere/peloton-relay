@@ -1,0 +1,581 @@
+{
+  "averages": {
+    "average_effort_score": null,
+    "total_heart_rate_zone_durations": null
+  },
+  "class_types": [
+    {
+      "id": "00000000000000000000000000000fba",
+      "name": "Restorative"
+    }
+  ],
+  "default_album_images": {
+    "default_class_detail_image_url": "https://example.invalid/redacted",
+    "default_in_class_image_url": "https://example.invalid/redacted"
+  },
+  "disabled_leaderboard_filters": {
+    "age_and_gender": false,
+    "following": false,
+    "just_me": false
+  },
+  "events": {
+    "data": []
+  },
+  "excluded_platforms": [],
+  "instructor_cues": [],
+  "is_ftp_test": false,
+  "is_power_zone_class": false,
+  "lanebreak_info": null,
+  "last_time_metrics": null,
+  "pace_target_type": null,
+  "playlist": {
+    "id": "00000000000000000000000000000fbb",
+    "is_in_class_music_shown": true,
+    "is_playlist_shown": true,
+    "is_top_artists_shown": true,
+    "ride_id": "00000000000000000000000000000fb9",
+    "songs": [
+      {
+        "album": {
+          "id": "00000000000000000000000000000fbc",
+          "image_url": "https://example.invalid/redacted",
+          "name": "Hands On Yello"
+        },
+        "artists": [
+          {
+            "artist_alias_id": "00000000000000000000000000000fbd",
+            "artist_id": "00000000000000000000000000000fbe",
+            "artist_name": "Moby",
+            "image_url": "https://example.invalid/redacted",
+            "num_rides_with_song_played": 961
+          },
+          {
+            "artist_alias_id": "00000000000000000000000000000fbf",
+            "artist_id": "00000000000000000000000000000fc0",
+            "artist_name": "Yello",
+            "image_url": "https://example.invalid/redacted",
+            "num_rides_with_song_played": 38
+          }
+        ],
+        "cue_time_offset": 60,
+        "explicit_rating": 0,
+        "genres": [
+          {
+            "name": "pop"
+          }
+        ],
+        "id": "00000000000000000000000000000fc1",
+        "index": 0,
+        "liked": false,
+        "popularity": 0,
+        "start_time_offset": 60,
+        "title": "Lost Again"
+      },
+      {
+        "album": {
+          "id": "00000000000000000000000000000fc2",
+          "image_url": "https://example.invalid/redacted",
+          "name": "Healing Gold"
+        },
+        "artists": [
+          {
+            "artist_alias_id": "00000000000000000000000000000fc3",
+            "artist_id": "00000000000000000000000000000fc4",
+            "artist_name": "Aetherium",
+            "image_url": "https://example.invalid/redacted",
+            "num_rides_with_song_played": 14
+          }
+        ],
+        "cue_time_offset": 422,
+        "explicit_rating": 0,
+        "genres": [],
+        "id": "00000000000000000000000000000fc5",
+        "index": 1,
+        "liked": false,
+        "popularity": 0,
+        "start_time_offset": 422,
+        "title": "Frozen Lake"
+      },
+      {
+        "album": {
+          "id": "00000000000000000000000000000fc6",
+          "image_url": "https://example.invalid/redacted",
+          "name": "Mantras in redacted"
+        },
+        "artists": [
+          {
+            "artist_alias_id": "00000000000000000000000000000fc7",
+            "artist_id": "00000000000000000000000000000fc8",
+            "artist_name": "Beautiful Chorus",
+            "image_url": "https://example.invalid/redacted",
+            "num_rides_with_song_played": 237
+          },
+          {
+            "artist_alias_id": "00000000000000000000000000000fc7",
+            "artist_id": "00000000000000000000000000000fc9",
+            "artist_name": "Beautiful Chorus",
+            "image_url": null,
+            "num_rides_with_song_played": 237
+          }
+        ],
+        "cue_time_offset": 861,
+        "explicit_rating": 0,
+        "genres": [],
+        "id": "00000000000000000000000000000fca",
+        "index": 2,
+        "liked": false,
+        "popularity": 53,
+        "start_time_offset": 861,
+        "title": "Breathe It In"
+      },
+      {
+        "album": {
+          "id": "00000000000000000000000000000fcb",
+          "image_url": "https://example.invalid/redacted",
+          "name": "Flow State"
+        },
+        "artists": [
+          {
+            "artist_alias_id": "00000000000000000000000000000fcc",
+            "artist_id": "00000000000000000000000000000fcd",
+            "artist_name": "Above & Beyond",
+            "image_url": "https://example.invalid/redacted",
+            "num_rides_with_song_played": 151
+          }
+        ],
+        "cue_time_offset": 964,
+        "explicit_rating": 0,
+        "genres": [
+          {
+            "name": "electronic"
+          }
+        ],
+        "id": "00000000000000000000000000000fce",
+        "index": 3,
+        "liked": false,
+        "popularity": 0,
+        "start_time_offset": 964,
+        "title": "Golden"
+      }
+    ],
+    "stream_id": "00000000000000000000000000000fcf",
+    "stream_url": null,
+    "top_albums": [
+      {
+        "id": "00000000000000000000000000000fbc",
+        "image_url": "https://example.invalid/redacted",
+        "name": "Hands On Yello"
+      },
+      {
+        "id": "00000000000000000000000000000fc6",
+        "image_url": "https://example.invalid/redacted",
+        "name": "Mantras in redacted"
+      },
+      {
+        "id": "00000000000000000000000000000fcb",
+        "image_url": "https://example.invalid/redacted",
+        "name": "Flow State"
+      },
+      {
+        "id": "00000000000000000000000000000fc2",
+        "image_url": "https://example.invalid/redacted",
+        "name": "Healing Gold"
+      }
+    ],
+    "top_artists": [
+      {
+        "artist_alias_id": "00000000000000000000000000000fbd",
+        "artist_id": "00000000000000000000000000000fbe",
+        "artist_name": "Moby",
+        "image_url": "https://example.invalid/redacted",
+        "num_rides_with_song_played": 961
+      },
+      {
+        "artist_alias_id": "00000000000000000000000000000fc7",
+        "artist_id": "00000000000000000000000000000fc8",
+        "artist_name": "Beautiful Chorus",
+        "image_url": "https://example.invalid/redacted",
+        "num_rides_with_song_played": 237
+      },
+      {
+        "artist_alias_id": "00000000000000000000000000000fc7",
+        "artist_id": "00000000000000000000000000000fc9",
+        "artist_name": "Beautiful Chorus",
+        "image_url": null,
+        "num_rides_with_song_played": 237
+      },
+      {
+        "artist_alias_id": "00000000000000000000000000000fcc",
+        "artist_id": "00000000000000000000000000000fcd",
+        "artist_name": "Above & Beyond",
+        "image_url": "https://example.invalid/redacted",
+        "num_rides_with_song_played": 151
+      }
+    ]
+  },
+  "related_rides": {
+    "display_name": "Default Name",
+    "id": "Default Ride ID",
+    "name": "Default Name",
+    "rides": [
+      {
+        "content_format": "video",
+        "content_provider": "peloton",
+        "fitness_discipline": "yoga",
+        "id": "00000000000000000000000000000fd0",
+        "image_url": "https://example.invalid/redacted",
+        "instructor_id": "00000000000000000000000000000fd1",
+        "language": "english",
+        "origin_locale": "en-US",
+        "original_air_time": 1631941149,
+        "scheduled_start_time": 1631941113,
+        "title": "15 min Restorative"
+      },
+      {
+        "content_format": "video",
+        "content_provider": "peloton",
+        "fitness_discipline": "yoga",
+        "id": "00000000000000000000000000000fd2",
+        "image_url": "https://example.invalid/redacted",
+        "instructor_id": "00000000000000000000000000000fd3",
+        "language": "english",
+        "origin_locale": "en-US",
+        "original_air_time": 1640494737,
+        "scheduled_start_time": 1640494713,
+        "title": "15 min Restorative"
+      },
+      {
+        "content_format": "video",
+        "content_provider": "peloton",
+        "fitness_discipline": "yoga",
+        "id": "00000000000000000000000000000fd4",
+        "image_url": "https://example.invalid/redacted",
+        "instructor_id": "00000000000000000000000000000fd1",
+        "language": "english",
+        "origin_locale": "en-US",
+        "original_air_time": 1631941149,
+        "scheduled_start_time": 1631941113,
+        "title": "15 min Restorative"
+      },
+      {
+        "content_format": "video",
+        "content_provider": "peloton",
+        "fitness_discipline": "yoga",
+        "id": "00000000000000000000000000000fd5",
+        "image_url": "https://example.invalid/redacted",
+        "instructor_id": "00000000000000000000000000000fd1",
+        "language": "english",
+        "origin_locale": "en-US",
+        "original_air_time": 1637443626,
+        "scheduled_start_time": 1637443713,
+        "title": "30 min Restorative"
+      }
+    ]
+  },
+  "ride": {
+    "availability": {
+      "is_available": true,
+      "reason": null
+    },
+    "captions": [
+      "en-US",
+      "es-ES"
+    ],
+    "class_type_ids": [
+      "00000000000000000000000000000fba"
+    ],
+    "content_availability": "digital_and_above",
+    "content_availability_level": "digital_and_above",
+    "content_format": "video",
+    "content_provider": "peloton",
+    "description": "In restorative yoga, we hold poses for longer amounts of time and use props to take some or all of the effort out of the poses. Cultivate relaxation, calm the nervous system and feel restored.",
+    "difficulty_estimate": 2.922526656768795,
+    "difficulty_level": null,
+    "difficulty_rating_avg": 2.922526656768795,
+    "difficulty_rating_count": 7409,
+    "distance": null,
+    "distance_display_value": null,
+    "distance_unit": null,
+    "duration": 900,
+    "dynamic_video_recorded_speed_in_mph": null,
+    "equipment_ids": [
+      "00000000000000000000000000000fd6",
+      "00000000000000000000000000000fd7",
+      "00000000000000000000000000000fd8"
+    ],
+    "equipment_tags": [
+      {
+        "icon_url": "https://example.invalid/redacted",
+        "id": "00000000000000000000000000000fd6",
+        "name": "Yoga Block",
+        "slug": "yoga_block"
+      },
+      {
+        "icon_url": "https://example.invalid/redacted",
+        "id": "00000000000000000000000000000fd7",
+        "name": "Yoga Strap",
+        "slug": "yoga_strap"
+      },
+      {
+        "icon_url": "https://example.invalid/redacted",
+        "id": "00000000000000000000000000000fd8",
+        "name": "Yoga Mat",
+        "slug": "yoga_mat"
+      }
+    ],
+    "explicit_rating": 0,
+    "extra_images": [],
+    "fitness_discipline": "yoga",
+    "fitness_discipline_display_name": "Yoga",
+    "flags": [],
+    "free_for_limited_time": false,
+    "has_closed_captions": true,
+    "has_free_mode": false,
+    "has_pedaling_metrics": false,
+    "has_tread_pace_target": false,
+    "home_peloton_id": "00000000000000000000000000000fd9",
+    "id": "00000000000000000000000000000fb9",
+    "image_url": "https://example.invalid/redacted",
+    "individual_instructor_ids": [],
+    "instructor": {
+      "about_image_url": "about_image_url-3",
+      "background": "background-3",
+      "bike_instructor_list_display_image_url": null,
+      "bio": "redacted",
+      "coach_type": "peloton_coach",
+      "default_cross_fade": 10,
+      "default_cue_delay": 5,
+      "facebook_fan_page": "",
+      "featured_profile": true,
+      "film_link": "",
+      "first_name": "first_name-4",
+      "fitness_disciplines": [
+        "cycling",
+        "strength",
+        "stretching",
+        "yoga"
+      ],
+      "id": "00000000000000000000000000000fda",
+      "image_url": "image_url-4",
+      "individual_instructor_ids": [],
+      "instagram_profile": "",
+      "instructor_hero_image_url": "instructor_hero_image_url-3",
+      "instructor_page_destination_url": "instructor_page_destination_url-3",
+      "ios_instructor_list_display_image_url": "ios_instructor_list_display_image_url-3",
+      "is_active": true,
+      "is_announced": true,
+      "is_filterable": true,
+      "is_instructor_group": false,
+      "is_visible": true,
+      "jumbotron_url": null,
+      "jumbotron_url_dark": "jumbotron_url_dark-3",
+      "jumbotron_url_ios": "jumbotron_url_ios-3",
+      "last_name": "last_name-4",
+      "life_style_image_url": "life_style_image_url-3",
+      "list_order": 54,
+      "music_bio": "music_bio-3",
+      "name": "name-4",
+      "ordered_q_and_as": [],
+      "quote": "quote-3",
+      "short_bio": "short_bio-3",
+      "spotify_playlist_uri": "",
+      "strava_profile": "",
+      "twitter_profile": "",
+      "user_id": "00000000000000000000000000000fdb",
+      "username": "username-4",
+      "web_instructor_list_display_image_url": "web_instructor_list_display_image_url-3",
+      "web_instructor_list_gif_image_url": null,
+      "workout_share_images": [
+        {
+          "fitness_discipline": "bike_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cardio",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "circuit",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cycling",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "meditation",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "running",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "strength",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "stretching",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "walking",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "yoga",
+          "image_url": "https://example.invalid/redacted"
+        }
+      ]
+    },
+    "instructor_id": "00000000000000000000000000000fda",
+    "is_archived": true,
+    "is_closed_caption_shown": true,
+    "is_dynamic_video_eligible": false,
+    "is_explicit": false,
+    "is_favorite": false,
+    "is_fixed_distance": false,
+    "is_limited_ride": false,
+    "is_live_in_studio_only": true,
+    "is_outdoor": false,
+    "join_tokens": {
+      "on_demand": "redacted"
+    },
+    "language": "english",
+    "leaderboard_filter_type": null,
+    "length": 1115,
+    "live_stream_id": "00000000000000000000000000000fb9-live",
+    "live_stream_url": null,
+    "location": "redacted",
+    "membership_tiering_info": {
+      "limited_classes_reset_date": null,
+      "limited_classes_taken": null,
+      "limited_classes_total": null,
+      "tier_type": "no_membership"
+    },
+    "metrics": [
+      "heart_rate",
+      "calories"
+    ],
+    "muscle_group_score": [],
+    "origin_locale": "en-US",
+    "original_air_time": 1492105053,
+    "overall_estimate": 0.9782942561687314,
+    "overall_rating_avg": 0.9782942561687314,
+    "overall_rating_count": 9767,
+    "pedaling_duration": 900,
+    "pedaling_end_offset": 960,
+    "pedaling_start_offset": 60,
+    "preview_stream_url": "https://example.invalid/redacted",
+    "rating": 0,
+    "ride_type_id": "00000000000000000000000000000fba",
+    "ride_type_ids": [
+      "00000000000000000000000000000fba"
+    ],
+    "sample_preview_stream_url": null,
+    "sample_vod_stream_url": null,
+    "scheduled_start_time": 1492105413,
+    "series_id": "00000000000000000000000000000fdc",
+    "sold_out": false,
+    "studio_peloton_id": "00000000000000000000000000000fdd",
+    "thumbnail_location": null,
+    "thumbnail_title": null,
+    "title": "15 min Restorative",
+    "total_following_workouts": 1,
+    "total_in_progress_workouts": 0,
+    "total_ratings": 22152,
+    "total_user_workouts": 1,
+    "total_workouts": 50000,
+    "user_caption_locales": [
+      {
+        "locale": "en-US",
+        "slugs": [
+          {
+            "display_name": "English",
+            "display_names": {
+              "de-DE": "Englisch",
+              "en-US": "English",
+              "es-ES": "Ingles",
+              "fr-CA": "Anglais",
+              "fr-FR": "Anglais"
+            },
+            "type": "English"
+          }
+        ]
+      },
+      {
+        "locale": "es-ES",
+        "slugs": [
+          {
+            "display_name": "Spanish",
+            "display_names": {
+              "de-DE": "Spanisch",
+              "en-US": "Spanish",
+              "es-ES": "Espa\u00f1ol",
+              "fr-CA": "Espagnol",
+              "fr-FR": "Espagnol"
+            },
+            "type": "Espa\u00f1ol"
+          }
+        ]
+      }
+    ],
+    "vod_stream_id": "00000000000000000000000000000fb9-vod",
+    "vod_stream_url": null
+  },
+  "sampled_top_tags": null,
+  "segments": {
+    "conflicted_movement_count": 0,
+    "conflicted_movement_preferences": [],
+    "flagged_movements_not_available": false,
+    "movement_patterns": [],
+    "movements_by_weight_category": {},
+    "segment_body_focus_distribution": {
+      "full_body": "1.0"
+    },
+    "segment_category_distribution": {
+      "Restorative Yoga": "0.9266666666666666",
+      "Savasana": "0.07333333333333333"
+    },
+    "segment_list": [
+      {
+        "icon_name": "yoga_final_poses",
+        "icon_slug": "yoga_final_poses",
+        "icon_url": "https://example.invalid/redacted",
+        "id": "000000000000000000000000000000fa",
+        "intensity_in_mets": 2.0,
+        "is_drill": false,
+        "is_transition": false,
+        "length": 834,
+        "metrics_type": "floor",
+        "name": "Restorative Yoga",
+        "start_time_offset": 0,
+        "subsegments_v2": []
+      },
+      {
+        "icon_name": "yoga_savasana",
+        "icon_slug": "yoga_savasana",
+        "icon_url": "https://example.invalid/redacted",
+        "id": "000000000000000000000000000000fb",
+        "intensity_in_mets": 1.0,
+        "is_drill": false,
+        "is_transition": false,
+        "length": 66,
+        "metrics_type": "floor",
+        "name": "Savasana",
+        "start_time_offset": 834,
+        "subsegments_v2": []
+      }
+    ]
+  },
+  "target_class_metrics": {},
+  "target_metrics_data": {}
+}

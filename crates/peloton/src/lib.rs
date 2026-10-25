@@ -3,3 +3,4 @@
 pub mod endpoints;
 pub mod ids;
 pub mod oauth;
+pub mod upstream;

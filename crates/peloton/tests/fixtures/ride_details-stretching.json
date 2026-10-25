@@ -1,0 +1,450 @@
+{
+  "averages": {
+    "average_effort_score": null,
+    "total_heart_rate_zone_durations": null
+  },
+  "class_types": [
+    {
+      "id": "0000000000000000000000000000f137",
+      "name": "Pre & Post-Ride Stretch"
+    }
+  ],
+  "default_album_images": {
+    "default_class_detail_image_url": "https://example.invalid/redacted",
+    "default_in_class_image_url": "https://example.invalid/redacted"
+  },
+  "disabled_leaderboard_filters": {
+    "age_and_gender": false,
+    "following": false,
+    "just_me": false
+  },
+  "events": {
+    "data": []
+  },
+  "excluded_platforms": [],
+  "instructor_cues": [],
+  "is_ftp_test": false,
+  "is_power_zone_class": false,
+  "lanebreak_info": null,
+  "last_time_metrics": null,
+  "pace_target_type": null,
+  "playlist": {
+    "id": "0000000000000000000000000000f138",
+    "is_in_class_music_shown": true,
+    "is_playlist_shown": true,
+    "is_top_artists_shown": false,
+    "ride_id": "0000000000000000000000000000f136",
+    "songs": [
+      {
+        "album": {
+          "id": "0000000000000000000000000000f139",
+          "image_url": "https://example.invalid/redacted",
+          "name": "Fake Plastic Trees"
+        },
+        "artists": [
+          {
+            "artist_alias_id": "0000000000000000000000000000f13a",
+            "artist_id": "0000000000000000000000000000f13b",
+            "artist_name": "Radiohead",
+            "image_url": "https://example.invalid/redacted",
+            "num_rides_with_song_played": 412
+          }
+        ],
+        "cue_time_offset": 0,
+        "explicit_rating": 0,
+        "genres": [
+          {
+            "name": "alternative"
+          }
+        ],
+        "id": "0000000000000000000000000000f13c",
+        "index": 0,
+        "liked": false,
+        "popularity": 0,
+        "start_time_offset": 0,
+        "title": "Fake Plastic Trees"
+      },
+      {
+        "album": {
+          "id": "0000000000000000000000000000f13d",
+          "image_url": "https://example.invalid/redacted",
+          "name": "Classics"
+        },
+        "artists": [
+          {
+            "artist_alias_id": "0000000000000000000000000000f13e",
+            "artist_id": "0000000000000000000000000000f13f",
+            "artist_name": "Ratatat",
+            "image_url": "https://example.invalid/redacted",
+            "num_rides_with_song_played": 3
+          }
+        ],
+        "cue_time_offset": 286,
+        "explicit_rating": 0,
+        "genres": [
+          {
+            "name": "electronic"
+          },
+          {
+            "name": "indie"
+          },
+          {
+            "name": "alternative"
+          }
+        ],
+        "id": "0000000000000000000000000000f140",
+        "index": 1,
+        "liked": false,
+        "popularity": 60,
+        "start_time_offset": 286,
+        "title": "Loud Pipes"
+      }
+    ],
+    "stream_id": "0000000000000000000000000000f141",
+    "stream_url": null,
+    "top_albums": [],
+    "top_artists": []
+  },
+  "related_rides": {
+    "display_name": "Default Name",
+    "id": "Default Ride ID",
+    "name": "Default Name",
+    "rides": [
+      {
+        "content_format": "video",
+        "content_provider": "peloton",
+        "fitness_discipline": "stretching",
+        "id": "0000000000000000000000000000f142",
+        "image_url": "https://example.invalid/redacted",
+        "instructor_id": "0000000000000000000000000000f143",
+        "language": "english",
+        "origin_locale": "en-US",
+        "original_air_time": 1636261169,
+        "scheduled_start_time": 1636261113,
+        "title": "10 min Power Zone Post-Ride Stretch"
+      },
+      {
+        "content_format": "video",
+        "content_provider": "peloton",
+        "fitness_discipline": "stretching",
+        "id": "0000000000000000000000000000f144",
+        "image_url": "https://example.invalid/redacted",
+        "instructor_id": "0000000000000000000000000000f145",
+        "language": "english",
+        "origin_locale": "en-US",
+        "original_air_time": 1641617923,
+        "scheduled_start_time": 1641617913,
+        "title": "10 min Power Zone Post-Ride Stretch"
+      },
+      {
+        "content_format": "video",
+        "content_provider": "peloton",
+        "fitness_discipline": "stretching",
+        "id": "0000000000000000000000000000f146",
+        "image_url": "https://example.invalid/redacted",
+        "instructor_id": "0000000000000000000000000000f147",
+        "language": "english",
+        "origin_locale": "en-US",
+        "original_air_time": 1629176331,
+        "scheduled_start_time": 1629176313,
+        "title": "10 min Power Zone Post-Ride Stretch"
+      },
+      {
+        "content_format": "video",
+        "content_provider": "peloton",
+        "fitness_discipline": "stretching",
+        "id": "0000000000000000000000000000f148",
+        "image_url": "https://example.invalid/redacted",
+        "instructor_id": "00000000000000000000000000000f94",
+        "language": "english",
+        "origin_locale": "en-US",
+        "original_air_time": 1639198770,
+        "scheduled_start_time": 1639198713,
+        "title": "10 min Power Zone Post-Ride Stretch"
+      }
+    ]
+  },
+  "ride": {
+    "availability": {
+      "is_available": true,
+      "reason": null
+    },
+    "captions": [
+      "de-DE",
+      "en-US",
+      "es-ES"
+    ],
+    "class_type_ids": [
+      "0000000000000000000000000000f137"
+    ],
+    "content_availability": "digital_and_above",
+    "content_availability_level": "digital_and_above",
+    "content_format": "video",
+    "content_provider": "peloton",
+    "description": "Join redacted for this 5-minute stretch complementing your hard work on the Bike.",
+    "difficulty_estimate": 3.4071265357485845,
+    "difficulty_level": null,
+    "difficulty_rating_avg": 3.4071265357485845,
+    "difficulty_rating_count": 90591,
+    "distance": null,
+    "distance_display_value": null,
+    "distance_unit": null,
+    "duration": 300,
+    "dynamic_video_recorded_speed_in_mph": null,
+    "equipment_ids": [],
+    "equipment_tags": [],
+    "explicit_rating": 0,
+    "extra_images": [],
+    "fitness_discipline": "stretching",
+    "fitness_discipline_display_name": "Stretching",
+    "flags": [],
+    "free_for_limited_time": false,
+    "has_closed_captions": true,
+    "has_free_mode": false,
+    "has_pedaling_metrics": false,
+    "has_tread_pace_target": false,
+    "home_peloton_id": "0000000000000000000000000000f149",
+    "id": "0000000000000000000000000000f136",
+    "image_url": "https://example.invalid/redacted",
+    "individual_instructor_ids": [],
+    "instructor": {
+      "about_image_url": "about_image_url-2",
+      "background": "background-2",
+      "bike_instructor_list_display_image_url": null,
+      "bio": "redacted",
+      "coach_type": "peloton_coach",
+      "default_cross_fade": 10,
+      "default_cue_delay": 5,
+      "facebook_fan_page": "",
+      "featured_profile": true,
+      "film_link": "",
+      "first_name": "first_name-3",
+      "fitness_disciplines": [
+        "cycling",
+        "strength"
+      ],
+      "id": "00000000000000000000000000000fb5",
+      "image_url": "image_url-3",
+      "individual_instructor_ids": [],
+      "instagram_profile": "",
+      "instructor_hero_image_url": "instructor_hero_image_url-2",
+      "instructor_page_destination_url": "instructor_page_destination_url-2",
+      "ios_instructor_list_display_image_url": "ios_instructor_list_display_image_url-2",
+      "is_active": true,
+      "is_announced": true,
+      "is_filterable": true,
+      "is_instructor_group": false,
+      "is_visible": true,
+      "jumbotron_url": null,
+      "jumbotron_url_dark": "jumbotron_url_dark-2",
+      "jumbotron_url_ios": "jumbotron_url_ios-2",
+      "last_name": "last_name-3",
+      "life_style_image_url": "life_style_image_url-2",
+      "list_order": 55,
+      "music_bio": "music_bio-2",
+      "name": "name-3",
+      "ordered_q_and_as": [],
+      "quote": "quote-2",
+      "short_bio": "short_bio-2",
+      "spotify_playlist_uri": "",
+      "strava_profile": "",
+      "twitter_profile": "",
+      "user_id": "00000000000000000000000000000fb6",
+      "username": "username-3",
+      "web_instructor_list_display_image_url": "web_instructor_list_display_image_url-2",
+      "web_instructor_list_gif_image_url": null,
+      "workout_share_images": [
+        {
+          "fitness_discipline": "bike_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cardio",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "circuit",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cycling",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "meditation",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "running",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "strength",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "stretching",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "walking",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "yoga",
+          "image_url": "https://example.invalid/redacted"
+        }
+      ]
+    },
+    "instructor_id": "00000000000000000000000000000fb5",
+    "is_archived": false,
+    "is_closed_caption_shown": true,
+    "is_dynamic_video_eligible": false,
+    "is_explicit": false,
+    "is_favorite": false,
+    "is_fixed_distance": false,
+    "is_limited_ride": false,
+    "is_live_in_studio_only": true,
+    "is_outdoor": false,
+    "join_tokens": {
+      "on_demand": "redacted"
+    },
+    "language": "english",
+    "leaderboard_filter_type": null,
+    "length": 329,
+    "live_stream_id": "0000000000000000000000000000f136-live",
+    "live_stream_url": null,
+    "location": "redacted",
+    "membership_tiering_info": {
+      "limited_classes_reset_date": null,
+      "limited_classes_taken": null,
+      "limited_classes_total": null,
+      "tier_type": "no_membership"
+    },
+    "metrics": [
+      "heart_rate",
+      "calories"
+    ],
+    "muscle_group_score": [],
+    "origin_locale": "en-US",
+    "original_air_time": 1480168713,
+    "overall_estimate": 0.9991876000418264,
+    "overall_rating_avg": 0.9991876000418264,
+    "overall_rating_count": 124323,
+    "pedaling_duration": 300,
+    "pedaling_end_offset": 301,
+    "pedaling_start_offset": 1,
+    "preview_stream_url": "https://example.invalid/redacted",
+    "rating": 0,
+    "ride_type_id": "0000000000000000000000000000f137",
+    "ride_type_ids": [
+      "0000000000000000000000000000f137"
+    ],
+    "sample_preview_stream_url": null,
+    "sample_vod_stream_url": null,
+    "scheduled_start_time": 1480168713,
+    "series_id": "0000000000000000000000000000f14a",
+    "sold_out": false,
+    "studio_peloton_id": "0000000000000000000000000000f14b",
+    "thumbnail_location": null,
+    "thumbnail_title": null,
+    "title": "5 min Post-Ride Stretch",
+    "total_following_workouts": 0,
+    "total_in_progress_workouts": 0,
+    "total_ratings": 525862,
+    "total_user_workouts": 3,
+    "total_workouts": 1000000,
+    "user_caption_locales": [
+      {
+        "locale": "en-US",
+        "slugs": [
+          {
+            "display_name": "English",
+            "display_names": {
+              "de-DE": "Englisch",
+              "en-US": "English",
+              "es-ES": "Ingles",
+              "fr-CA": "Anglais",
+              "fr-FR": "Anglais"
+            },
+            "type": "English"
+          }
+        ]
+      },
+      {
+        "locale": "de-DE",
+        "slugs": [
+          {
+            "display_name": "German",
+            "display_names": {
+              "de-DE": "Deutsche",
+              "en-US": "German",
+              "es-ES": "Aleman",
+              "fr-CA": "Allemand",
+              "fr-FR": "Allemand"
+            },
+            "type": "Deutsche"
+          }
+        ]
+      },
+      {
+        "locale": "es-ES",
+        "slugs": [
+          {
+            "display_name": "Spanish",
+            "display_names": {
+              "de-DE": "Spanisch",
+              "en-US": "Spanish",
+              "es-ES": "Espa\u00f1ol",
+              "fr-CA": "Espagnol",
+              "fr-FR": "Espagnol"
+            },
+            "type": "Espa\u00f1ol"
+          }
+        ]
+      }
+    ],
+    "vod_stream_id": "0000000000000000000000000000f136-vod",
+    "vod_stream_url": null
+  },
+  "sampled_top_tags": null,
+  "segments": {
+    "conflicted_movement_count": 0,
+    "conflicted_movement_preferences": [],
+    "flagged_movements_not_available": false,
+    "movement_patterns": [],
+    "movements_by_weight_category": {},
+    "segment_body_focus_distribution": {
+      "flexibility": "1.0"
+    },
+    "segment_category_distribution": {
+      "Stretching": "1.0"
+    },
+    "segment_list": [
+      {
+        "icon_name": "stretching_yoga_flexibility",
+        "icon_slug": "stretching_yoga_flexibility",
+        "icon_url": "https://example.invalid/redacted",
+        "id": "00000000000000000000000000000f1a",
+        "intensity_in_mets": 2.5,
+        "is_drill": false,
+        "is_transition": false,
+        "length": 300,
+        "metrics_type": "floor",
+        "name": "Stretching",
+        "start_time_offset": 0,
+        "subsegments_v2": []
+      }
+    ]
+  },
+  "target_class_metrics": {},
+  "target_metrics_data": {}
+}

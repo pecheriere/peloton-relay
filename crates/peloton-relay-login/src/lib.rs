@@ -3,6 +3,7 @@
 pub mod capture;
 pub mod check;
 pub mod output;
+pub mod scrub;
 pub mod session;
 #[cfg(target_os = "macos")]
 pub mod window;

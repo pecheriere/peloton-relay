@@ -9,6 +9,13 @@ publish.workspace = true
 
 [dependencies]
 clap.workspace = true
+peloton = { path = "../peloton", version = "0.1.0" }
+serde.workspace = true
+time.workspace = true
+utoipa.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

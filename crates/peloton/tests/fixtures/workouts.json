@@ -1,0 +1,954 @@
+{
+  "aggregate_stats": [],
+  "count": 5,
+  "data": [
+    {
+      "achievement_templates": [],
+      "calories": 233.77,
+      "created": 1495341025,
+      "created_at": 1495341025,
+      "device_time_created_at": 1495341025,
+      "device_type": "home_bike_plus",
+      "distance": 4.97,
+      "effort_zones": {
+        "heart_rate_zone_durations": {
+          "heart_rate_z1_duration": 59,
+          "heart_rate_z2_duration": 391,
+          "heart_rate_z3_duration": 685,
+          "heart_rate_z4_duration": 65,
+          "heart_rate_z5_duration": 0
+        },
+        "total_effort_points": null
+      },
+      "end_time": 1495342285,
+      "fitbit_id": null,
+      "fitness_discipline": "cycling",
+      "has_leaderboard_metrics": true,
+      "has_pedaling_metrics": true,
+      "hr_total_points": null,
+      "id": "00000000000000000000000000000f44",
+      "is_3p_fit_feed_workout": false,
+      "is_3p_fit_feed_workout_excluded_from_streaks": false,
+      "is_non_partner_3p_fit_feed_workout": false,
+      "is_outdoor": false,
+      "is_peloton_originated_workout": true,
+      "is_splits_personal_record": false,
+      "is_total_work_personal_record": false,
+      "metrics_type": "cycling",
+      "name": "Cycling Workout",
+      "peloton_id": null,
+      "platform": "home_bike",
+      "ride": {
+        "fitness_discipline": "cycling",
+        "id": "00000000000000000000000000000000",
+        "instructor": null,
+        "instructor_id": "",
+        "title": null
+      },
+      "service_id": null,
+      "start_time": 1495341090,
+      "status": "COMPLETE",
+      "strava_id": null,
+      "timezone": "Etc/UTC",
+      "title": null,
+      "total_music_audio_buffer_seconds": null,
+      "total_music_audio_play_seconds": null,
+      "total_video_buffering_seconds": 0,
+      "total_video_watch_time_seconds": 0,
+      "total_work": 100395.8,
+      "user_id": "000000000000000000000000000000f2",
+      "v2_total_video_buffering_seconds": 1,
+      "v2_total_video_watch_time_seconds": 1345,
+      "workout_type": "freestyle"
+    },
+    {
+      "calories": 33.31,
+      "created": 1493353483,
+      "created_at": 1493353483,
+      "device_time_created_at": 1493353483,
+      "device_type": "home_bike_plus",
+      "effort_zones": null,
+      "end_time": 1493354443,
+      "fitbit_id": null,
+      "fitness_discipline": "yoga",
+      "has_leaderboard_metrics": false,
+      "has_pedaling_metrics": false,
+      "id": "000000000000000000000000000000f9",
+      "is_3p_fit_feed_workout": false,
+      "is_3p_fit_feed_workout_excluded_from_streaks": false,
+      "is_non_partner_3p_fit_feed_workout": false,
+      "is_outdoor": false,
+      "is_peloton_originated_workout": true,
+      "is_splits_personal_record": false,
+      "is_total_work_personal_record": false,
+      "metrics_type": null,
+      "name": "Yoga Workout",
+      "peloton_id": "0000000000000000000000000000f439",
+      "platform": "home_bike",
+      "ride": {
+        "availability": {
+          "is_available": true,
+          "reason": null
+        },
+        "class_type_ids": [
+          "00000000000000000000000000000fba"
+        ],
+        "content_format": "video",
+        "content_provider": "peloton",
+        "description": "In restorative yoga, we hold poses for longer amounts of time and use props to take some or all of the effort out of the poses. Cultivate relaxation, calm the nervous system and feel restored.",
+        "difficulty_estimate": 2.9243,
+        "difficulty_level": null,
+        "difficulty_rating_avg": 2.9243,
+        "difficulty_rating_count": 7393,
+        "distance": null,
+        "distance_display_value": null,
+        "distance_unit": null,
+        "duration": 900,
+        "dynamic_video_recorded_speed_in_mph": null,
+        "explicit_rating": 0,
+        "extra_images": [],
+        "fitness_discipline": "yoga",
+        "fitness_discipline_display_name": "Yoga",
+        "flags": [],
+        "has_closed_captions": false,
+        "has_pedaling_metrics": false,
+        "home_peloton_id": "00000000000000000000000000000fd9",
+        "id": "00000000000000000000000000000fb9",
+        "image_url": "https://example.invalid/redacted",
+        "individual_instructor_ids": [],
+        "instructor": {
+          "about_image_url": "about_image_url-3",
+          "background": "background-3",
+          "bike_instructor_list_display_image_url": null,
+          "bio": "redacted",
+          "coach_type": "peloton_coach",
+          "default_cross_fade": 10,
+          "default_cue_delay": 5,
+          "facebook_fan_page": "",
+          "featured_profile": true,
+          "film_link": "",
+          "first_name": "first_name-4",
+          "fitness_disciplines": [
+            "cycling",
+            "strength",
+            "stretching",
+            "yoga"
+          ],
+          "id": "00000000000000000000000000000fda",
+          "image_url": "image_url-4",
+          "individual_instructor_ids": [],
+          "instagram_profile": "",
+          "instructor_hero_image_url": "instructor_hero_image_url-3",
+          "instructor_page_destination_url": "instructor_page_destination_url-3",
+          "ios_instructor_list_display_image_url": "ios_instructor_list_display_image_url-3",
+          "is_active": true,
+          "is_announced": true,
+          "is_filterable": true,
+          "is_instructor_group": false,
+          "is_visible": true,
+          "jumbotron_url": null,
+          "jumbotron_url_dark": "jumbotron_url_dark-3",
+          "jumbotron_url_ios": "jumbotron_url_ios-3",
+          "last_name": "last_name-4",
+          "life_style_image_url": "life_style_image_url-3",
+          "list_order": 54,
+          "music_bio": "music_bio-3",
+          "name": "name-4",
+          "ordered_q_and_as": [],
+          "quote": "quote-3",
+          "short_bio": "short_bio-3",
+          "spotify_playlist_uri": "",
+          "strava_profile": "",
+          "twitter_profile": "",
+          "user_id": "00000000000000000000000000000fdb",
+          "username": "username-4",
+          "web_instructor_list_display_image_url": "web_instructor_list_display_image_url-3",
+          "web_instructor_list_gif_image_url": null,
+          "workout_share_images": [
+            {
+              "fitness_discipline": "bike_bootcamp",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "caesar",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "caesar_bootcamp",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "cardio",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "circuit",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "cycling",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "meditation",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "running",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "strength",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "stretching",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "walking",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "yoga",
+              "image_url": "https://example.invalid/redacted"
+            }
+          ]
+        },
+        "instructor_id": "00000000000000000000000000000fda",
+        "is_archived": true,
+        "is_closed_caption_shown": false,
+        "is_dynamic_video_eligible": false,
+        "is_explicit": false,
+        "is_fixed_distance": false,
+        "is_live_in_studio_only": true,
+        "language": "english",
+        "length": 1115,
+        "live_stream_id": "00000000000000000000000000000fb9-live",
+        "live_stream_url": null,
+        "location": "redacted",
+        "metrics": [
+          "heart_rate",
+          "calories"
+        ],
+        "origin_locale": "en-US",
+        "original_air_time": 1492105053,
+        "overall_estimate": 0.9784,
+        "overall_rating_avg": 0.9784,
+        "overall_rating_count": 9750,
+        "pedaling_duration": 900,
+        "pedaling_end_offset": 960,
+        "pedaling_start_offset": 60,
+        "preview_stream_url": "https://example.invalid/redacted",
+        "rating": 0,
+        "ride_type_id": "00000000000000000000000000000fba",
+        "ride_type_ids": [
+          "00000000000000000000000000000fba"
+        ],
+        "sample_preview_stream_url": null,
+        "sample_vod_stream_url": null,
+        "scheduled_start_time": 1492105413,
+        "series_id": "00000000000000000000000000000fdc",
+        "sold_out": false,
+        "studio_peloton_id": "00000000000000000000000000000fdd",
+        "title": "15 min Restorative",
+        "total_in_progress_workouts": 0,
+        "total_ratings": 0,
+        "total_workouts": 50156,
+        "vod_stream_id": "00000000000000000000000000000fb9-vod",
+        "vod_stream_url": "https://example.invalid/redacted"
+      },
+      "service_id": null,
+      "start_time": 1493353545,
+      "status": "COMPLETE",
+      "strava_id": null,
+      "timezone": "Etc/UTC",
+      "title": null,
+      "total_music_audio_buffer_seconds": null,
+      "total_music_audio_play_seconds": null,
+      "total_video_buffering_seconds": 0,
+      "total_video_watch_time_seconds": 0,
+      "user_id": "000000000000000000000000000000f2",
+      "v2_total_video_buffering_seconds": 4,
+      "v2_total_video_watch_time_seconds": 1073,
+      "workout_type": "class"
+    },
+    {
+      "calories": 381.36,
+      "created": 1492918851,
+      "created_at": 1492918851,
+      "device_time_created_at": 1492918851,
+      "device_type": "home_bike_plus",
+      "distance": 7.88,
+      "effort_zones": {
+        "heart_rate_zone_durations": {
+          "heart_rate_z1_duration": 30,
+          "heart_rate_z2_duration": 430,
+          "heart_rate_z3_duration": 836,
+          "heart_rate_z4_duration": 501,
+          "heart_rate_z5_duration": 0
+        },
+        "total_effort_points": null
+      },
+      "end_time": 1492920718,
+      "fitbit_id": null,
+      "fitness_discipline": "cycling",
+      "has_leaderboard_metrics": true,
+      "has_pedaling_metrics": true,
+      "hr_total_points": null,
+      "id": "00000000000000000000000000000f14",
+      "is_3p_fit_feed_workout": false,
+      "is_3p_fit_feed_workout_excluded_from_streaks": false,
+      "is_non_partner_3p_fit_feed_workout": false,
+      "is_outdoor": false,
+      "is_peloton_originated_workout": true,
+      "is_splits_personal_record": false,
+      "is_total_work_personal_record": false,
+      "metrics_type": "cycling",
+      "name": "Scenic Ride",
+      "peloton_id": "0000000000000000000000000000f441",
+      "platform": "home_bike",
+      "ride": {
+        "availability": {
+          "is_available": true,
+          "reason": null
+        },
+        "class_type_ids": [
+          "0000000000000000000000000000f320"
+        ],
+        "content_format": "video",
+        "content_provider": "virtual_active",
+        "description": "Join redacted as the takes us on an epic ride alongside the Pacific Ocean in Big Sur. Filmed by professionals on a closed course. Do not attempt to recreate.",
+        "difficulty_estimate": 0.0,
+        "difficulty_level": null,
+        "difficulty_rating_avg": 0.0,
+        "difficulty_rating_count": 0,
+        "distance": null,
+        "distance_display_value": null,
+        "distance_unit": null,
+        "duration": 1800,
+        "dynamic_video_recorded_speed_in_mph": null,
+        "explicit_rating": 0,
+        "extra_images": [],
+        "fitness_discipline": "cycling",
+        "fitness_discipline_display_name": "Cycling",
+        "flags": [],
+        "has_closed_captions": false,
+        "has_pedaling_metrics": true,
+        "home_peloton_id": null,
+        "id": "0000000000000000000000000000f31f",
+        "image_url": "https://example.invalid/redacted",
+        "individual_instructor_ids": [],
+        "instructor": {
+          "about_image_url": "about_image_url-3",
+          "background": "background-3",
+          "bike_instructor_list_display_image_url": null,
+          "bio": "redacted",
+          "coach_type": "peloton_coach",
+          "default_cross_fade": 10,
+          "default_cue_delay": 5,
+          "facebook_fan_page": "",
+          "featured_profile": true,
+          "film_link": "",
+          "first_name": "first_name-4",
+          "fitness_disciplines": [
+            "cycling",
+            "strength",
+            "stretching",
+            "yoga"
+          ],
+          "id": "00000000000000000000000000000fda",
+          "image_url": "image_url-4",
+          "individual_instructor_ids": [],
+          "instagram_profile": "",
+          "instructor_hero_image_url": "instructor_hero_image_url-3",
+          "instructor_page_destination_url": "instructor_page_destination_url-3",
+          "ios_instructor_list_display_image_url": "ios_instructor_list_display_image_url-3",
+          "is_active": true,
+          "is_announced": true,
+          "is_filterable": true,
+          "is_instructor_group": false,
+          "is_visible": true,
+          "jumbotron_url": null,
+          "jumbotron_url_dark": "jumbotron_url_dark-3",
+          "jumbotron_url_ios": "jumbotron_url_ios-3",
+          "last_name": "last_name-4",
+          "life_style_image_url": "life_style_image_url-3",
+          "list_order": 54,
+          "music_bio": "music_bio-3",
+          "name": "name-4",
+          "ordered_q_and_as": [],
+          "quote": "quote-3",
+          "short_bio": "short_bio-3",
+          "spotify_playlist_uri": "",
+          "strava_profile": "",
+          "twitter_profile": "",
+          "user_id": "00000000000000000000000000000fdb",
+          "username": "username-4",
+          "web_instructor_list_display_image_url": "web_instructor_list_display_image_url-3",
+          "web_instructor_list_gif_image_url": null,
+          "workout_share_images": [
+            {
+              "fitness_discipline": "bike_bootcamp",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "caesar",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "caesar_bootcamp",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "cardio",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "circuit",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "cycling",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "meditation",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "running",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "strength",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "stretching",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "walking",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "yoga",
+              "image_url": "https://example.invalid/redacted"
+            }
+          ]
+        },
+        "instructor_id": "00000000000000000000000000000fda",
+        "is_archived": true,
+        "is_closed_caption_shown": false,
+        "is_dynamic_video_eligible": false,
+        "is_explicit": false,
+        "is_fixed_distance": false,
+        "is_live_in_studio_only": false,
+        "language": "english",
+        "length": 1997,
+        "live_stream_id": "0000000000000000000000000000f31f-live",
+        "live_stream_url": null,
+        "location": "redacted",
+        "metrics": [
+          "heart_rate",
+          "cadence",
+          "calories"
+        ],
+        "origin_locale": "en-US",
+        "original_air_time": 1468948713,
+        "overall_estimate": 0.9851,
+        "overall_rating_avg": 0.9851,
+        "overall_rating_count": 87691,
+        "pedaling_duration": 1800,
+        "pedaling_end_offset": 1867,
+        "pedaling_start_offset": 67,
+        "preview_stream_url": "https://example.invalid/redacted",
+        "rating": 0,
+        "ride_type_id": "0000000000000000000000000000f320",
+        "ride_type_ids": [
+          "0000000000000000000000000000f320"
+        ],
+        "sample_preview_stream_url": null,
+        "sample_vod_stream_url": null,
+        "scheduled_start_time": 1468948713,
+        "series_id": "0000000000000000000000000000f34a",
+        "sold_out": false,
+        "studio_peloton_id": null,
+        "title": "30 min Big Sur Ride",
+        "total_in_progress_workouts": 1,
+        "total_ratings": 0,
+        "total_workouts": 1181272,
+        "vod_stream_id": "0000000000000000000000000000f31f-vod",
+        "vod_stream_url": "https://example.invalid/redacted"
+      },
+      "service_id": null,
+      "start_time": 1492918919,
+      "status": "COMPLETE",
+      "strava_id": null,
+      "timezone": "Etc/UTC",
+      "title": null,
+      "total_music_audio_buffer_seconds": null,
+      "total_music_audio_play_seconds": null,
+      "total_video_buffering_seconds": 0,
+      "total_video_watch_time_seconds": 0,
+      "total_work": 172579.24,
+      "user_id": "000000000000000000000000000000f2",
+      "v2_total_video_buffering_seconds": 1,
+      "v2_total_video_watch_time_seconds": 1985,
+      "workout_type": "scenic"
+    },
+    {
+      "calories": 14.41,
+      "created": 1492578394,
+      "created_at": 1492578394,
+      "device_time_created_at": 1492578394,
+      "device_type": "home_bike_plus",
+      "effort_zones": null,
+      "end_time": 1492578695,
+      "fitbit_id": null,
+      "fitness_discipline": "stretching",
+      "has_leaderboard_metrics": false,
+      "has_pedaling_metrics": false,
+      "id": "00000000000000000000000000000f19",
+      "is_3p_fit_feed_workout": false,
+      "is_3p_fit_feed_workout_excluded_from_streaks": false,
+      "is_non_partner_3p_fit_feed_workout": false,
+      "is_outdoor": false,
+      "is_peloton_originated_workout": true,
+      "is_splits_personal_record": false,
+      "is_total_work_personal_record": false,
+      "metrics_type": null,
+      "name": "Stretching Workout",
+      "peloton_id": "0000000000000000000000000000f444",
+      "platform": "home_bike",
+      "ride": {
+        "availability": {
+          "is_available": true,
+          "reason": null
+        },
+        "class_type_ids": [
+          "0000000000000000000000000000f137"
+        ],
+        "content_format": "video",
+        "content_provider": "peloton",
+        "description": "Join redacted for this 5-minute stretch complementing your hard work on the Bike.",
+        "difficulty_estimate": 3.4073,
+        "difficulty_level": null,
+        "difficulty_rating_avg": 3.4073,
+        "difficulty_rating_count": 90531,
+        "distance": null,
+        "distance_display_value": null,
+        "distance_unit": null,
+        "duration": 300,
+        "dynamic_video_recorded_speed_in_mph": null,
+        "explicit_rating": 0,
+        "extra_images": [],
+        "fitness_discipline": "stretching",
+        "fitness_discipline_display_name": "Stretching",
+        "flags": [],
+        "has_closed_captions": false,
+        "has_pedaling_metrics": false,
+        "home_peloton_id": "0000000000000000000000000000f149",
+        "id": "0000000000000000000000000000f136",
+        "image_url": "https://example.invalid/redacted",
+        "individual_instructor_ids": [],
+        "instructor": {
+          "about_image_url": "about_image_url-2",
+          "background": "background-2",
+          "bike_instructor_list_display_image_url": null,
+          "bio": "redacted",
+          "coach_type": "peloton_coach",
+          "default_cross_fade": 10,
+          "default_cue_delay": 5,
+          "facebook_fan_page": "",
+          "featured_profile": true,
+          "film_link": "",
+          "first_name": "first_name-3",
+          "fitness_disciplines": [
+            "cycling",
+            "strength"
+          ],
+          "id": "00000000000000000000000000000fb5",
+          "image_url": "image_url-3",
+          "individual_instructor_ids": [],
+          "instagram_profile": "",
+          "instructor_hero_image_url": "instructor_hero_image_url-2",
+          "instructor_page_destination_url": "instructor_page_destination_url-2",
+          "ios_instructor_list_display_image_url": "ios_instructor_list_display_image_url-2",
+          "is_active": true,
+          "is_announced": true,
+          "is_filterable": true,
+          "is_instructor_group": false,
+          "is_visible": true,
+          "jumbotron_url": null,
+          "jumbotron_url_dark": "jumbotron_url_dark-2",
+          "jumbotron_url_ios": "jumbotron_url_ios-2",
+          "last_name": "last_name-3",
+          "life_style_image_url": "life_style_image_url-2",
+          "list_order": 55,
+          "music_bio": "music_bio-2",
+          "name": "name-3",
+          "ordered_q_and_as": [],
+          "quote": "quote-2",
+          "short_bio": "short_bio-2",
+          "spotify_playlist_uri": "",
+          "strava_profile": "",
+          "twitter_profile": "",
+          "user_id": "00000000000000000000000000000fb6",
+          "username": "username-3",
+          "web_instructor_list_display_image_url": "web_instructor_list_display_image_url-2",
+          "web_instructor_list_gif_image_url": null,
+          "workout_share_images": [
+            {
+              "fitness_discipline": "bike_bootcamp",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "caesar",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "caesar_bootcamp",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "cardio",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "circuit",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "cycling",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "meditation",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "running",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "strength",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "stretching",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "walking",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "yoga",
+              "image_url": "https://example.invalid/redacted"
+            }
+          ]
+        },
+        "instructor_id": "00000000000000000000000000000fb5",
+        "is_archived": false,
+        "is_closed_caption_shown": false,
+        "is_dynamic_video_eligible": false,
+        "is_explicit": false,
+        "is_fixed_distance": false,
+        "is_live_in_studio_only": true,
+        "language": "english",
+        "length": 329,
+        "live_stream_id": "0000000000000000000000000000f136-live",
+        "live_stream_url": null,
+        "location": "redacted",
+        "metrics": [
+          "heart_rate",
+          "calories"
+        ],
+        "origin_locale": "en-US",
+        "original_air_time": 1480168713,
+        "overall_estimate": 0.9992,
+        "overall_rating_avg": 0.9992,
+        "overall_rating_count": 124215,
+        "pedaling_duration": 300,
+        "pedaling_end_offset": 301,
+        "pedaling_start_offset": 1,
+        "preview_stream_url": "https://example.invalid/redacted",
+        "rating": 0,
+        "ride_type_id": "0000000000000000000000000000f137",
+        "ride_type_ids": [
+          "0000000000000000000000000000f137"
+        ],
+        "sample_preview_stream_url": null,
+        "sample_vod_stream_url": null,
+        "scheduled_start_time": 1480168713,
+        "series_id": "0000000000000000000000000000f14a",
+        "sold_out": false,
+        "studio_peloton_id": "0000000000000000000000000000f14b",
+        "title": "5 min Post-Ride Stretch",
+        "total_in_progress_workouts": 0,
+        "total_ratings": 0,
+        "total_workouts": 1125479,
+        "vod_stream_id": "0000000000000000000000000000f136-vod",
+        "vod_stream_url": null
+      },
+      "service_id": null,
+      "start_time": 1492578397,
+      "status": "COMPLETE",
+      "strava_id": null,
+      "timezone": "Etc/UTC",
+      "title": null,
+      "total_music_audio_buffer_seconds": null,
+      "total_music_audio_play_seconds": null,
+      "total_video_buffering_seconds": 0,
+      "total_video_watch_time_seconds": 0,
+      "user_id": "000000000000000000000000000000f2",
+      "v2_total_video_buffering_seconds": 1,
+      "v2_total_video_watch_time_seconds": 314,
+      "workout_type": "class"
+    },
+    {
+      "calories": 103.56,
+      "created": 1491452662,
+      "created_at": 1491452662,
+      "device_time_created_at": 1491452662,
+      "device_type": "home_bike_plus",
+      "distance": 2.65,
+      "effort_zones": {
+        "heart_rate_zone_durations": {
+          "heart_rate_z1_duration": 144,
+          "heart_rate_z2_duration": 216,
+          "heart_rate_z3_duration": 240,
+          "heart_rate_z4_duration": 0,
+          "heart_rate_z5_duration": 0
+        },
+        "total_effort_points": null
+      },
+      "end_time": 1491453282,
+      "fitbit_id": null,
+      "fitness_discipline": "cycling",
+      "has_leaderboard_metrics": true,
+      "has_pedaling_metrics": true,
+      "hr_total_points": null,
+      "id": "00000000000000000000000000000f1b",
+      "is_3p_fit_feed_workout": false,
+      "is_3p_fit_feed_workout_excluded_from_streaks": false,
+      "is_non_partner_3p_fit_feed_workout": false,
+      "is_outdoor": false,
+      "is_peloton_originated_workout": true,
+      "is_splits_personal_record": false,
+      "is_total_work_personal_record": false,
+      "metrics_type": "cycling",
+      "name": "Cycling Workout",
+      "peloton_id": "0000000000000000000000000000f445",
+      "platform": "home_bike",
+      "ride": {
+        "availability": {
+          "is_available": true,
+          "reason": null
+        },
+        "class_type_ids": [
+          "00000000000000000000000000000f69"
+        ],
+        "content_format": "video",
+        "content_provider": "peloton",
+        "description": "This class is spent primarily in the saddle to give your joints a smooth ride while still giving you a good sweat. Perfect for all levels, especially those recovering from an injury.",
+        "difficulty_estimate": 5.0073,
+        "difficulty_level": null,
+        "difficulty_rating_avg": 5.0073,
+        "difficulty_rating_count": 19683,
+        "distance": null,
+        "distance_display_value": null,
+        "distance_unit": null,
+        "duration": 600,
+        "dynamic_video_recorded_speed_in_mph": null,
+        "explicit_rating": 0,
+        "extra_images": [],
+        "fitness_discipline": "cycling",
+        "fitness_discipline_display_name": "Cycling",
+        "flags": [],
+        "has_closed_captions": false,
+        "has_pedaling_metrics": true,
+        "home_peloton_id": "0000000000000000000000000000f1ab",
+        "id": "0000000000000000000000000000f194",
+        "image_url": "https://example.invalid/redacted",
+        "individual_instructor_ids": [],
+        "instructor": {
+          "about_image_url": "about_image_url-2",
+          "background": "background-2",
+          "bike_instructor_list_display_image_url": null,
+          "bio": "redacted",
+          "coach_type": "peloton_coach",
+          "default_cross_fade": 10,
+          "default_cue_delay": 5,
+          "facebook_fan_page": "",
+          "featured_profile": true,
+          "film_link": "",
+          "first_name": "first_name-3",
+          "fitness_disciplines": [
+            "cycling",
+            "strength"
+          ],
+          "id": "00000000000000000000000000000fb5",
+          "image_url": "image_url-3",
+          "individual_instructor_ids": [],
+          "instagram_profile": "",
+          "instructor_hero_image_url": "instructor_hero_image_url-2",
+          "instructor_page_destination_url": "instructor_page_destination_url-2",
+          "ios_instructor_list_display_image_url": "ios_instructor_list_display_image_url-2",
+          "is_active": true,
+          "is_announced": true,
+          "is_filterable": true,
+          "is_instructor_group": false,
+          "is_visible": true,
+          "jumbotron_url": null,
+          "jumbotron_url_dark": "jumbotron_url_dark-2",
+          "jumbotron_url_ios": "jumbotron_url_ios-2",
+          "last_name": "last_name-3",
+          "life_style_image_url": "life_style_image_url-2",
+          "list_order": 55,
+          "music_bio": "music_bio-2",
+          "name": "name-3",
+          "ordered_q_and_as": [],
+          "quote": "quote-2",
+          "short_bio": "short_bio-2",
+          "spotify_playlist_uri": "",
+          "strava_profile": "",
+          "twitter_profile": "",
+          "user_id": "00000000000000000000000000000fb6",
+          "username": "username-3",
+          "web_instructor_list_display_image_url": "web_instructor_list_display_image_url-2",
+          "web_instructor_list_gif_image_url": null,
+          "workout_share_images": [
+            {
+              "fitness_discipline": "bike_bootcamp",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "caesar",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "caesar_bootcamp",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "cardio",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "circuit",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "cycling",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "meditation",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "running",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "strength",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "stretching",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "walking",
+              "image_url": "https://example.invalid/redacted"
+            },
+            {
+              "fitness_discipline": "yoga",
+              "image_url": "https://example.invalid/redacted"
+            }
+          ]
+        },
+        "instructor_id": "00000000000000000000000000000fb5",
+        "is_archived": true,
+        "is_closed_caption_shown": false,
+        "is_dynamic_video_eligible": false,
+        "is_explicit": false,
+        "is_fixed_distance": false,
+        "is_live_in_studio_only": true,
+        "language": "english",
+        "length": 722,
+        "live_stream_id": "0000000000000000000000000000f194-live",
+        "live_stream_url": null,
+        "location": "redacted",
+        "metrics": [
+          "heart_rate",
+          "cadence",
+          "calories"
+        ],
+        "origin_locale": "en-US",
+        "original_air_time": 1483891113,
+        "overall_estimate": 0.9984,
+        "overall_rating_avg": 0.9984,
+        "overall_rating_count": 20744,
+        "pedaling_duration": 600,
+        "pedaling_end_offset": 660,
+        "pedaling_start_offset": 60,
+        "preview_stream_url": "https://example.invalid/redacted",
+        "rating": 0,
+        "ride_type_id": "00000000000000000000000000000f69",
+        "ride_type_ids": [
+          "00000000000000000000000000000f69"
+        ],
+        "sample_preview_stream_url": null,
+        "sample_vod_stream_url": null,
+        "scheduled_start_time": 1483891113,
+        "series_id": "00000000000000000000000000000f98",
+        "sold_out": false,
+        "studio_peloton_id": "0000000000000000000000000000f1ac",
+        "title": "10 min Low Impact Ride",
+        "total_in_progress_workouts": 0,
+        "total_ratings": 0,
+        "total_workouts": 156493,
+        "vod_stream_id": "0000000000000000000000000000f194-vod",
+        "vod_stream_url": "https://example.invalid/redacted"
+      },
+      "service_id": null,
+      "start_time": 1491452685,
+      "status": "COMPLETE",
+      "strava_id": null,
+      "timezone": "Etc/UTC",
+      "title": null,
+      "total_music_audio_buffer_seconds": null,
+      "total_music_audio_play_seconds": null,
+      "total_video_buffering_seconds": 0,
+      "total_video_watch_time_seconds": 0,
+      "total_work": 59556.84,
+      "user_id": "000000000000000000000000000000f2",
+      "v2_total_video_buffering_seconds": 1,
+      "v2_total_video_watch_time_seconds": 672,
+      "workout_type": "class"
+    }
+  ],
+  "limit": 30,
+  "next": {
+    "created_at": 1491278910,
+    "workout_id": "00000000000000000000000000000f27"
+  },
+  "page": 0,
+  "page_count": 7,
+  "show_next": true,
+  "show_previous": false,
+  "sort_by": "-device_time_created_at,-pk",
+  "summary": {},
+  "total": 202,
+  "total_heart_rate_zone_durations": {
+    "heart_rate_z1_duration": 0,
+    "heart_rate_z2_duration": 0,
+    "heart_rate_z3_duration": 0,
+    "heart_rate_z4_duration": 0,
+    "heart_rate_z5_duration": 0
+  }
+}
