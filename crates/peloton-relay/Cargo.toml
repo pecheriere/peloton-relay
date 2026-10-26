@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 clap.workspace = true
 peloton = { path = "../peloton", version = "0.1.0" }
 reqwest.workspace = true
@@ -23,7 +24,9 @@ url.workspace = true
 utoipa.workspace = true
 
 [dev-dependencies]
+http-body-util = "0.1"
 tempfile.workspace = true
+tower = { version = "0.5", features = ["util"] }
 tracing-subscriber.workspace = true
 wiremock.workspace = true
 
