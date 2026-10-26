@@ -30,6 +30,10 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          arguments: --target aarch64-apple-darwin
+          command: check
 
   login-macos:
     runs-on: macos-latest
@@ -43,10 +47,6 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo clippy -p peloton-relay-login --all-targets --all-features -- -D warnings
       - run: cargo test -p peloton-relay-login --all-features
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
-        with:
-          arguments: --target aarch64-apple-darwin
-          command: check
 
   docker-build:
     runs-on: ubuntu-latest
