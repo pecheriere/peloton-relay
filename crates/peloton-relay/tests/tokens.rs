@@ -149,6 +149,42 @@ fn save_is_atomic_and_0600() {
 }
 
 #[test]
+fn save_removes_stale_temp_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    let stale = dir.path().join(".state.json.123.0.tmp");
+    let live = dir.path().join(".state.json.456.1.tmp");
+    let unrelated = [
+        ".state.json.bak",
+        ".state.json.x.0.tmp",
+        ".state.json.1.tmp",
+        ".other.json.1.0.tmp",
+        "state.json.1.0.tmp",
+    ];
+    for name in unrelated {
+        fs::write(dir.path().join(name), b"keep").unwrap();
+    }
+    fs::write(&live, b"another writer, mid-save").unwrap();
+    fs::write(&stale, b"crashed writer").unwrap();
+    let long_ago = std::time::SystemTime::now() - StdDuration::from_secs(600);
+    fs::File::options()
+        .write(true)
+        .open(&stale)
+        .unwrap()
+        .set_modified(long_ago)
+        .unwrap();
+
+    file.save(&state("access", "refresh", Duration::hours(48)))
+        .unwrap();
+
+    assert!(!stale.exists(), "stale temp file left behind");
+    assert!(live.exists(), "a concurrent writer's temp file was removed");
+    for name in unrelated {
+        assert!(dir.path().join(name).exists(), "{name} was removed");
+    }
+}
+
+#[test]
 fn save_into_missing_directory_fails_cleanly() {
     let dir = tempfile::tempdir().unwrap();
     let file = state_file(&dir.path().join("absent"));
@@ -504,6 +540,118 @@ async fn refresh_survives_cancelled_caller() {
     assert!(abandoned.is_err());
 
     // The rotated refresh token must still land on disk, not be lost.
+    let (access, _) = tokens.bearer().await.unwrap();
+    assert_eq!(access.expose_secret(), "new-access");
+    let on_disk = file.load().unwrap().unwrap();
+    assert_eq!(
+        on_disk.tokens.refresh_token.expose_secret(),
+        "rotated-refresh"
+    );
+    assert_eq!(refresh_calls(&server).await, 1);
+}
+
+#[tokio::test]
+async fn adopts_state_seeded_while_ready() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(&state("old-access", "old-refresh", Duration::hours(48)))
+        .unwrap();
+    let tokens = manager(dir.path(), &server);
+    let (access, _) = tokens.bearer().await.unwrap();
+    assert_eq!(access.expose_secret(), "old-access");
+
+    // `seed` from another process replaces the file of a healthy relay.
+    file.save(&state(
+        "seeded-access",
+        "seeded-refresh",
+        Duration::hours(48),
+    ))
+    .unwrap();
+    let (access, _) = tokens.bearer().await.unwrap();
+    assert_eq!(access.expose_secret(), "seeded-access");
+    assert!(tokens.is_ready());
+
+    // A corrupt replacement does not knock out the working credential.
+    fs::write(&file.path, "{").unwrap();
+    let (access, _) = tokens.bearer().await.unwrap();
+    assert_eq!(access.expose_secret(), "seeded-access");
+    assert_eq!(refresh_calls(&server).await, 0);
+}
+
+/// Makes `dir` read-only and checks that this actually blocks writes
+/// (it does not for root, which this test cannot run as).
+fn make_read_only(dir: &Path) {
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o500)).unwrap();
+    assert!(
+        fs::File::create(dir.join("probe")).is_err(),
+        "directory permissions are not enforced (running as root?)"
+    );
+}
+
+fn make_writable(dir: &Path) {
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+#[tokio::test]
+async fn save_failure_withholds_tokens_until_saved() {
+    let server = MockServer::start().await;
+    refresh_mock("old-refresh")
+        .respond_with(rotated_tokens())
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(&state("old-access", "old-refresh", -Duration::minutes(5)))
+        .unwrap();
+    let tokens = manager(dir.path(), &server);
+
+    make_read_only(dir.path());
+    assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+    assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+    assert!(!tokens.is_ready());
+    make_writable(dir.path());
+    let on_disk = file.load().unwrap().unwrap();
+    assert_eq!(on_disk.tokens.refresh_token.expose_secret(), "old-refresh");
+
+    // The rotated tokens were kept in memory, not replaced by the stale file.
+    let (access, _) = tokens.bearer().await.unwrap();
+    assert_eq!(access.expose_secret(), "new-access");
+    assert!(tokens.is_ready());
+    let on_disk = file.load().unwrap().unwrap();
+    assert_eq!(
+        on_disk.tokens.refresh_token.expose_secret(),
+        "rotated-refresh"
+    );
+    assert_eq!(refresh_calls(&server).await, 1);
+}
+
+#[tokio::test]
+async fn unsaved_tokens_win_over_external_seed() {
+    let server = MockServer::start().await;
+    refresh_mock("old-refresh")
+        .respond_with(rotated_tokens())
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(&state("old-access", "old-refresh", -Duration::minutes(5)))
+        .unwrap();
+    let tokens = manager(dir.path(), &server);
+
+    make_read_only(dir.path());
+    assert!(tokens.bearer().await.is_err());
+    make_writable(dir.path());
+    file.save(&state(
+        "seeded-access",
+        "seeded-refresh",
+        Duration::hours(48),
+    ))
+    .unwrap();
+
+    // The rotated refresh token exists only in memory: it is saved, not discarded.
     let (access, _) = tokens.bearer().await.unwrap();
     assert_eq!(access.expose_secret(), "new-access");
     let on_disk = file.load().unwrap().unwrap();

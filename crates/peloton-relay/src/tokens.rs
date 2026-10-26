@@ -21,7 +21,7 @@ use tokio::sync::Mutex;
 use tracing::Instrument as _;
 use tracing::instrument::WithSubscriber as _;
 
-use crate::store::{State, StateFile, StoreError};
+use crate::store::{FileId, Snapshot, State, StateFile, StoreError};
 
 /// Refresh this long before the access token expires.
 pub const DEFAULT_REFRESH_MARGIN: Duration = Duration::from_secs(60 * 60);
@@ -77,6 +77,22 @@ struct Ready {
     persist: Persist,
     /// Set after a transient refresh failure; no refresh before it allows.
     backoff: Option<Backoff>,
+    /// The state file version this state came from or was saved as.
+    file_id: Option<FileId>,
+    /// An external change was ignored because `state` is not saved yet (logged).
+    external_ignored: bool,
+}
+
+impl Ready {
+    fn new(state: State, file_id: FileId) -> Self {
+        Self {
+            state,
+            persist: Persist::Saved,
+            backoff: None,
+            file_id: Some(file_id),
+            external_ignored: false,
+        }
+    }
 }
 
 /// Whether the in-memory state is on disk.
@@ -94,6 +110,15 @@ enum LoadProblem {
     Missing,
     Corrupt,
     Unreadable(io::ErrorKind),
+}
+
+impl LoadProblem {
+    fn from_error(err: &StoreError) -> Self {
+        match err {
+            StoreError::Corrupt => Self::Corrupt,
+            StoreError::Io(io) => Self::Unreadable(io.kind()),
+        }
+    }
 }
 
 /// Exponential backoff between transient refresh failures.
@@ -137,14 +162,12 @@ impl Inner {
     }
 
     /// Applies a fresh read of the state file while not ready.
-    fn apply_loaded(&mut self, loaded: Result<Option<State>, StoreError>) {
-        let state = match loaded {
-            Ok(Some(state)) => state,
-            Ok(None) => return self.note_load_problem(LoadProblem::Missing),
-            Err(StoreError::Corrupt) => return self.note_load_problem(LoadProblem::Corrupt),
-            Err(StoreError::Io(err)) => {
-                return self.note_load_problem(LoadProblem::Unreadable(err.kind()));
-            }
+    fn apply_loaded(&mut self, loaded: Result<Snapshot, StoreError>) {
+        let (state, id) = match loaded {
+            Ok(Snapshot::Valid(state, id)) => (state, id),
+            Ok(Snapshot::Missing) => return self.note_load_problem(LoadProblem::Missing),
+            Ok(Snapshot::Corrupt(_)) => return self.note_load_problem(LoadProblem::Corrupt),
+            Err(err) => return self.note_load_problem(LoadProblem::from_error(&err)),
         };
         self.load_problem = None;
         if let Phase::Failed { dead_refresh } = &self.phase
@@ -157,11 +180,32 @@ impl Inner {
             event = "state_loaded",
             "loaded Peloton credential from the state file"
         );
-        self.phase = Phase::Ready(Ready {
-            state,
-            persist: Persist::Saved,
-            backoff: None,
-        });
+        self.phase = Phase::Ready(Ready::new(state, id));
+    }
+
+    /// Adopts a state file that another process replaced while ready.
+    fn apply_external(&mut self, loaded: Result<Snapshot, StoreError>) {
+        let Phase::Ready(ready) = &mut self.phase else {
+            return;
+        };
+        match loaded {
+            Ok(Snapshot::Valid(state, id)) => {
+                tracing::info!(
+                    event = "state_reloaded",
+                    "state file was replaced; using the new credential"
+                );
+                *ready = Ready::new(state, id);
+                self.load_problem = None;
+            }
+            Ok(Snapshot::Corrupt(id)) => {
+                // Keep the working credential; remember this version so it is not re-parsed.
+                ready.file_id = Some(id);
+                self.note_load_problem(LoadProblem::Corrupt);
+            }
+            // Deleted: the next save recreates it.
+            Ok(Snapshot::Missing) => {}
+            Err(err) => self.note_load_problem(LoadProblem::from_error(&err)),
+        }
     }
 
     fn note_load_problem(&mut self, problem: LoadProblem) {
@@ -276,7 +320,9 @@ where
 impl Shared {
     async fn bearer(&self) -> Result<(SecretString, PelotonId), NotAuthenticated> {
         let mut inner = self.inner.lock().await;
-        if !inner.is_ready() {
+        if inner.is_ready() {
+            self.check_external(&mut inner).await;
+        } else {
             self.reload(&mut inner).await;
         }
         let now = OffsetDateTime::now_utc();
@@ -305,13 +351,44 @@ impl Shared {
     /// Re-reads the state file, or retries a failed save of refreshed tokens.
     async fn reload(&self, inner: &mut Inner) {
         if let Phase::Ready(ready) = &mut inner.phase {
-            // Memory holds newer tokens than the file; never overwrite them with it.
+            // Memory holds newer tokens than the file (the old refresh token may
+            // already be rotated away): save them, never replace them with the file.
+            if !ready.external_ignored && self.file_changed(ready).await {
+                ready.external_ignored = true;
+                tracing::warn!(
+                    event = "state_external_change_ignored",
+                    "state file was replaced while refreshed tokens are unsaved; keeping the refreshed tokens"
+                );
+            }
             self.persist(ready).await;
             return;
         }
         let store = self.store.clone();
-        let loaded = blocking(move || store.load()).await.and_then(|r| r);
+        let loaded = blocking(move || store.snapshot()).await.and_then(|r| r);
         inner.apply_loaded(loaded);
+    }
+
+    /// While ready, picks up a state file replaced by another process (`seed`).
+    async fn check_external(&self, inner: &mut Inner) {
+        let Phase::Ready(ready) = &inner.phase else {
+            return;
+        };
+        if !self.file_changed(ready).await {
+            return;
+        }
+        let store = self.store.clone();
+        let loaded = blocking(move || store.snapshot()).await.and_then(|r| r);
+        inner.apply_external(loaded);
+    }
+
+    /// Whether the file on disk is not the version `ready` came from or saved.
+    async fn file_changed(&self, ready: &Ready) -> bool {
+        let store = self.store.clone();
+        match blocking(move || store.current_id()).await.and_then(|r| r) {
+            Ok(Some(id)) => ready.file_id != Some(id),
+            // Missing or unreadable: nothing to adopt.
+            Ok(None) | Err(_) => false,
+        }
     }
 
     /// Refreshes the credential unless a backoff is in effect.
@@ -351,8 +428,13 @@ impl Shared {
         }
         let store = self.store.clone();
         let state = ready.state.clone();
-        match blocking(move || store.save(&state)).await.and_then(|r| r) {
-            Ok(()) => {
+        match blocking(move || store.save_with_id(&state))
+            .await
+            .and_then(|r| r)
+        {
+            Ok(id) => {
+                ready.file_id = Some(id);
+                ready.external_ignored = false;
                 if ready.persist == Persist::Failing {
                     tracing::info!(
                         event = "state_save_recovered",
