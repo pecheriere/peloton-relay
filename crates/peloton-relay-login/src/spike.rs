@@ -6,10 +6,13 @@
 //!    rejected token stops the spike before anything else is sent.
 //! 2. Schema introspection, saved when the gateway allows it.
 //! 3. The three library reads (REST), saved.
-//! 4. Schedule: list, add at the first whole hour at least 13 days ahead, read
-//!    it, move it one hour, remove it, and check the list is as before.
-//! 5. Stack: read and print it, add the class, write the saved Stack back with
-//!    `ModifyStack`, and check the read-back order is identical.
+//! 4. Schedule: list, add at the first whole hour at least 13 days ahead,
+//!    prove the new item is listed, read it, move it one hour, remove it, and
+//!    check the list is as before. Later calls always send back the raw ids
+//!    Peloton returned, whether or not they decode as expected.
+//! 5. Stack: read and print it (refusing a partial list), add the class, write
+//!    the saved Stack back with `ModifyStack` using Peloton's own `joinToken`s,
+//!    and check the read-back order is identical.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -64,6 +67,76 @@ fragment TypeRef on __Type {
   ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } }
 }
 ";
+
+/// One GraphQL operation as the spike sends it.
+struct Op {
+    name: &'static str,
+    kind: OpKind,
+    document: &'static str,
+    /// The root field of `data` holding the answer.
+    field: &'static str,
+}
+
+const CHECK: Op = Op {
+    name: "CheckDoesClassExistInUserStack",
+    kind: OpKind::Query,
+    document: CHECK_CLASS_IN_STACK,
+    field: "checkDoesClassExistInUserStack",
+};
+const SCHEMA: Op = Op {
+    name: "IntrospectionQuery",
+    kind: OpKind::Query,
+    document: INTROSPECTION,
+    field: "__schema",
+};
+const LIST: Op = Op {
+    name: "YourScheduleItems",
+    kind: OpKind::Query,
+    document: YOUR_SCHEDULE_ITEMS,
+    field: "userScheduledItemsList",
+};
+const READ: Op = Op {
+    name: "ScheduledClass",
+    kind: OpKind::Query,
+    document: SCHEDULED_CLASS,
+    field: "scheduledClass",
+};
+const ADD: Op = Op {
+    name: "AddClassToSchedule",
+    kind: OpKind::Mutation,
+    document: ADD_CLASS_TO_SCHEDULE,
+    field: "addClassToSchedule",
+};
+const MOVE: Op = Op {
+    name: "RescheduleClass",
+    kind: OpKind::Mutation,
+    document: RESCHEDULE_CLASS,
+    field: "rescheduleClass",
+};
+const REMOVE: Op = Op {
+    name: "RemoveClassFromSchedule",
+    kind: OpKind::Mutation,
+    document: REMOVE_CLASS_FROM_SCHEDULE,
+    field: "removeClassFromSchedule",
+};
+const VIEW: Op = Op {
+    name: "ViewUserStack",
+    kind: OpKind::Query,
+    document: VIEW_USER_STACK,
+    field: "viewUserStack",
+};
+const STACK_ADD: Op = Op {
+    name: "AddClassToStack",
+    kind: OpKind::Mutation,
+    document: ADD_CLASS_TO_STACK,
+    field: "addClassToStack",
+};
+const MODIFY: Op = Op {
+    name: "ModifyStack",
+    kind: OpKind::Mutation,
+    document: MODIFY_STACK,
+    field: "modifyStack",
+};
 
 /// Why a GraphQL call did not yield data.
 #[derive(Debug, PartialEq, Eq)]
@@ -205,20 +278,21 @@ pub fn schedule_ids(list: &Value) -> BTreeSet<String> {
     out
 }
 
-/// Reads a schedule mutation's union result into the scheduled-class id.
+/// Reads a schedule mutation's union result into the raw scheduled-class id
+/// Peloton returned. The id is not decoded here: whatever Peloton issued is
+/// what later calls must send back.
 ///
 /// # Errors
 ///
 /// Returns Peloton's error code and message, or a shape problem.
-pub fn scheduled_result(value: &Value) -> Result<ScheduledClassId, String> {
+pub fn scheduled_result(value: &Value) -> Result<String, String> {
     let typename = value.get("__typename").and_then(Value::as_str);
     if typename == Some("ScheduledClass") {
         return value
             .get("id")
             .and_then(Value::as_str)
-            .ok_or("ScheduledClass without an id")?
-            .parse()
-            .map_err(|_| "ScheduledClass id does not decode as an event id".to_owned());
+            .map(str::to_owned)
+            .ok_or_else(|| "ScheduledClass without an id".to_owned());
     }
     let code = value.get("code").and_then(Value::as_str).unwrap_or("?");
     let message: String = value
@@ -232,6 +306,36 @@ pub fn scheduled_result(value: &Value) -> Result<ScheduledClassId, String> {
         "{}: {code}: {message}",
         typename.unwrap_or("unknown result")
     ))
+}
+
+/// Checks that the raw scheduled-class id `raw` decodes to `ride` at `start`.
+///
+/// # Errors
+///
+/// Says whether the id does not decode or names another ride or time.
+pub fn check_event(raw: &str, ride: &PelotonId, start: OffsetDateTime) -> Result<(), String> {
+    let id: ScheduledClassId = raw
+        .parse()
+        .map_err(|_| "Peloton's scheduled-class id does not decode as an event id".to_owned())?;
+    if id.ride_id() != ride {
+        return Err("the scheduled class names a different ride".to_owned());
+    }
+    if id.scheduled_start_time() != start {
+        return Err("the scheduled class has a different start time".to_owned());
+    }
+    Ok(())
+}
+
+/// Whether `list` holds the spike's item: the raw id itself, or any id that
+/// decodes to `ride` at `start`.
+#[must_use]
+pub fn list_contains(
+    list: &BTreeSet<String>,
+    raw: &str,
+    ride: &PelotonId,
+    start: OffsetDateTime,
+) -> bool {
+    list.contains(raw) || list.iter().any(|id| check_event(id, ride, start).is_ok())
 }
 
 /// One Stack entry, as the spike reads it.
@@ -249,18 +353,32 @@ pub struct StackItem {
 ///
 /// # Errors
 ///
-/// Returns a message when the shape is unexpected or an entry's class id
-/// cannot be turned into a ride id (nothing is ever silently dropped).
+/// Returns a message when the shape is unexpected, when `numClasses`
+/// disagrees with the list, or when an entry lacks a `playOrder` or a class
+/// id that can be turned into a ride id (nothing is ever silently dropped).
 pub fn stack_items(stack: &Value) -> Result<Vec<StackItem>, String> {
+    let count = stack.get("numClasses").and_then(Value::as_i64);
     let Some(list) = stack.pointer("/userStack/stackedClassList") else {
-        return match stack.get("numClasses").and_then(Value::as_i64) {
+        return match count {
             Some(0) => Ok(Vec::new()),
             _ => Err("Stack response without userStack.stackedClassList".to_owned()),
         };
     };
     let list = list.as_array().ok_or("stackedClassList is not a list")?;
+    if let Some(count) = count
+        && usize::try_from(count).ok() != Some(list.len())
+    {
+        return Err(format!(
+            "numClasses is {count} but the list holds {} entries",
+            list.len()
+        ));
+    }
     let mut items = Vec::with_capacity(list.len());
     for (index, entry) in list.iter().enumerate() {
+        let order = entry
+            .get("playOrder")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| format!("Stack entry {index} has no playOrder"))?;
         let class = entry
             .get("pelotonClass")
             .ok_or_else(|| format!("Stack entry {index} has no pelotonClass"))?;
@@ -278,7 +396,6 @@ pub fn stack_items(stack: &Value) -> Result<Vec<StackItem>, String> {
             .map_err(|_| {
                 format!("Stack entry {index}: classId is neither a ride id nor a class id")
             })?;
-        let order = entry.get("playOrder").and_then(Value::as_i64);
         items.push((
             order,
             StackItem {
@@ -299,42 +416,66 @@ pub fn stack_items(stack: &Value) -> Result<Vec<StackItem>, String> {
     Ok(items.into_iter().map(|(_, item)| item).collect())
 }
 
-/// The class ids that write `saved` back, proven equal to Peloton's own.
+/// The ids that write a saved Stack back, all issued by Peloton.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Restore {
+    /// Peloton's `joinToken` of each saved entry, in play order.
+    pub ids: Vec<String>,
+    /// Entries whose `joinToken` names the right ride but differs from the
+    /// local encoding (a finding worth keeping).
+    pub encoding_mismatches: Vec<String>,
+}
+
+/// Builds the restore list from Peloton's own `joinToken`s.
 ///
 /// # Errors
 ///
-/// Refuses (naming the entry) when Peloton's `joinToken` for an entry is
-/// missing or differs from the local encoding, so a restore never sends an
-/// id Peloton did not issue.
-pub fn restore_ids(saved: &[StackItem]) -> Result<Vec<String>, String> {
-    saved
-        .iter()
-        .enumerate()
-        .map(|(index, item)| {
-            let local = OnDemandClassId::from_ride(&item.ride);
-            match item.join_token.as_deref() {
-                Some(token) if token == local.as_str() => Ok(local.as_str().to_owned()),
-                Some(token) => {
-                    let same_ride = token
-                        .parse::<OnDemandClassId>()
-                        .is_ok_and(|t| t.ride_id() == &item.ride);
-                    Err(format!(
-                        "Stack entry {index} ({}): Peloton's joinToken differs from the local encoding ({})",
-                        item.ride,
-                        if same_ride {
-                            "same ride, different bytes"
-                        } else {
-                            "not an on-demand class id for this ride"
-                        }
-                    ))
-                }
-                None => Err(format!(
-                    "Stack entry {index} ({}): Peloton returned no joinToken",
-                    item.ride
-                )),
-            }
-        })
-        .collect()
+/// Refuses (naming the entry) when a `joinToken` is missing or is not an
+/// on-demand class id for that entry's ride, so a restore never sends an id
+/// Peloton did not issue for that class.
+pub fn restore_ids(saved: &[StackItem]) -> Result<Restore, String> {
+    let mut restore = Restore {
+        ids: Vec::with_capacity(saved.len()),
+        encoding_mismatches: Vec::new(),
+    };
+    for (index, item) in saved.iter().enumerate() {
+        let token = item.join_token.as_deref().ok_or_else(|| {
+            format!(
+                "Stack entry {} ({}): Peloton returned no joinToken",
+                index + 1,
+                item.ride
+            )
+        })?;
+        let same_ride = token
+            .parse::<OnDemandClassId>()
+            .is_ok_and(|t| t.ride_id() == &item.ride);
+        if !same_ride {
+            return Err(format!(
+                "Stack entry {} ({}): Peloton's joinToken is not an on-demand class id for this ride",
+                index + 1,
+                item.ride
+            ));
+        }
+        if token != OnDemandClassId::from_ride(&item.ride).as_str() {
+            restore
+                .encoding_mismatches
+                .push(format!("entry {} ({})", index + 1, item.ride));
+        }
+        restore.ids.push(token.to_owned());
+    }
+    Ok(restore)
+}
+
+/// The JSON type of `value`, for describing answers without echoing them.
+fn json_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "list",
+        Value::Object(_) => "object",
+    }
 }
 
 /// The outcome of one spike step.
@@ -403,37 +544,37 @@ struct Spike<'a> {
 }
 
 impl Spike<'_> {
-    /// Sends one operation, saves the raw answer as `file` and returns
-    /// `data.<field>`.
+    /// Sends `op`, saves the raw answer as `file` and returns `data.<field>`.
+    /// The answer is classified before it is saved, so a failed save (its
+    /// own FAIL) never hides what Peloton did.
     fn call(
         &self,
-        op: &str,
-        kind: OpKind,
-        document: &str,
+        steps: &mut Steps,
+        op: &Op,
         variables: &Value,
-        field: &str,
         file: &str,
     ) -> Result<Value, CallFailure> {
         self.session.pause();
         let reply = self
             .session
-            .graphql(self.access, op, kind, document, variables)
+            .graphql(self.access, op.name, op.kind, op.document, variables)
             .map_err(CallFailure::Other)?;
-        save(self.dir, file, &reply.body).map_err(CallFailure::Other)?;
-        root_field(&reply, field)
+        let result = root_field(&reply, op.field);
+        if let Err(e) = save(self.dir, file, &reply.body) {
+            steps.record(&format!("save {file}"), Status::Fail, e);
+        }
+        result
     }
 
     /// Like [`Spike::call`], with failures as plain messages.
     fn call_msg(
         &self,
-        op: &str,
-        kind: OpKind,
-        document: &str,
+        steps: &mut Steps,
+        op: &Op,
         variables: &Value,
-        field: &str,
         file: &str,
     ) -> Result<Value, String> {
-        self.call(op, kind, document, variables, field, file)
+        self.call(steps, op, variables, file)
             .map_err(|failure| match failure {
                 CallFailure::Auth => "the gateway rejected the token".to_owned(),
                 CallFailure::Other(message) => message,
@@ -451,30 +592,21 @@ impl Spike<'_> {
 
     fn list_schedule(
         &self,
-        start: &str,
-        end: &str,
+        steps: &mut Steps,
+        window: &Window,
         file: &str,
     ) -> Result<BTreeSet<String>, String> {
         self.call_msg(
-            "YourScheduleItems",
-            OpKind::Query,
-            YOUR_SCHEDULE_ITEMS,
-            &json!({ "startTime": start, "endTime": end }),
-            "userScheduledItemsList",
+            steps,
+            &LIST,
+            &json!({ "startTime": window.start, "endTime": window.end }),
             file,
         )
         .map(|list| schedule_ids(&list))
     }
 
-    fn view_stack(&self, file: &str) -> Result<Vec<StackItem>, String> {
-        let stack = self.call_msg(
-            "ViewUserStack",
-            OpKind::Query,
-            VIEW_USER_STACK,
-            &json!({}),
-            "viewUserStack",
-            file,
-        )?;
+    fn view_stack(&self, steps: &mut Steps, file: &str) -> Result<Vec<StackItem>, String> {
+        let stack = self.call_msg(steps, &VIEW, &json!({}), file)?;
         stack_items(&stack)
     }
 }
@@ -540,16 +672,19 @@ pub fn run(session: &Session, dir: &Path, class: &PelotonId) -> Result<(), Strin
 fn check_class(spike: &Spike<'_>, steps: &mut Steps) -> Result<Option<bool>, String> {
     let step = "check class in Stack (token + id encoding)";
     match spike.call(
-        "CheckDoesClassExistInUserStack",
-        OpKind::Query,
-        CHECK_CLASS_IN_STACK,
+        steps,
+        &CHECK,
         &json!({ "pelotonClassId": spike.class.as_str() }),
-        "checkDoesClassExistInUserStack",
         "check_class_in_stack.json",
     ) {
         Ok(value) => {
-            steps.record(step, Status::Pass, format!("Peloton answered {value}"));
-            Ok(value.as_bool())
+            let answer = value.as_bool();
+            let detail = answer.map_or_else(
+                || format!("Peloton answered a {} (not a boolean)", json_type(&value)),
+                |b| format!("Peloton answered {b}"),
+            );
+            steps.record(step, Status::Pass, detail);
+            Ok(answer)
         }
         Err(CallFailure::Auth) => {
             steps.record(step, Status::Fail, "GraphQL gateway rejected the token");
@@ -565,14 +700,7 @@ fn check_class(spike: &Spike<'_>, steps: &mut Steps) -> Result<Option<bool>, Str
 /// Step 2.
 fn introspect(spike: &Spike<'_>, steps: &mut Steps) {
     let step = "schema introspection";
-    match spike.call(
-        "IntrospectionQuery",
-        OpKind::Query,
-        INTROSPECTION,
-        &json!({}),
-        "__schema",
-        "graphql_schema.json",
-    ) {
+    match spike.call(steps, &SCHEMA, &json!({}), "graphql_schema.json") {
         Ok(_) => steps.record(step, Status::Pass, "saved graphql_schema.json"),
         Err(CallFailure::Auth) => steps.record(step, Status::Skip, "gateway refused introspection"),
         Err(CallFailure::Other(message)) => steps.record(
@@ -583,21 +711,50 @@ fn introspect(spike: &Spike<'_>, steps: &mut Steps) {
     }
 }
 
+/// The schedule window the spike lists, as sent upstream.
+struct Window {
+    start: String,
+    end: String,
+}
+
+/// Where the spike's scheduled item should be, for checks and hand cleanup.
+struct Plan<'a> {
+    ride: &'a PelotonId,
+    start: OffsetDateTime,
+    moved: OffsetDateTime,
+}
+
+impl Plan<'_> {
+    fn describe(&self) -> String {
+        format!("ride {} at {} or {} UTC", self.ride, self.start, self.moved)
+    }
+}
+
 /// Step 4.
 fn schedule_round_trip(spike: &Spike<'_>, steps: &mut Steps) -> Result<(), String> {
     let now = OffsetDateTime::now_utc();
-    let window_start = iso(now)?;
-    let window_end = iso(now + SCHEDULE_WINDOW)?;
+    let window = Window {
+        start: iso(now)?,
+        end: iso(now + SCHEDULE_WINDOW)?,
+    };
+    let start = spike_start(now)?;
+    let plan = Plan {
+        ride: spike.class.ride_id(),
+        start,
+        moved: start + Duration::HOUR,
+    };
 
-    let before = spike.list_schedule(&window_start, &window_end, "schedule_before.json");
-    let Ok(before) = before.map_err(|e| steps.record("schedule list (before)", Status::Fail, e))
-    else {
-        steps.record(
-            "schedule writes",
-            Status::Skip,
-            "cannot verify cleanup without the list",
-        );
-        return Ok(());
+    let before = match spike.list_schedule(steps, &window, "schedule_before.json") {
+        Ok(before) => before,
+        Err(e) => {
+            steps.record("schedule list (before)", Status::Fail, e);
+            steps.record(
+                "schedule writes",
+                Status::Skip,
+                "cannot verify cleanup without the list",
+            );
+            return Ok(());
+        }
     };
     steps.record(
         "schedule list (before)",
@@ -605,75 +762,133 @@ fn schedule_round_trip(spike: &Spike<'_>, steps: &mut Steps) -> Result<(), Strin
         format!("{} item(s) in the next 14 days", before.len()),
     );
 
-    let left_over = schedule_writes(spike, steps, spike_start(now)?)?;
+    let outcome = schedule_writes(spike, steps, &window, &plan)?;
 
-    let after = spike
-        .list_schedule(&window_start, &window_end, "schedule_after.json")
-        .and_then(|after| {
-            if after == before {
-                Ok("the schedule is back to its pre-spike items".to_owned())
-            } else {
-                for extra in after.difference(&before) {
-                    print_left_over(extra);
-                }
-                Err(format!(
+    match spike.list_schedule(steps, &window, "schedule_after.json") {
+        Ok(after) if after == before && outcome.seen_in_list => steps.record(
+            "schedule list (after)",
+            Status::Pass,
+            "the schedule is back to its pre-spike items",
+        ),
+        Ok(after) if after == before => steps.record(
+            "schedule list (after)",
+            Status::Fail,
+            "UNPROVEN: equal to before, but the spike's item never showed up in the list, so the comparison proves nothing",
+        ),
+        Ok(after) => {
+            for extra in after.difference(&before) {
+                print_left_over(extra, &plan);
+            }
+            steps.record(
+                "schedule list (after)",
+                Status::Fail,
+                format!(
                     "the schedule differs from before: {} added, {} missing",
                     after.difference(&before).count(),
                     before.difference(&after).count()
-                ))
+                ),
+            );
+        }
+        Err(e) => {
+            steps.record("schedule list (after)", Status::Fail, e);
+            if outcome.wrote {
+                eprintln!();
+                eprintln!(
+                    "!!! Could not re-read the schedule. Check it by hand for {}",
+                    plan.describe()
+                );
             }
-        });
-    steps.result("schedule list (after)", after);
+        }
+    }
 
-    if let Some(id) = left_over {
-        print_left_over(id.as_str());
+    if let Some(raw) = outcome.left_over {
+        print_left_over(&raw, &plan);
     }
     Ok(())
 }
 
-/// Adds the class at `start`, reads it, moves it one hour and removes it.
-/// Returns the scheduled class still on the account if removal failed.
+/// What the schedule writes left behind.
+struct WriteOutcome {
+    /// Peloton reported a scheduled class (so the account was changed).
+    wrote: bool,
+    /// The list showed the spike's item after the add.
+    seen_in_list: bool,
+    /// The raw id still on the account when removal did not succeed.
+    left_over: Option<String>,
+}
+
+/// Adds the class, proves it shows up in the list, reads it, moves it one
+/// hour and removes it, always sending back the raw ids Peloton returned.
 fn schedule_writes(
     spike: &Spike<'_>,
     steps: &mut Steps,
-    start: OffsetDateTime,
-) -> Result<Option<ScheduledClassId>, String> {
-    let moved = start + Duration::HOUR;
-    let start_iso = iso(start)?;
-    let moved_iso = iso(moved)?;
-    let ride = spike.class.ride_id();
-
+    window: &Window,
+    plan: &Plan<'_>,
+) -> Result<WriteOutcome, String> {
+    let start_iso = iso(plan.start)?;
     let added = spike
         .call_msg(
-            "AddClassToSchedule",
-            OpKind::Mutation,
-            ADD_CLASS_TO_SCHEDULE,
+            steps,
+            &ADD,
             &json!({ "id": spike.class.as_str(), "startTime": start_iso }),
-            "addClassToSchedule",
             "schedule_add.json",
         )
         .and_then(|v| scheduled_result(&v));
-    let Some(first) = added.as_ref().ok().cloned() else {
-        steps.result("schedule add", added.map(|_| String::new()));
-        steps.record(
-            "schedule read, move and remove",
-            Status::Skip,
-            "nothing was scheduled",
-        );
-        return Ok(None);
+    let first = match added {
+        Ok(first) => first,
+        Err(e) => {
+            steps.record("schedule add", Status::Fail, e);
+            steps.record(
+                "schedule read, move and remove",
+                Status::Skip,
+                "Peloton did not report a scheduled class",
+            );
+            eprintln!("note: if the add reached Peloton anyway, the after-list check will show it");
+            return Ok(WriteOutcome {
+                wrote: false,
+                seen_in_list: false,
+                left_over: None,
+            });
+        }
     };
-    steps.result(
+    steps.record(
         "schedule add",
-        expect_event(&first, ride, start).map(|()| format!("scheduled at {start_iso}")),
+        Status::Pass,
+        format!("Peloton scheduled it for {start_iso}"),
     );
+    steps.result(
+        "schedule add id decodes to the class and time",
+        check_event(&first, plan.ride, plan.start).map(|()| "it does".to_owned()),
+    );
+
+    let seen_in_list = match spike.list_schedule(steps, window, "schedule_during.json") {
+        Ok(list) if list_contains(&list, &first, plan.ride, plan.start) => {
+            steps.record(
+                "schedule list (with spike item)",
+                Status::Pass,
+                "the new item is listed",
+            );
+            true
+        }
+        Ok(_) => {
+            steps.record(
+                "schedule list (with spike item)",
+                Status::Fail,
+                "the new item is not in the list",
+            );
+            false
+        }
+        Err(e) => {
+            steps.record("schedule list (with spike item)", Status::Fail, e);
+            false
+        }
+    };
 
     let read = spike
         .call_msg(
-            "ScheduledClass",
-            OpKind::Query,
-            SCHEDULED_CLASS,
-            &json!({ "id": first.as_str() }),
-            "scheduledClass",
+            steps,
+            &READ,
+            &json!({ "id": first }),
             "scheduled_class.json",
         )
         .and_then(|v| {
@@ -685,61 +900,69 @@ fn schedule_writes(
         });
     steps.result("schedule read", read);
 
-    let rescheduled = spike
-        .call_msg(
-            "RescheduleClass",
-            OpKind::Mutation,
-            RESCHEDULE_CLASS,
-            &json!({ "id": first.as_str(), "startTime": moved_iso }),
-            "rescheduleClass",
-            "schedule_reschedule.json",
-        )
-        .and_then(|v| scheduled_result(&v));
-    let current = rescheduled.as_ref().map_or(first.clone(), Clone::clone);
-    steps.result(
-        "schedule move (+1 h)",
-        rescheduled.and_then(|new_id| {
-            expect_event(&new_id, ride, moved)?;
-            Ok(if new_id == first {
-                "moved; Peloton kept the same id".to_owned()
-            } else {
-                "moved; Peloton issued a new id".to_owned()
-            })
-        }),
-    );
+    let current = schedule_move(spike, steps, &first, plan)?;
 
     let removed = spike
         .call_msg(
-            "RemoveClassFromSchedule",
-            OpKind::Mutation,
-            REMOVE_CLASS_FROM_SCHEDULE,
-            &json!({ "id": current.as_str() }),
-            "removeClassFromSchedule",
+            steps,
+            &REMOVE,
+            &json!({ "id": current }),
             "schedule_remove.json",
         )
         .and_then(|v| scheduled_result(&v).map(|_| "removed".to_owned()));
     let left_over = removed.is_err().then_some(current);
     steps.result("schedule remove", removed);
-    Ok(left_over)
+    Ok(WriteOutcome {
+        wrote: true,
+        seen_in_list,
+        left_over,
+    })
 }
 
-fn expect_event(
-    id: &ScheduledClassId,
-    ride: &PelotonId,
-    start: OffsetDateTime,
-) -> Result<(), String> {
-    if id.ride_id() != ride {
-        return Err("the scheduled class names a different ride".to_owned());
+/// Moves the scheduled class `first` one hour; returns the raw id that now
+/// names it (Peloton's new one, or `first` if the move was not reported).
+fn schedule_move(
+    spike: &Spike<'_>,
+    steps: &mut Steps,
+    first: &str,
+    plan: &Plan<'_>,
+) -> Result<String, String> {
+    let moved = spike
+        .call_msg(
+            steps,
+            &MOVE,
+            &json!({ "id": first, "startTime": iso(plan.moved)? }),
+            "schedule_reschedule.json",
+        )
+        .and_then(|v| scheduled_result(&v));
+    match moved {
+        Ok(new_id) => {
+            let same = if new_id == first {
+                "Peloton kept the same id"
+            } else {
+                "Peloton issued a new id"
+            };
+            steps.record(
+                "schedule move (+1 h)",
+                Status::Pass,
+                format!("moved; {same}"),
+            );
+            steps.result(
+                "schedule move id decodes to the class and new time",
+                check_event(&new_id, plan.ride, plan.moved).map(|()| "it does".to_owned()),
+            );
+            Ok(new_id)
+        }
+        Err(e) => {
+            steps.record("schedule move (+1 h)", Status::Fail, e);
+            Ok(first.to_owned())
+        }
     }
-    if id.scheduled_start_time() != start {
-        return Err("the scheduled class has a different start time".to_owned());
-    }
-    Ok(())
 }
 
-fn print_left_over(id: &str) {
-    let what = id.parse::<ScheduledClassId>().map_or_else(
-        |_| "an item that does not decode as a scheduled class".to_owned(),
+fn print_left_over(raw: &str, plan: &Plan<'_>) {
+    let what = raw.parse::<ScheduledClassId>().map_or_else(
+        |_| plan.describe(),
         |e| format!("ride {} at {} UTC", e.ride_id(), e.scheduled_start_time()),
     );
     eprintln!();
@@ -748,14 +971,14 @@ fn print_left_over(id: &str) {
 
 /// Step 5.
 fn stack_round_trip(spike: &Spike<'_>, steps: &mut Steps, in_stack: Option<bool>) {
-    let saved = match spike.view_stack("stack_before.json") {
+    let saved = match spike.view_stack(steps, "stack_before.json") {
         Ok(saved) => saved,
         Err(e) => {
             steps.record("Stack read (before)", Status::Fail, e);
             steps.record(
                 "Stack writes",
                 Status::Skip,
-                "the current Stack could not be saved",
+                "the current Stack could not be read in full",
             );
             return;
         }
@@ -777,21 +1000,32 @@ fn stack_round_trip(spike: &Spike<'_>, steps: &mut Steps, in_stack: Option<bool>
     let restore = match restore_ids(&saved) {
         Ok(restore) => restore,
         Err(e) => {
-            steps.record("Stack encoding matches Peloton's", Status::Fail, e);
+            steps.record("Stack restore ids", Status::Fail, e);
             steps.record(
                 "Stack writes",
                 Status::Skip,
-                "not writing ids Peloton did not issue",
+                "not writing ids Peloton did not issue for these classes",
             );
             return;
         }
     };
     if !saved.is_empty() {
-        steps.record(
-            "Stack encoding matches Peloton's",
-            Status::Pass,
-            "every joinToken equals the local encoding",
-        );
+        if restore.encoding_mismatches.is_empty() {
+            steps.record(
+                "Stack local encoding",
+                Status::Pass,
+                "every joinToken equals the local encoding",
+            );
+        } else {
+            steps.record(
+                "Stack local encoding",
+                Status::Fail,
+                format!(
+                    "local encoding differs from Peloton's joinToken for {}; restoring with Peloton's",
+                    restore.encoding_mismatches.join(", ")
+                ),
+            );
+        }
     }
 
     let already = saved.iter().any(|item| &item.ride == spike.class.ride_id());
@@ -811,27 +1045,27 @@ fn stack_round_trip(spike: &Spike<'_>, steps: &mut Steps, in_stack: Option<bool>
 
     let modified = spike
         .call_msg(
-            "ModifyStack",
-            OpKind::Mutation,
-            MODIFY_STACK,
-            &json!({ "input": { "pelotonClassIdList": restore } }),
-            "modifyStack",
+            steps,
+            &MODIFY,
+            &json!({ "input": { "pelotonClassIdList": restore.ids } }),
             "stack_modify.json",
         )
         .map(|_| "wrote the saved Stack back".to_owned());
     ok &= steps.result("Stack restore", modified);
 
-    let verified = spike.view_stack("stack_after.json").and_then(|after| {
-        if after
-            .iter()
-            .map(|i| &i.ride)
-            .eq(saved.iter().map(|i| &i.ride))
-        {
-            Ok("the Stack matches the saved order".to_owned())
-        } else {
-            Err("the Stack differs from the saved one".to_owned())
-        }
-    });
+    let verified = spike
+        .view_stack(steps, "stack_after.json")
+        .and_then(|after| {
+            if after
+                .iter()
+                .map(|i| &i.ride)
+                .eq(saved.iter().map(|i| &i.ride))
+            {
+                Ok("the Stack matches the saved order".to_owned())
+            } else {
+                Err("the Stack differs from the saved one".to_owned())
+            }
+        });
     ok &= steps.result("Stack read (after)", verified);
 
     if !ok {
@@ -844,11 +1078,9 @@ fn stack_add(spike: &Spike<'_>, steps: &mut Steps, saved_len: usize) -> bool {
     let ride = spike.class.ride_id();
     let added = spike
         .call_msg(
-            "AddClassToStack",
-            OpKind::Mutation,
-            ADD_CLASS_TO_STACK,
+            steps,
+            &STACK_ADD,
             &json!({ "input": { "pelotonClassId": spike.class.as_str() } }),
-            "addClassToStack",
             "stack_add.json",
         )
         .and_then(|v| stack_items(&v))
@@ -879,8 +1111,8 @@ mod tests {
     use time::macros::datetime;
 
     use super::{
-        CallFailure, StackItem, restore_ids, root_field, schedule_ids, scheduled_result,
-        spike_start, stack_items,
+        CallFailure, Restore, StackItem, check_event, json_type, list_contains, restore_ids,
+        root_field, schedule_ids, scheduled_result, spike_start, stack_items,
     };
     use crate::session::GraphqlReply;
     use peloton::ids::{OnDemandClassId, PelotonId};
@@ -984,18 +1216,45 @@ mod tests {
     }
 
     #[test]
-    fn scheduled_result_reads_class_or_error() {
+    fn scheduled_result_keeps_the_raw_id_whatever_it_is() {
         let id = event(RIDE, 1_700_000_000);
         let ok = json!({"__typename": "ScheduledClass", "id": id});
-        assert_eq!(scheduled_result(&ok).expect("id").ride_id(), &ride(RIDE));
+        assert_eq!(scheduled_result(&ok), Ok(id));
+        // An id the spike cannot decode is still Peloton's, and must be kept.
+        let odd = json!({"__typename": "ScheduledClass", "id": "opaque"});
+        assert_eq!(scheduled_result(&odd), Ok("opaque".to_owned()));
         let err =
             json!({"__typename": "CannotScheduleClassError", "code": "X", "message": "too far"});
         assert_eq!(
             scheduled_result(&err),
             Err("CannotScheduleClassError: X: too far".to_owned())
         );
-        let bad = json!({"__typename": "ScheduledClass", "id": "nope"});
-        assert!(scheduled_result(&bad).is_err());
+        assert!(scheduled_result(&json!({"__typename": "ScheduledClass"})).is_err());
+    }
+
+    #[test]
+    fn check_event_compares_ride_and_time() {
+        let start = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
+        let id = event(RIDE, 1_700_000_000);
+        assert_eq!(check_event(&id, &ride(RIDE), start), Ok(()));
+        assert!(check_event(&id, &ride(OTHER), start).is_err());
+        assert!(check_event(&id, &ride(RIDE), start + time::Duration::HOUR).is_err());
+        assert!(check_event("opaque", &ride(RIDE), start).is_err());
+    }
+
+    #[test]
+    fn list_contains_matches_raw_or_decoded_ids() {
+        let start = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
+        let ours = event(RIDE, 1_700_000_000);
+        let list: std::collections::BTreeSet<String> =
+            ["opaque".to_owned(), ours.clone()].into_iter().collect();
+        assert!(list_contains(&list, "opaque", &ride(OTHER), start));
+        assert!(list_contains(&list, "different-raw", &ride(RIDE), start));
+        let others: std::collections::BTreeSet<String> =
+            [event(OTHER, 1_700_000_000), event(RIDE, 1_700_003_600)]
+                .into_iter()
+                .collect();
+        assert!(!list_contains(&others, &ours, &ride(RIDE), start));
     }
 
     #[test]
@@ -1031,7 +1290,27 @@ mod tests {
     }
 
     #[test]
-    fn restore_ids_require_peloton_issued_tokens() {
+    fn stack_items_refuses_partial_lists() {
+        let stack = json!({"numClasses": 2, "userStack": {"stackedClassList": [
+            {"playOrder": 1, "pelotonClass": {"classId": RIDE, "title": "A"}},
+        ]}});
+        let err = stack_items(&stack).expect_err("partial list");
+        assert!(err.contains("numClasses is 2"));
+    }
+
+    #[test]
+    fn stack_items_refuses_missing_play_order() {
+        let stack = json!({"userStack": {"stackedClassList": [
+            {"playOrder": 1, "pelotonClass": {"classId": RIDE, "title": "A"}},
+            {"pelotonClass": {"classId": OTHER, "title": "B"}},
+        ]}});
+        let err = stack_items(&stack).expect_err("no playOrder");
+        assert!(err.contains("playOrder"));
+    }
+
+    #[test]
+    fn restore_ids_use_peloton_tokens_for_the_same_ride() {
+        use base64::Engine as _;
         let local = OnDemandClassId::from_ride(&ride(RIDE));
         let item = |token: Option<&str>| StackItem {
             ride: ride(RIDE),
@@ -1040,11 +1319,36 @@ mod tests {
         };
         assert_eq!(
             restore_ids(&[item(Some(local.as_str()))]),
-            Ok(vec![local.as_str().to_owned()])
+            Ok(Restore {
+                ids: vec![local.as_str().to_owned()],
+                encoding_mismatches: Vec::new(),
+            })
         );
+        // Same ride, different bytes: restore with Peloton's verbatim, and say so.
+        let compact = base64::engine::general_purpose::STANDARD.encode(format!(
+            r#"{{"home_peloton_id":null,"ride_id":"{RIDE}","studio_peloton_id":null,"type":"on_demand"}}"#
+        ));
+        let restore = restore_ids(&[item(Some(&compact))]).expect("same ride");
+        assert_eq!(restore.ids, vec![compact]);
+        assert_eq!(restore.encoding_mismatches.len(), 1);
+        // Missing, other ride, or not a class id: refuse.
         assert!(restore_ids(&[item(None)]).is_err());
         let other = OnDemandClassId::from_ride(&ride(OTHER));
         assert!(restore_ids(&[item(Some(other.as_str()))]).is_err());
-        assert_eq!(restore_ids(&[]), Ok(Vec::new()));
+        assert!(restore_ids(&[item(Some("opaque"))]).is_err());
+        assert_eq!(
+            restore_ids(&[]),
+            Ok(Restore {
+                ids: Vec::new(),
+                encoding_mismatches: Vec::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn json_type_names_without_echoing() {
+        assert_eq!(json_type(&json!({"secret": "x"})), "object");
+        assert_eq!(json_type(&json!(true)), "boolean");
+        assert_eq!(json_type(&json!(null)), "null");
     }
 }
