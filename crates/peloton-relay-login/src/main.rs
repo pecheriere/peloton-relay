@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use peloton_relay_login::output::write_tokens;
+use peloton_relay_login::output::TokenOutput;
 use peloton_relay_login::session::Session;
 use peloton_relay_login::{capture, check, scrub};
 
@@ -62,11 +62,11 @@ fn run(command: Command) -> Result<(), String> {
 }
 
 fn login() -> Result<(), String> {
-    if stdout().is_terminal() {
-        return Err("stdout is a terminal; pipe or redirect it to receive the tokens".to_owned());
-    }
+    let stdout = stdout();
+    let is_terminal = stdout.is_terminal();
+    let output = TokenOutput::new(stdout, is_terminal).map_err(|e| e.to_string())?;
     let tokens = Session::new()?.login()?;
-    write_tokens(&tokens, stdout(), false).map_err(|e| e.to_string())?;
+    output.write(&tokens).map_err(|e| e.to_string())?;
     eprintln!("Login succeeded.");
     Ok(())
 }

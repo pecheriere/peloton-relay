@@ -18,22 +18,37 @@ pub enum OutputError {
     Write(#[from] std::io::Error),
 }
 
-/// Writes `set` as one line of JSON to `out`.
+/// Where the token set goes: anything but a terminal.
 ///
-/// # Errors
-///
-/// Returns [`OutputError::RefusingTerminal`] when `out_is_terminal` is set, and
-/// other variants when serializing or writing fails.
-pub fn write_tokens(
-    set: &TokenSet,
-    mut out: impl Write,
-    out_is_terminal: bool,
-) -> Result<(), OutputError> {
-    if out_is_terminal {
-        return Err(OutputError::RefusingTerminal);
+/// Created before signing in, so a terminal is refused before any tokens
+/// exist rather than after the user has logged in.
+#[derive(Debug)]
+pub struct TokenOutput<W> {
+    out: W,
+}
+
+impl<W: Write> TokenOutput<W> {
+    /// Accepts `out` unless `out_is_terminal`.
+    ///
+    /// # Errors
+    ///
+    /// [`OutputError::RefusingTerminal`] when `out_is_terminal` is set.
+    pub fn new(out: W, out_is_terminal: bool) -> Result<Self, OutputError> {
+        if out_is_terminal {
+            return Err(OutputError::RefusingTerminal);
+        }
+        Ok(Self { out })
     }
-    serde_json::to_writer(&mut out, set)?;
-    out.write_all(b"\n")?;
-    out.flush()?;
-    Ok(())
+
+    /// Writes `set` as one line of JSON and flushes.
+    ///
+    /// # Errors
+    ///
+    /// When serializing or writing fails.
+    pub fn write(mut self, set: &TokenSet) -> Result<(), OutputError> {
+        serde_json::to_writer(&mut self.out, set)?;
+        self.out.write_all(b"\n")?;
+        self.out.flush()?;
+        Ok(())
+    }
 }

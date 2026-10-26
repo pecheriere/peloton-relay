@@ -1,5 +1,5 @@
 use peloton::oauth::TokenSet;
-use peloton_relay_login::output::{OutputError, write_tokens};
+use peloton_relay_login::output::{OutputError, TokenOutput};
 use secrecy::{ExposeSecret, SecretString};
 use time::macros::datetime;
 
@@ -12,10 +12,11 @@ fn sample() -> TokenSet {
 }
 
 #[test]
-fn refuses_to_write_to_terminal() {
+fn refuses_a_terminal_before_any_tokens_exist() {
     let mut buf = Vec::new();
-    let err = write_tokens(&sample(), &mut buf, true).unwrap_err();
+    let err = TokenOutput::new(&mut buf, true).unwrap_err();
     assert!(matches!(err, OutputError::RefusingTerminal));
+    assert!(err.to_string().contains("pipe or redirect"));
     assert!(buf.is_empty(), "nothing may be written to a terminal");
 }
 
@@ -23,7 +24,11 @@ fn refuses_to_write_to_terminal() {
 fn writes_json_round_trip() {
     let set = sample();
     let mut buf = Vec::new();
-    write_tokens(&set, &mut buf, false).unwrap();
+    TokenOutput::new(&mut buf, false)
+        .unwrap()
+        .write(&set)
+        .unwrap();
+    assert!(buf.ends_with(b"\n"));
     let parsed: TokenSet = serde_json::from_slice(&buf).unwrap();
     assert_eq!(
         parsed.access_token.expose_secret(),
