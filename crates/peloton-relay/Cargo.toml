@@ -10,12 +10,21 @@ publish.workspace = true
 [dependencies]
 clap.workspace = true
 peloton = { path = "../peloton", version = "0.1.0" }
+secrecy.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 time.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing.workspace = true
 utoipa.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
+reqwest.workspace = true
+tempfile.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+wiremock.workspace = true
 
 [lints]
 workspace = true
