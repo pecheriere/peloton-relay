@@ -1,4 +1,4 @@
-//! The read-only subset of the Peloton API the relay talks to.
+//! The subset of the Peloton API the relay talks to.
 
 use crate::ids::PelotonId;
 
@@ -36,4 +36,25 @@ pub fn performance_graph(id: &PelotonId) -> String {
 #[must_use]
 pub fn ride_details(id: &PelotonId) -> String {
     format!("/ride/{id}/details")
+}
+
+/// Peloton's GraphQL gateway (schedule and Stack).
+pub const GRAPHQL_URL: &str = "https://gql-graphql-gateway.prod.k8s.onepeloton.com/graphql";
+
+/// Path of the on-demand class library search.
+#[must_use]
+pub fn library_archived() -> String {
+    "/v2/ride/archived".to_owned()
+}
+
+/// Path of the library's filter values for a browse category.
+#[must_use]
+pub fn ride_filters() -> String {
+    "/ride/filters".to_owned()
+}
+
+/// Path of the library's browse categories.
+#[must_use]
+pub fn browse_categories() -> String {
+    "/browse_categories".to_owned()
 }

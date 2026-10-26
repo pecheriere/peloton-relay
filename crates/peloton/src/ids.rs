@@ -4,6 +4,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize};
+use time::OffsetDateTime;
 
 const ID_LEN: usize = 32;
 
@@ -41,5 +42,170 @@ impl<'de> Deserialize<'de> for PelotonId {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = String::deserialize(deserializer)?;
         raw.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+/// Longest base64 class id accepted; real ids are well under 300 characters.
+const MAX_CLASS_ID_LEN: usize = 512;
+
+/// The string is not a valid Peloton class id of the expected kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("invalid Peloton class id")]
+pub struct ParseClassIdError;
+
+/// Decodes a standard, padded base64 string holding a JSON object of type `T`.
+fn decode_class_id<T: serde::de::DeserializeOwned>(s: &str) -> Result<T, ParseClassIdError> {
+    use base64::Engine as _;
+
+    if s.is_empty() || s.len() > MAX_CLASS_ID_LEN {
+        return Err(ParseClassIdError);
+    }
+    let json = base64::engine::general_purpose::STANDARD
+        .decode(s)
+        .map_err(|_| ParseClassIdError)?;
+    serde_json::from_slice(&json).map_err(|_| ParseClassIdError)
+}
+
+/// Peloton's id for an on-demand class, as the GraphQL API expects it:
+/// standard base64 of a JSON object naming the ride.
+///
+/// Encoding produces exactly the bytes Peloton's web app sends,
+/// `{"home_peloton_id": null, "ride_id": "<hex>", "studio_peloton_id": null, "type": "on_demand"}`;
+/// parsing accepts any JSON layout of that object and keeps the string verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct OnDemandClassId {
+    encoded: String,
+    ride: PelotonId,
+}
+
+#[derive(Deserialize)]
+enum OnDemandType {
+    #[serde(rename = "on_demand")]
+    OnDemand,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OnDemandPayload {
+    #[expect(
+        dead_code,
+        reason = "validated on parse; the value carries no information"
+    )]
+    home_peloton_id: Option<PelotonId>,
+    ride_id: PelotonId,
+    #[expect(
+        dead_code,
+        reason = "validated on parse; the value carries no information"
+    )]
+    studio_peloton_id: Option<PelotonId>,
+    #[serde(rename = "type")]
+    #[expect(dead_code, reason = "validated on parse; only one value is accepted")]
+    kind: OnDemandType,
+}
+
+impl OnDemandClassId {
+    /// Encodes the on-demand class id of `ride`.
+    #[must_use]
+    pub fn from_ride(ride: &PelotonId) -> Self {
+        use base64::Engine as _;
+
+        let json = format!(
+            r#"{{"home_peloton_id": null, "ride_id": "{ride}", "studio_peloton_id": null, "type": "on_demand"}}"#
+        );
+        Self {
+            encoded: base64::engine::general_purpose::STANDARD.encode(json),
+            ride: ride.clone(),
+        }
+    }
+
+    /// The base64 string sent to Peloton.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.encoded
+    }
+
+    /// The ride this class id names.
+    #[must_use]
+    pub fn ride_id(&self) -> &PelotonId {
+        &self.ride
+    }
+}
+
+impl FromStr for OnDemandClassId {
+    type Err = ParseClassIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let payload: OnDemandPayload = decode_class_id(s)?;
+        Ok(Self {
+            encoded: s.to_owned(),
+            ride: payload.ride_id,
+        })
+    }
+}
+
+/// Peloton's id for a scheduled class (an "event"), issued by Peloton and
+/// passed back verbatim once it decodes to the expected shape.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ScheduledClassId {
+    encoded: String,
+    ride: PelotonId,
+    start: OffsetDateTime,
+}
+
+#[derive(Deserialize)]
+enum EventType {
+    #[serde(rename = "event")]
+    Event,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EventPayload {
+    #[expect(dead_code, reason = "validated on parse; personal and not exposed")]
+    home_peloton_id: PelotonId,
+    ride_id: PelotonId,
+    scheduled_start_time: i64,
+    #[expect(
+        dead_code,
+        reason = "validated on parse; the value carries no information"
+    )]
+    studio_peloton_id: Option<PelotonId>,
+    #[serde(rename = "type")]
+    #[expect(dead_code, reason = "validated on parse; only one value is accepted")]
+    kind: EventType,
+}
+
+impl ScheduledClassId {
+    /// The base64 string sent to Peloton.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.encoded
+    }
+
+    /// The ride that is scheduled.
+    #[must_use]
+    pub fn ride_id(&self) -> &PelotonId {
+        &self.ride
+    }
+
+    /// When the class is scheduled to start.
+    #[must_use]
+    pub fn scheduled_start_time(&self) -> OffsetDateTime {
+        self.start
+    }
+}
+
+impl FromStr for ScheduledClassId {
+    type Err = ParseClassIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let payload: EventPayload = decode_class_id(s)?;
+        let start = OffsetDateTime::from_unix_timestamp(payload.scheduled_start_time)
+            .map_err(|_| ParseClassIdError)?;
+        Ok(Self {
+            encoded: s.to_owned(),
+            ride: payload.ride_id,
+            start,
+        })
     }
 }

@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use peloton::ids::PelotonId;
 use peloton_relay_login::output::TokenOutput;
 use peloton_relay_login::session::Session;
-use peloton_relay_login::{capture, check, scrub};
+use peloton_relay_login::{capture, check, scrub, spike};
 
 /// macOS login helper that obtains Peloton tokens for the relay.
 ///
@@ -32,6 +33,16 @@ enum Command {
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..=100))]
         workouts: u32,
     },
+    /// Log in and round-trip the schedule and Stack operations on the account,
+    /// restoring both and saving every raw response.
+    Spike {
+        /// Ride id (32 lowercase hex) of the on-demand class to use.
+        #[arg(long)]
+        class: PelotonId,
+        /// Directory to write into: outside the git work tree, or `<work tree>/captures`.
+        #[arg(long, default_value = "captures")]
+        dir: PathBuf,
+    },
     /// Scrub captures into fixtures that are safe to publish (no login, no network).
     Scrub {
         /// Directory holding the raw captures.
@@ -57,6 +68,7 @@ fn run(command: Command) -> Result<(), String> {
         Command::Login => login(),
         Command::Check => check::run(&Session::new()?),
         Command::Capture { dir, workouts } => capture::run(&Session::new()?, &dir, workouts),
+        Command::Spike { class, dir } => spike::run(&Session::new()?, &dir, &class),
         Command::Scrub { in_dir, out_dir } => scrub::run(&in_dir, &out_dir),
     }
 }

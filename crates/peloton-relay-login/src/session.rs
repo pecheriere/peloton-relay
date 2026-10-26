@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use peloton::endpoints::{API_BASE, PLATFORM_HEADER};
+use peloton::graphql::{OpKind, op_url};
 use peloton::oauth::{AUTH_DOMAIN, AuthClient, AuthRequest, TokenSet, parse_callback};
 use secrecy::{ExposeSecret as _, SecretString};
 use url::Url;
@@ -11,6 +12,15 @@ use url::Url;
 use crate::window;
 
 const PAUSE: Duration = Duration::from_millis(400);
+
+/// A GraphQL gateway answer of any status, kept raw for saving and inspection.
+#[derive(Debug)]
+pub struct GraphqlReply {
+    /// The HTTP status.
+    pub status: reqwest::StatusCode,
+    /// The raw response body; never printed.
+    pub body: Vec<u8>,
+}
 
 /// An HTTP client, a runtime and the auth endpoint shared by all subcommands.
 pub struct Session {
@@ -99,6 +109,44 @@ impl Session {
                 .await
                 .map(|b| b.to_vec())
                 .map_err(|_| format!("reading the response of {path_and_query} failed"))
+        })
+    }
+
+    /// `POST`s one GraphQL operation to the gateway and returns the raw answer.
+    ///
+    /// The status is returned rather than turned into an error, because the
+    /// gateway reports validation and auth problems in error bodies worth saving.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the operation only when the request cannot be
+    /// sent or its body cannot be read. Bodies are never included.
+    pub fn graphql(
+        &self,
+        access: &SecretString,
+        op: &str,
+        kind: OpKind,
+        document: &str,
+        variables: &serde_json::Value,
+    ) -> Result<GraphqlReply, String> {
+        let body = serde_json::json!({ "query": document, "variables": variables });
+        self.runtime.block_on(async {
+            let response = self
+                .http
+                .post(op_url(op, kind))
+                .bearer_auth(access.expose_secret())
+                .header(PLATFORM_HEADER.0, PLATFORM_HEADER.1)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|_| format!("GraphQL request {op} failed"))?;
+            let status = response.status();
+            let body = response
+                .bytes()
+                .await
+                .map_err(|_| format!("reading the response of GraphQL {op} failed"))?
+                .to_vec();
+            Ok(GraphqlReply { status, body })
         })
     }
 

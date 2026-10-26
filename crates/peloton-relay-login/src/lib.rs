@@ -5,6 +5,7 @@ pub mod check;
 pub mod output;
 pub mod scrub;
 pub mod session;
+pub mod spike;
 #[cfg(target_os = "macos")]
 pub mod window;
 
