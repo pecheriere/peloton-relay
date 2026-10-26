@@ -584,3 +584,63 @@ async fn other_members_workouts_are_not_found() {
         assert!(!body.contains("abcd"), "{uri}: {body}");
     }
 }
+
+#[test]
+fn openapi_documents_every_error_response() {
+    let document = serde_json::to_value(openapi()).unwrap();
+    let responses = |route: &str| document["paths"][route]["get"]["responses"].clone();
+    let id_routes = [
+        "/v1/workouts/{id}",
+        "/v1/workouts/{id}/metrics",
+        "/v1/classes/{id}",
+    ];
+    for route in ["/v1/me", "/v1/workouts"].into_iter().chain(id_routes) {
+        let responses = responses(route);
+        for status in ["200", "400", "502", "503"] {
+            assert!(responses[status].is_object(), "{route} lacks {status}");
+        }
+        for status in ["400", "502", "503"] {
+            assert_eq!(
+                responses[status]["content"]["application/json"]["schema"]["$ref"],
+                "#/components/schemas/ErrorBody",
+                "{route} {status}"
+            );
+        }
+        let unavailable = responses["503"]["description"].as_str().unwrap();
+        for code in ["not_authenticated", "upstream_rate_limited"] {
+            assert!(unavailable.contains(code), "{route}: {unavailable}");
+        }
+        assert!(
+            responses["503"]["headers"]["Retry-After"].is_object(),
+            "{route}"
+        );
+        let failed = responses["502"]["description"].as_str().unwrap();
+        assert!(failed.contains("upstream_error"), "{route}: {failed}");
+        assert!(
+            responses["400"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("invalid_input"),
+            "{route}"
+        );
+    }
+    for route in id_routes {
+        let not_found = responses(route)["404"]["description"].clone();
+        assert!(
+            not_found.as_str().unwrap().contains("not_found"),
+            "{route}: {not_found}"
+        );
+    }
+    let readyz = responses("/readyz");
+    assert!(
+        readyz["503"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("not_authenticated")
+    );
+    // Unknown routes and wrong methods are documented once, for the whole API.
+    let description = document["info"]["description"].as_str().unwrap();
+    for text in ["404", "not_found", "405", "method_not_allowed"] {
+        assert!(description.contains(text), "{description}");
+    }
+}

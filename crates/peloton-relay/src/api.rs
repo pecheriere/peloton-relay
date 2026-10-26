@@ -51,7 +51,7 @@ pub fn router(state: AppState) -> Router {
 #[openapi(
     info(
         title = "Peloton relay",
-        description = "Read-only relay of a Peloton account's profile, workouts, metrics and classes."
+        description = "Read-only relay of a Peloton account's profile, workouts, metrics and classes.\n\nEvery error has an `ErrorBody`. Any path not listed here answers 404 `not_found`, and any method other than GET on a listed path answers 405 `method_not_allowed`."
     ),
     paths(me, workouts, workout, metrics, class, healthz, readyz),
     components(schemas(
@@ -172,8 +172,11 @@ struct Status {
     path = "/v1/me",
     responses(
         (status = 200, body = Profile),
-        (status = 502, body = ErrorBody),
-        (status = 503, body = ErrorBody)
+        (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
+        (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+            headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
+        )
     )
 )]
 async fn me(
@@ -191,9 +194,11 @@ async fn me(
     params(WorkoutsParams),
     responses(
         (status = 200, body = WorkoutPage),
-        (status = 400, body = ErrorBody),
-        (status = 502, body = ErrorBody),
-        (status = 503, body = ErrorBody)
+        (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
+        (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+            headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
+        )
     )
 )]
 async fn workouts(
@@ -211,10 +216,12 @@ async fn workouts(
     params(("id" = String, Path, description = "Workout id: 32 lowercase hex characters")),
     responses(
         (status = 200, body = WorkoutDetail),
-        (status = 400, body = ErrorBody),
-        (status = 404, body = ErrorBody),
-        (status = 502, body = ErrorBody),
-        (status = 503, body = ErrorBody)
+        (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
+        (status = 404, description = "`not_found`: no such workout of the credential's owner.", body = ErrorBody),
+        (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+            headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
+        )
     )
 )]
 async fn workout(
@@ -236,10 +243,12 @@ async fn workout(
     ),
     responses(
         (status = 200, body = Metrics),
-        (status = 400, body = ErrorBody),
-        (status = 404, body = ErrorBody),
-        (status = 502, body = ErrorBody),
-        (status = 503, body = ErrorBody)
+        (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
+        (status = 404, description = "`not_found`: no such workout of the credential's owner.", body = ErrorBody),
+        (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+            headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
+        )
     )
 )]
 async fn metrics(
@@ -262,10 +271,12 @@ async fn metrics(
     params(("id" = String, Path, description = "Class id: 32 lowercase hex characters")),
     responses(
         (status = 200, body = ClassDetails),
-        (status = 400, body = ErrorBody),
-        (status = 404, body = ErrorBody),
-        (status = 502, body = ErrorBody),
-        (status = 503, body = ErrorBody)
+        (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
+        (status = 404, description = "`not_found`: no such class.", body = ErrorBody),
+        (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+            headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
+        )
     )
 )]
 async fn class(
@@ -293,7 +304,7 @@ async fn healthz() -> Json<Status> {
     path = "/readyz",
     responses(
         (status = 200, body = Status),
-        (status = 503, body = ErrorBody)
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential.", body = ErrorBody)
     )
 )]
 async fn readyz(
