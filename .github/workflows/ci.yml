@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release workflow runs these checks on the tagged commit first.
+  workflow_call:
 
 permissions:
   contents: read
@@ -56,5 +58,7 @@ jobs:
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          platforms: linux/amd64
+          # Both release platforms. The builder stage cross-compiles with zig
+          # and the final stage only copies files, so no emulation is needed.
+          platforms: linux/arm64,linux/amd64
           push: false
