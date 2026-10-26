@@ -13,7 +13,6 @@ use peloton_relay::tokens::{DEFAULT_REFRESH_MARGIN, TokenManager};
 use peloton_relay::upstream::{DEFAULT_MAX_IN_FLIGHT, Peloton};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
-use tracing_subscriber::EnvFilter;
 use url::Url;
 
 /// Read-only Peloton API relay server.
@@ -56,12 +55,7 @@ async fn main() -> ExitCode {
 
 async fn serve() -> Result<(), String> {
     let config = Config::from_env().map_err(|err| err.to_string())?;
-    tracing_subscriber::fmt()
-        .json()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+    peloton_relay::logging::init().map_err(|err| format!("cannot set up logging: {err}"))?;
 
     let http = http_client().map_err(|err| format!("cannot build the HTTP client: {err}"))?;
     let auth_base = Url::parse(&format!("https://{AUTH_DOMAIN}")).map_err(|err| err.to_string())?;

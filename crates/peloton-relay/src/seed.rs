@@ -29,6 +29,12 @@ pub enum SeedError {
         /// HTTP status code.
         status: u16,
     },
+    /// Peloton answered with a status other than success or a rejection.
+    #[error("Peloton answered with status {status}")]
+    Unexpected {
+        /// HTTP status code.
+        status: u16,
+    },
     /// The state file could not be written.
     #[error("could not write the state file")]
     Store(#[from] StoreError),
@@ -89,8 +95,11 @@ async fn fetch_me(
         .map_err(|_| SeedError::Upstream)?;
     let status = response.status();
     if !status.is_success() {
-        return Err(SeedError::Rejected {
-            status: status.as_u16(),
+        let status = status.as_u16();
+        return Err(if matches!(status, 401 | 403) {
+            SeedError::Rejected { status }
+        } else {
+            SeedError::Unexpected { status }
         });
     }
     response.json().await.map_err(|_| SeedError::Upstream)

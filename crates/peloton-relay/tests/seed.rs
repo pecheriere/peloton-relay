@@ -102,3 +102,23 @@ async fn seed_rejects_token_peloton_refuses() {
     assert!(!shown.contains("body-secret") && !shown.contains("access-secret"));
     assert!(!store.path.exists());
 }
+
+#[tokio::test]
+async fn seed_reports_other_statuses_neutrally() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/me"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::state_file(dir.path());
+
+    let err = run_seed(TOKENS.as_bytes(), &store, &common::http(), &base(&server))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, SeedError::Unexpected { status: 503 }));
+    assert_eq!(err.to_string(), "Peloton answered with status 503");
+    assert!(!store.path.exists());
+}
