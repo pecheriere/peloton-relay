@@ -1,56 +1,29 @@
 //! Tests for the state file and the refreshing token manager.
 
 use std::fs;
-use std::io;
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
-use peloton::ids::PelotonId;
-use peloton::oauth::{AuthClient, TokenSet};
-use peloton_relay::store::{State, StateFile, StoreError};
+use peloton::oauth::AuthClient;
+use peloton_relay::store::StoreError;
 use peloton_relay::tokens::{NotAuthenticated, TokenManager};
 use secrecy::{ExposeSecret, SecretString};
 use time::{Duration, OffsetDateTime};
 use tracing::Instrument as _;
-use tracing_subscriber::fmt::MakeWriter;
 use url::Url;
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const USER: &str = "0123456789abcdef0123456789abcdef";
+mod common;
+
+use common::{captured_logs, state, state_file, user};
+
 const MARGIN: StdDuration = StdDuration::from_secs(3600);
 
-fn user() -> PelotonId {
-    USER.parse().unwrap()
-}
-
-fn state(access: &str, refresh: &str, expires_in: Duration) -> State {
-    State {
-        tokens: TokenSet {
-            access_token: SecretString::from(access.to_owned()),
-            refresh_token: SecretString::from(refresh.to_owned()),
-            expires_at: OffsetDateTime::now_utc() + expires_in,
-        },
-        user_id: user(),
-    }
-}
-
-fn state_file(dir: &Path) -> StateFile {
-    StateFile {
-        path: dir.join("state.json"),
-    }
-}
-
 fn manager(dir: &Path, server: &MockServer) -> TokenManager {
-    let http = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(StdDuration::from_secs(5))
-        .timeout(StdDuration::from_secs(10))
-        .build()
-        .unwrap();
-    let auth = AuthClient::new(http, Url::parse(&server.uri()).unwrap());
+    let auth = AuthClient::new(common::http(), Url::parse(&server.uri()).unwrap());
     TokenManager::new(state_file(dir), auth, MARGIN)
 }
 
@@ -74,51 +47,6 @@ fn rotated_tokens() -> ResponseTemplate {
 
 async fn refresh_calls(server: &MockServer) -> usize {
     server.received_requests().await.unwrap().len()
-}
-
-/// Collects formatted tracing output in memory.
-#[derive(Clone, Default)]
-struct LogBuffer(Arc<Mutex<Vec<u8>>>);
-
-impl LogBuffer {
-    fn contents(&self) -> String {
-        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
-    }
-}
-
-impl io::Write for LogBuffer {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> MakeWriter<'a> for LogBuffer {
-    type Writer = Self;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        self.clone()
-    }
-}
-
-/// Process-wide log capture.
-///
-/// A global subscriber rather than a thread-local one: tracing caches callsite
-/// interest across threads, so a scoped subscriber misses events when other
-/// tests hit the same callsites concurrently. Tests tag their events with a
-/// span and filter on it.
-fn captured_logs() -> &'static LogBuffer {
-    static LOGS: OnceLock<LogBuffer> = OnceLock::new();
-    LOGS.get_or_init(|| {
-        let logs = LogBuffer::default();
-        let subscriber = tracing_subscriber::fmt().with_writer(logs.clone()).finish();
-        tracing::subscriber::set_global_default(subscriber).unwrap();
-        logs
-    })
 }
 
 #[test]
