@@ -12,7 +12,8 @@ use secrecy::SecretString;
 use time::{Duration, OffsetDateTime};
 use tracing_subscriber::fmt::MakeWriter;
 
-pub const USER: &str = "0123456789abcdef0123456789abcdef";
+/// The credential owner: the member the scrubbed fixtures belong to.
+pub const USER: &str = "000000000000000000000000000000f2";
 
 pub fn user() -> PelotonId {
     USER.parse().unwrap()

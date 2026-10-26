@@ -12,7 +12,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tracing::Instrument as _;
 use url::Url;
-use wiremock::matchers::{header, method, path, query_param};
+use wiremock::matchers::{header, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 mod common;
@@ -143,6 +143,14 @@ async fn workout_detail_graph_and_ride_paths() {
     Mock::given(method("GET"))
         .and(path(format!("/api/workout/{WORKOUT}")))
         .and(query_param("joins", "ride,ride.instructor"))
+        .respond_with(json(fixture("workout-cycling-class.json")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // The graph's ownership check: the workout without joins.
+    Mock::given(method("GET"))
+        .and(path(format!("/api/workout/{WORKOUT}")))
+        .and(query_param_is_missing("joins"))
         .respond_with(json(fixture("workout-cycling-class.json")))
         .expect(1)
         .mount(&server)
@@ -402,4 +410,71 @@ async fn rejected_refreshed_token_does_not_refresh_again() {
         .filter(|l| l.contains("refresh_storm") && l.contains("peloton_unauthorized_after_refresh"))
         .count();
     assert_eq!(warnings, 1, "{}", logs.contents());
+}
+
+/// `fixture` with its top-level `user_id` replaced (`None` removes it).
+fn workout_owned_by(name: &str, owner: Option<&str>) -> String {
+    let mut value: serde_json::Value = serde_json::from_str(&fixture(name)).unwrap();
+    let object = value.as_object_mut().unwrap();
+    match owner {
+        Some(owner) => object.insert("user_id".to_owned(), owner.into()),
+        None => object.remove("user_id"),
+    };
+    value.to_string()
+}
+
+#[tokio::test]
+async fn foreign_or_unowned_workout_is_not_found() {
+    let other = "0000000000000000000000000000abcd";
+    for body in [
+        workout_owned_by("workout-cycling-class.json", Some(other)),
+        workout_owned_by("workout-cycling-class.json", None),
+        workout_owned_by("workout-cycling-class.json", Some("not-an-id")),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/workout/{WORKOUT}")))
+            .respond_with(json(body))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/workout/{WORKOUT}/performance_graph")))
+            .respond_with(json(fixture("performance_graph-cycling-class.json")))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let peloton = client(&dir, &server, Some("tok-1"));
+        let err = peloton.workout(&workout_id()).await.unwrap_err();
+        assert_eq!(err, UpstreamError::NotFound);
+        let err = peloton
+            .performance_graph(&workout_id(), 1)
+            .await
+            .unwrap_err();
+        assert_eq!(err, UpstreamError::NotFound);
+    }
+}
+
+#[tokio::test]
+async fn graph_of_own_workout_checks_ownership_first() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/workout/{WORKOUT}")))
+        .respond_with(json(fixture("workout-cycling-class.json")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/workout/{WORKOUT}/performance_graph")))
+        .respond_with(json(fixture("performance_graph-cycling-class.json")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    client(&dir, &server, Some("tok-1"))
+        .performance_graph(&workout_id(), 1)
+        .await
+        .unwrap();
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests[0].url.path(), format!("/api/workout/{WORKOUT}"));
 }

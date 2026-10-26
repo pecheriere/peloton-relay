@@ -46,6 +46,19 @@ where
         .map_err(D::Error::custom)
 }
 
+/// Decodes an optional id leniently: a missing, `null` or malformed value is
+/// `None`, so an odd value never fails a whole response. Only suitable where
+/// `None` is the safe reading, such as an ownership check.
+fn lenient_id<'de, D>(deserializer: D) -> Result<Option<PelotonId>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match Option::<Value>::deserialize(deserializer)? {
+        Some(Value::String(id)) => id.parse().ok(),
+        _ => None,
+    })
+}
+
 /// `GET /me`: the signed-in member.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Me {
@@ -110,6 +123,9 @@ pub struct WorkoutPage {
 pub struct Workout {
     /// Workout id.
     pub id: PelotonId,
+    /// The member who did the workout; `None` when missing or malformed.
+    #[serde(default, deserialize_with = "lenient_id")]
+    pub user_id: Option<PelotonId>,
     /// Discipline slug: "cycling", "yoga", "stretching", ….
     #[serde(default)]
     pub fitness_discipline: Option<String>,
@@ -428,6 +444,32 @@ mod tests {
         .ride
         .expect("ride");
         assert!(ride.instructor.is_none());
+    }
+
+    #[test]
+    fn owner_id_is_lenient() {
+        let owner = "000000000000000000000000000000f2";
+        let parse = |user_id: serde_json::Value| -> Workout {
+            serde_json::from_value(json!({
+                "id": "0123456789abcdef0123456789abcdef",
+                "user_id": user_id,
+            }))
+            .expect("parse")
+        };
+        assert_eq!(
+            parse(json!(owner))
+                .user_id
+                .map(|id| id.to_string())
+                .as_deref(),
+            Some(owner)
+        );
+        for odd in [json!(null), json!("../me"), json!(7)] {
+            assert!(parse(odd.clone()).user_id.is_none(), "{odd}");
+        }
+        let missing: Workout =
+            serde_json::from_value(json!({"id": "0123456789abcdef0123456789abcdef"}))
+                .expect("parse");
+        assert!(missing.user_id.is_none());
     }
 
     #[test]

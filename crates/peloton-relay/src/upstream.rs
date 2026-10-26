@@ -111,7 +111,7 @@ impl Peloton {
     ///
     /// See [`UpstreamError`].
     pub async fn me(&self) -> Result<Me, UpstreamError> {
-        self.get(|_| endpoints::me(), &[]).await
+        self.get(|_| endpoints::me(), &[]).await.map(|(me, _)| me)
     }
 
     /// `GET /user/{id}/workouts` for the credential's owner, newest first.
@@ -132,37 +132,60 @@ impl Peloton {
         if let Some(to) = query.to {
             params.push(("to", utc_iso8601(to)?));
         }
-        self.get(endpoints::user_workouts, &params).await
+        self.get(endpoints::user_workouts, &params)
+            .await
+            .map(|(page, _)| page)
     }
 
-    /// `GET /workout/{id}` with ride and instructor joined.
+    /// `GET /workout/{id}` with ride and instructor joined, if the workout
+    /// belongs to the credential's owner.
     ///
     /// # Errors
     ///
-    /// See [`UpstreamError`].
+    /// [`UpstreamError::NotFound`] also when the workout is another member's
+    /// or names no owner, so the relay does not reveal that it exists. See
+    /// [`UpstreamError`] for the others.
     pub async fn workout(&self, id: &PelotonId) -> Result<Workout, UpstreamError> {
-        self.get(
-            |_| endpoints::workout(id),
-            &[("joins", RIDE_JOINS.to_owned())],
-        )
-        .await
+        self.owned_workout(id, &[("joins", RIDE_JOINS.to_owned())])
+            .await
     }
 
-    /// `GET /workout/{id}/performance_graph`, sampled every `every_n` seconds.
+    /// `GET /workout/{id}/performance_graph`, sampled every `every_n` seconds,
+    /// if the workout belongs to the credential's owner.
+    ///
+    /// The graph names no member, so ownership is checked first with a
+    /// `GET /workout/{id}` (no joins).
     ///
     /// # Errors
     ///
-    /// See [`UpstreamError`].
+    /// As [`Self::workout`].
     pub async fn performance_graph(
         &self,
         id: &PelotonId,
         every_n: u32,
     ) -> Result<PerformanceGraph, UpstreamError> {
+        self.owned_workout(id, &[]).await?;
         self.get(
             |_| endpoints::performance_graph(id),
             &[("every_n", every_n.to_string())],
         )
         .await
+        .map(|(graph, _)| graph)
+    }
+
+    /// `GET /workout/{id}`, or [`UpstreamError::NotFound`] unless its
+    /// `user_id` is the credential owner's.
+    async fn owned_workout(
+        &self,
+        id: &PelotonId,
+        params: &[(&str, String)],
+    ) -> Result<Workout, UpstreamError> {
+        let (workout, owner): (Workout, _) = self.get(|_| endpoints::workout(id), params).await?;
+        if workout.user_id.as_ref() == Some(&owner) {
+            Ok(workout)
+        } else {
+            Err(UpstreamError::NotFound)
+        }
     }
 
     /// `GET /ride/{id}/details`.
@@ -171,10 +194,13 @@ impl Peloton {
     ///
     /// See [`UpstreamError`].
     pub async fn ride_details(&self, id: &PelotonId) -> Result<RideDetails, UpstreamError> {
-        self.get(|_| endpoints::ride_details(id), &[]).await
+        self.get(|_| endpoints::ride_details(id), &[])
+            .await
+            .map(|(details, _)| details)
     }
 
-    /// Issues a GET; `path` receives the credential owner's id.
+    /// Issues a GET; `path` receives the credential owner's id, which is
+    /// returned with the decoded body.
     ///
     /// On 401 the token manager decides whether a retry can help (it refreshed,
     /// or another request already did); a second 401 is reported back too, so
@@ -183,32 +209,33 @@ impl Peloton {
         &self,
         path: impl Fn(&PelotonId) -> String,
         params: &[(&str, String)],
-    ) -> Result<T, UpstreamError> {
+    ) -> Result<(T, PelotonId), UpstreamError> {
         let _permit = self.permits.acquire().await.map_err(|_| {
             tracing::error!("upstream concurrency limiter closed");
             UpstreamError::Transport
         })?;
-        let (token, response) = self.send(&path, params).await?;
+        let (token, owner, response) = self.send(&path, params).await?;
         if response.status() != StatusCode::UNAUTHORIZED {
-            return interpret(response).await;
+            return Ok((interpret(response).await?, owner));
         }
         if !self.tokens.unauthorized(&token).await {
             return Err(UpstreamError::NotAuthenticated);
         }
-        let (token, response) = self.send(&path, params).await?;
+        let (token, owner, response) = self.send(&path, params).await?;
         if response.status() == StatusCode::UNAUTHORIZED {
             self.tokens.unauthorized(&token).await;
             return Err(UpstreamError::NotAuthenticated);
         }
-        interpret(response).await
+        Ok((interpret(response).await?, owner))
     }
 
-    /// Sends one authenticated GET; returns the token it used with the response.
+    /// Sends one authenticated GET; returns the token and owner it used with
+    /// the response.
     async fn send(
         &self,
         path: &impl Fn(&PelotonId) -> String,
         params: &[(&str, String)],
-    ) -> Result<(SecretString, reqwest::Response), UpstreamError> {
+    ) -> Result<(SecretString, PelotonId, reqwest::Response), UpstreamError> {
         let (token, user) = self
             .tokens
             .bearer()
@@ -231,7 +258,7 @@ impl Peloton {
                 );
                 UpstreamError::Transport
             })?;
-        Ok((token, response))
+        Ok((token, user, response))
     }
 
     fn url(&self, path: &str) -> Result<Url, UpstreamError> {

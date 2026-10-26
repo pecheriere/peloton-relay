@@ -87,6 +87,16 @@ async fn upstream_hits(server: &MockServer) -> usize {
     server.received_requests().await.unwrap().len()
 }
 
+/// Answers `GET /workout/{WORKOUT}` with a workout of the credential owner,
+/// which `/metrics` fetches to check ownership.
+async fn mount_own_workout(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path(format!("/api/workout/{WORKOUT}")))
+        .respond_with(json(fixture("workout-cycling-class.json")))
+        .mount(server)
+        .await;
+}
+
 fn assert_error(body: &str, code: &str) {
     let value = parse(body);
     assert_eq!(value["error"], code, "{body}");
@@ -183,6 +193,7 @@ async fn workout_detail_includes_class() {
 #[tokio::test]
 async fn metrics_map_and_forward_every_n() {
     let server = MockServer::start().await;
+    mount_own_workout(&server).await;
     Mock::given(method("GET"))
         .and(path(format!("/api/workout/{WORKOUT}/performance_graph")))
         .and(wiremock::matchers::query_param("every_n", "10"))
@@ -208,6 +219,7 @@ async fn metrics_map_and_forward_every_n() {
 #[tokio::test]
 async fn metrics_default_every_n_is_1() {
     let server = MockServer::start().await;
+    mount_own_workout(&server).await;
     Mock::given(method("GET"))
         .and(path(format!("/api/workout/{WORKOUT}/performance_graph")))
         .and(wiremock::matchers::query_param("every_n", "1"))
@@ -302,6 +314,7 @@ async fn rejects_invalid_query() {
 #[tokio::test]
 async fn accepts_range_boundaries() {
     let server = MockServer::start().await;
+    mount_own_workout(&server).await;
     Mock::given(method("GET"))
         .respond_with(json(fixture("workouts.json")))
         .mount(&server)
@@ -540,5 +553,34 @@ async fn responses_never_contain_tokens() {
                 "{uri} leaked a token in headers"
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn other_members_workouts_are_not_found() {
+    let mut foreign: Value = parse(&fixture("workout-cycling-class.json"));
+    foreign["user_id"] = "0000000000000000000000000000abcd".into();
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/workout/{WORKOUT}")))
+        .respond_with(json(foreign.to_string()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/workout/{WORKOUT}/performance_graph")))
+        .respond_with(json(fixture("performance_graph-cycling-class.json")))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let app = app(&dir, &server, true);
+    for uri in [
+        format!("/v1/workouts/{WORKOUT}"),
+        format!("/v1/workouts/{WORKOUT}/metrics"),
+    ] {
+        let (status, _, body) = get(&app, &uri).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
+        assert_error(&body, "not_found");
+        assert!(!body.contains("abcd"), "{uri}: {body}");
     }
 }
