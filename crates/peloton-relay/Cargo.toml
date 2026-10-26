@@ -18,8 +18,9 @@ serde_json.workspace = true
 serde_path_to_error = "0.1.20"
 thiserror.workspace = true
 time.workspace = true
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["net", "signal", "sync", "time"] }
 tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
 url.workspace = true
 utoipa.workspace = true
 
@@ -27,7 +28,6 @@ utoipa.workspace = true
 http-body-util = "0.1"
 tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }
-tracing-subscriber.workspace = true
 wiremock.workspace = true
 
 [lints]
