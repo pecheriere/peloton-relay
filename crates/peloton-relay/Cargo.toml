@@ -26,6 +26,7 @@ url.workspace = true
 utoipa.workspace = true
 
 [dev-dependencies]
+base64.workspace = true
 http-body-util = "0.1"
 tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }
