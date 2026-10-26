@@ -150,9 +150,8 @@ async fn healthcheck() -> Result<(), String> {
         .timeout(HEALTHCHECK_TIMEOUT)
         .build()
         .map_err(|err| format!("cannot build the HTTP client: {err}"))?;
-    let url = format!("http://127.0.0.1:{}/healthz", config.listen.port());
     let response = client
-        .get(url)
+        .get(config.healthcheck_url())
         .send()
         .await
         .map_err(|_| "the server is unreachable".to_owned())?;

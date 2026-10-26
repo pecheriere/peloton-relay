@@ -1,6 +1,6 @@
 //! Process configuration from the environment, and the shared HTTP client.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -32,7 +32,7 @@ pub enum ConfigError {
 /// Settings shared by all commands.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Address the HTTP server binds to; its port is also the healthcheck's.
+    /// Address the HTTP server binds to, which the healthcheck probes.
     pub listen: SocketAddr,
     /// Directory holding the state file.
     pub state_dir: PathBuf,
@@ -68,6 +68,26 @@ impl Config {
             Some(value) => PathBuf::from(value),
         };
         Ok(Self { listen, state_dir })
+    }
+
+    /// URL of the liveness probe of a server bound to [`Self::listen`]: the
+    /// listen address itself, or loopback when it binds every address.
+    ///
+    /// An IPv6 zone index is dropped; probing a link-local address needs the
+    /// server to also listen on loopback or a routable address.
+    #[must_use]
+    pub fn healthcheck_url(&self) -> String {
+        let port = self.listen.port();
+        match self.listen.ip() {
+            IpAddr::V4(ip) if ip.is_unspecified() => {
+                format!("http://{}:{port}/healthz", Ipv4Addr::LOCALHOST)
+            }
+            IpAddr::V4(ip) => format!("http://{ip}:{port}/healthz"),
+            IpAddr::V6(ip) if ip.is_unspecified() => {
+                format!("http://[{}]:{port}/healthz", Ipv6Addr::LOCALHOST)
+            }
+            IpAddr::V6(ip) => format!("http://[{ip}]:{port}/healthz"),
+        }
     }
 
     /// The state file inside the state directory.
@@ -123,6 +143,22 @@ mod tests {
         .unwrap();
         assert_eq!(config.listen.port(), 9000);
         assert_eq!(config.state_file().path.to_str(), Some("/tmp/x/state.json"));
+    }
+
+    #[test]
+    fn healthcheck_probes_the_listen_address() {
+        let url = |listen: &str| {
+            config(&[("PELOTON_RELAY_LISTEN", listen)])
+                .unwrap()
+                .healthcheck_url()
+        };
+        assert_eq!(url("0.0.0.0:8080"), "http://127.0.0.1:8080/healthz");
+        assert_eq!(url("[::]:8080"), "http://[::1]:8080/healthz");
+        assert_eq!(url("127.0.0.1:9000"), "http://127.0.0.1:9000/healthz");
+        assert_eq!(url("192.0.2.7:8080"), "http://192.0.2.7:8080/healthz");
+        assert_eq!(url("[::1]:8080"), "http://[::1]:8080/healthz");
+        assert_eq!(url("[2001:db8::7]:81"), "http://[2001:db8::7]:81/healthz");
+        assert_eq!(url("[fe80::1%2]:8080"), "http://[fe80::1]:8080/healthz");
     }
 
     #[test]
