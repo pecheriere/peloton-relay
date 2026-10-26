@@ -644,3 +644,39 @@ fn openapi_documents_every_error_response() {
         assert!(description.contains(text), "{description}");
     }
 }
+
+#[tokio::test]
+async fn cannot_schedule_is_422_with_pelotons_message() {
+    use axum::response::IntoResponse as _;
+    use peloton_relay::error::ApiError;
+    use peloton_relay::upstream::UpstreamError;
+
+    let error = ApiError::from(UpstreamError::CannotSchedule {
+        message: "This class can't be scheduled at that time.".to_owned(),
+    });
+    let response = error.into_response();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap(),
+        serde_json::json!({
+            "error": "cannot_schedule",
+            "message": "This class can't be scheduled at that time.",
+        })
+    );
+}
+
+#[tokio::test]
+async fn graphql_failure_is_upstream_error() {
+    use axum::response::IntoResponse as _;
+    use peloton_relay::error::ApiError;
+    use peloton_relay::upstream::UpstreamError;
+
+    let response = ApiError::from(UpstreamError::GraphQl).into_response();
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap()["error"],
+        "upstream_error"
+    );
+}

@@ -29,6 +29,20 @@ impl OpKind {
     }
 }
 
+/// One GraphQL operation: its name, kind, document, and the root field of
+/// `data` that holds its answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Op {
+    /// The operation name, as in the document and the gateway URL.
+    pub name: &'static str,
+    /// Whether it reads or writes.
+    pub kind: OpKind,
+    /// The document sent as `query`.
+    pub document: &'static str,
+    /// The root field of `data` holding the answer.
+    pub field: &'static str,
+}
+
 /// The gateway URL for operation `op`: `…/graphql?query=<op>` or `?mutation=<op>`.
 #[must_use]
 pub fn op_url(op: &str, kind: OpKind) -> String {

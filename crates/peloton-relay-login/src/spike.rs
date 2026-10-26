@@ -19,7 +19,7 @@ use std::path::Path;
 
 use peloton::endpoints;
 use peloton::graphql::{
-    ADD_CLASS_TO_SCHEDULE, ADD_CLASS_TO_STACK, CHECK_CLASS_IN_STACK, MODIFY_STACK, OpKind,
+    ADD_CLASS_TO_SCHEDULE, ADD_CLASS_TO_STACK, CHECK_CLASS_IN_STACK, MODIFY_STACK, Op, OpKind,
     REMOVE_CLASS_FROM_SCHEDULE, RESCHEDULE_CLASS, SCHEDULED_CLASS, VIEW_USER_STACK,
     YOUR_SCHEDULE_ITEMS,
 };
@@ -67,15 +67,6 @@ fragment TypeRef on __Type {
   ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } }
 }
 ";
-
-/// One GraphQL operation as the spike sends it.
-struct Op {
-    name: &'static str,
-    kind: OpKind,
-    document: &'static str,
-    /// The root field of `data` holding the answer.
-    field: &'static str,
-}
 
 const CHECK: Op = Op {
     name: "CheckDoesClassExistInUserStack",

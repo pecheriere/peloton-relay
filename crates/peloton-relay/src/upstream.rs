@@ -1,22 +1,29 @@
-//! Client for the read-only subset of the Peloton API.
+//! Client for the subset of the Peloton API the relay uses: REST reads and
+//! the GraphQL gateway's schedule and Stack operations.
 //!
 //! Every call authenticates with the [`TokenManager`]'s current access token.
 //! A 401 reports the rejected token back to the manager and retries once when
 //! the manager has a different token; otherwise, or on a second 401, the
 //! credential is unusable for now. Response
 //! bodies never reach errors or logs: a decode failure reports only the path
-//! of the offending field.
+//! of the offending field, and a GraphQL error only its `extensions.code`.
+//! The one exception is Peloton's short, user-facing explanation of why a
+//! class cannot be scheduled, which [`UpstreamError::CannotSchedule`] carries
+//! for the API client and which is never logged.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use peloton::endpoints::{self, PLATFORM_HEADER};
+use peloton::endpoints::{self, GRAPHQL_URL, PLATFORM_HEADER};
+use peloton::graphql::Op;
 use peloton::ids::PelotonId;
 use peloton::upstream::{Me, PerformanceGraph, RideDetails, Workout, WorkoutPage};
 use reqwest::StatusCode;
 use reqwest::header::RETRY_AFTER;
 use secrecy::{ExposeSecret as _, SecretString};
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 use time::OffsetDateTime;
 use time::UtcOffset;
 use time::format_description::well_known::Rfc3339;
@@ -58,7 +65,21 @@ pub enum UpstreamError {
     /// The request could not be built, sent, or its response read.
     #[error("upstream request failed")]
     Transport,
+    /// The GraphQL gateway reported errors, or answered with a union member
+    /// the relay does not handle.
+    #[error("upstream GraphQL operation failed")]
+    GraphQl,
+    /// Peloton refused to schedule the class.
+    #[error("Peloton cannot schedule the class")]
+    CannotSchedule {
+        /// Peloton's user-facing explanation, at most
+        /// [`MAX_CANNOT_SCHEDULE_MESSAGE`] characters.
+        message: String,
+    },
 }
+
+/// Longest Peloton explanation kept in [`UpstreamError::CannotSchedule`].
+pub const MAX_CANNOT_SCHEDULE_MESSAGE: usize = 200;
 
 /// Parameters of the workout list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,14 +99,18 @@ pub struct WorkoutQuery {
 pub struct Peloton {
     http: reqwest::Client,
     api_base: Url,
+    /// Kept as text and parsed per call, like the REST URLs, so a bad URL is
+    /// a request failure rather than a panic.
+    graphql_url: String,
     tokens: Arc<TokenManager>,
     permits: Semaphore,
 }
 
 impl Peloton {
     /// Creates a client for the API at `api_base` (e.g.
-    /// [`peloton::endpoints::API_BASE`]), allowing `max_in_flight` concurrent
-    /// requests (at least one; see [`DEFAULT_MAX_IN_FLIGHT`]).
+    /// [`peloton::endpoints::API_BASE`]) and the GraphQL gateway at
+    /// [`GRAPHQL_URL`], allowing `max_in_flight` concurrent requests (at least
+    /// one; see [`DEFAULT_MAX_IN_FLIGHT`]). Both share the limit.
     ///
     /// `http` must be built with `redirect::Policy::none()`, so a redirect can
     /// never carry the bearer token to another host, and with connect and
@@ -100,9 +125,18 @@ impl Peloton {
         Self {
             http,
             api_base,
+            graphql_url: GRAPHQL_URL.to_owned(),
             tokens,
             permits: Semaphore::new(max_in_flight.max(1)),
         }
+    }
+
+    /// Sends GraphQL operations to `url` instead of [`GRAPHQL_URL`]; any query
+    /// string `url` carries is replaced by the operation's.
+    #[must_use]
+    pub fn with_graphql_url(mut self, url: Url) -> Self {
+        self.graphql_url = url.into();
+        self
     }
 
     /// `GET /me`.
@@ -199,29 +233,101 @@ impl Peloton {
             .map(|(details, _)| details)
     }
 
+    /// Sends GraphQL operation `op` with `variables` and decodes the root
+    /// field `data.<op.field>` of the answer as `T`.
+    ///
+    /// The operation name goes in the URL as `?query=<name>` or
+    /// `?mutation=<name>`, the body is `{"query", "variables"}`. A non-empty
+    /// `errors` array fails the call even when `data` is present.
+    ///
+    /// # Errors
+    ///
+    /// [`UpstreamError::GraphQl`] when the gateway reports errors (only their
+    /// `extensions.code`s are logged); [`UpstreamError::Decode`] when `data`,
+    /// its root field or a field inside it does not match, with a path such
+    /// as `data.addClassToSchedule.id`. See [`UpstreamError`] for the others.
+    pub async fn gql<T: DeserializeOwned>(
+        &self,
+        op: &Op,
+        variables: &Value,
+    ) -> Result<T, UpstreamError> {
+        let mut url = Url::parse(&self.graphql_url).map_err(|_| UpstreamError::Transport)?;
+        url.query_pairs_mut()
+            .clear()
+            .append_pair(op.kind.as_str(), op.name);
+        let body = serde_json::json!({ "query": op.document, "variables": variables });
+        let (reply, _): (GraphQlReply, _) = self
+            .call(|_| Ok(self.http.post(url.clone()).json(&body)))
+            .await?;
+        if let Some(errors) = reply.errors.filter(|errors| !errors.is_empty()) {
+            let codes: Vec<&str> = errors
+                .iter()
+                .take(MAX_LOGGED_CODES)
+                .map(|error| {
+                    error
+                        .pointer("/extensions/code")
+                        .and_then(Value::as_str)
+                        .map_or("<none>", loggable_name)
+                })
+                .collect();
+            tracing::warn!(
+                op = op.name,
+                ?codes,
+                "upstream GraphQL operation returned errors"
+            );
+            return Err(UpstreamError::GraphQl);
+        }
+        let Some(Value::Object(mut data)) = reply.data else {
+            return Err(decode_failure(op, "data".to_owned()));
+        };
+        let Some(root) = data.remove(op.field) else {
+            return Err(decode_failure(op, format!("data.{}", op.field)));
+        };
+        serde_path_to_error::deserialize(root).map_err(|err| {
+            let inner = err.path().to_string();
+            let path = match inner.as_str() {
+                "." => format!("data.{}", op.field),
+                seq if seq.starts_with('[') => format!("data.{}{seq}", op.field),
+                field => format!("data.{}.{field}", op.field),
+            };
+            decode_failure(op, path)
+        })
+    }
+
     /// Issues a GET; `path` receives the credential owner's id, which is
     /// returned with the decoded body.
-    ///
-    /// On 401 the token manager decides whether a retry can help (it refreshed,
-    /// or another request already did); a second 401 is reported back too, so
-    /// the manager can tell that even a fresh token is rejected.
     async fn get<T: DeserializeOwned>(
         &self,
         path: impl Fn(&PelotonId) -> String,
         params: &[(&str, String)],
     ) -> Result<(T, PelotonId), UpstreamError> {
+        self.call(|user| Ok(self.http.get(self.url(&path(user))?).query(params)))
+            .await
+    }
+
+    /// Sends the request `build` makes for the credential owner, with the
+    /// bearer token and platform header, holding one permit until the body is
+    /// decoded as `T`; returns the owner's id with it.
+    ///
+    /// On 401 the token manager decides whether a retry can help (it refreshed,
+    /// or another request already did); a second 401 is reported back too, so
+    /// the manager can tell that even a fresh token is rejected.
+    async fn call<T: DeserializeOwned>(
+        &self,
+        build: impl Fn(&PelotonId) -> Result<reqwest::RequestBuilder, UpstreamError>,
+    ) -> Result<(T, PelotonId), UpstreamError> {
         let _permit = self.permits.acquire().await.map_err(|_| {
             tracing::error!("upstream concurrency limiter closed");
             UpstreamError::Transport
         })?;
-        let (token, owner, response) = self.send(&path, params).await?;
+        let (token, owner, response) = self.send(&build).await?;
         if response.status() != StatusCode::UNAUTHORIZED {
             return Ok((interpret(response).await?, owner));
         }
         if !self.tokens.unauthorized(&token).await {
             return Err(UpstreamError::NotAuthenticated);
         }
-        let (token, owner, response) = self.send(&path, params).await?;
+        let (token, owner, response) = self.send(&build).await?;
         if response.status() == StatusCode::UNAUTHORIZED {
             self.tokens.unauthorized(&token).await;
             return Err(UpstreamError::NotAuthenticated);
@@ -229,23 +335,18 @@ impl Peloton {
         Ok((interpret(response).await?, owner))
     }
 
-    /// Sends one authenticated GET; returns the token and owner it used with
-    /// the response.
+    /// Sends one authenticated request; returns the token and owner it used
+    /// with the response.
     async fn send(
         &self,
-        path: &impl Fn(&PelotonId) -> String,
-        params: &[(&str, String)],
+        build: &impl Fn(&PelotonId) -> Result<reqwest::RequestBuilder, UpstreamError>,
     ) -> Result<(SecretString, PelotonId, reqwest::Response), UpstreamError> {
         let (token, user) = self
             .tokens
             .bearer()
             .await
             .map_err(|_| UpstreamError::NotAuthenticated)?;
-        let url = self.url(&path(&user))?;
-        let response = self
-            .http
-            .get(url)
-            .query(params)
+        let response = build(&user)?
             .bearer_auth(token.expose_secret())
             .header(PLATFORM_HEADER.0, PLATFORM_HEADER.1)
             .send()
@@ -268,6 +369,85 @@ impl Peloton {
 }
 
 const RIDE_JOINS: &str = "ride,ride.instructor";
+
+/// Most GraphQL error codes logged for one answer.
+const MAX_LOGGED_CODES: usize = 10;
+
+/// The GraphQL response envelope. `errors` entries are kept as raw values so
+/// an unexpected error shape can never hide that there were errors.
+#[derive(Deserialize)]
+struct GraphQlReply {
+    #[serde(default)]
+    data: Option<Value>,
+    #[serde(default)]
+    errors: Option<Vec<Value>>,
+}
+
+fn decode_failure(op: &Op, path: String) -> UpstreamError {
+    tracing::warn!(op = op.name, %path, "upstream GraphQL response did not decode");
+    UpstreamError::Decode { path }
+}
+
+/// `name` when it is a short GraphQL-style name (an error code or type name),
+/// which carries no member data and is safe to log; a placeholder otherwise.
+fn loggable_name(name: &str) -> &str {
+    let valid = !name.is_empty()
+        && name.len() <= 64
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+    if valid { name } else { "<invalid>" }
+}
+
+/// Interprets the root field of a schedule mutation or read, a union
+/// dispatched on `__typename`: a `ScheduledClass` decodes as `T`.
+///
+/// # Errors
+///
+/// - `ScheduledClassDoesNotExistError` → [`UpstreamError::NotFound`].
+/// - `CannotScheduleClassError` → [`UpstreamError::CannotSchedule`] with
+///   Peloton's `message`, capped at [`MAX_CANNOT_SCHEDULE_MESSAGE`]
+///   characters ([`UpstreamError::Decode`] at `message` without one).
+/// - Any other member → [`UpstreamError::GraphQl`].
+/// - No string `__typename`, or a `ScheduledClass` that does not decode →
+///   [`UpstreamError::Decode`] with the path inside `root`.
+pub fn schedule_result<T: DeserializeOwned>(root: Value) -> Result<T, UpstreamError> {
+    let Some(typename) = root.get("__typename").and_then(Value::as_str) else {
+        tracing::warn!("schedule result has no __typename");
+        return Err(UpstreamError::Decode {
+            path: "__typename".to_owned(),
+        });
+    };
+    match typename {
+        "ScheduledClass" => serde_path_to_error::deserialize(root).map_err(|err| {
+            let path = err.path().to_string();
+            tracing::warn!(%path, "scheduled class did not decode");
+            UpstreamError::Decode { path }
+        }),
+        "ScheduledClassDoesNotExistError" => Err(UpstreamError::NotFound),
+        "CannotScheduleClassError" => {
+            let code = root
+                .get("code")
+                .and_then(Value::as_str)
+                .map_or("<none>", loggable_name);
+            let Some(message) = root.get("message").and_then(Value::as_str) else {
+                tracing::warn!(code, "cannot-schedule error has no message");
+                return Err(UpstreamError::Decode {
+                    path: "message".to_owned(),
+                });
+            };
+            tracing::info!(code, "Peloton cannot schedule the class");
+            Err(UpstreamError::CannotSchedule {
+                message: message.chars().take(MAX_CANNOT_SCHEDULE_MESSAGE).collect(),
+            })
+        }
+        other => {
+            tracing::warn!(
+                typename = loggable_name(other),
+                "unexpected schedule result member"
+            );
+            Err(UpstreamError::GraphQl)
+        }
+    }
+}
 
 fn utc_iso8601(instant: OffsetDateTime) -> Result<String, UpstreamError> {
     instant
@@ -308,4 +488,25 @@ async fn interpret<T: DeserializeOwned>(response: reqwest::Response) -> Result<T
             UpstreamError::Decode { path }
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::loggable_name;
+
+    #[test]
+    fn loggable_name_keeps_codes_and_type_names() {
+        for name in ["BAD_USER_INPUT", "CannotScheduleClassError", "E42"] {
+            assert_eq!(loggable_name(name), name);
+        }
+    }
+
+    #[test]
+    fn loggable_name_hides_anything_else() {
+        let long = "A".repeat(65);
+        for name in ["", "drop me", "a;b", "é", "x\ny", long.as_str()] {
+            assert_eq!(loggable_name(name), "<invalid>", "{name:?}");
+        }
+        assert_eq!(loggable_name(&"A".repeat(64)), "A".repeat(64));
+    }
 }
