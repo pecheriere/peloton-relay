@@ -16,8 +16,8 @@ All responses are JSON. The OpenAPI 3.1 description is served at `/openapi.json`
 |-------|-------------|
 | `GET /v1/me` | Profile of the authenticated user. |
 | `GET /v1/workouts` | A page of workouts. Query: `page` (from 0), `limit` (1 to 100, default 20), `from` and `to` (RFC 3339 instants). |
-| `GET /v1/workouts/{id}` | One workout. |
-| `GET /v1/workouts/{id}/metrics` | Performance samples of a workout. Query: `every_n` (sample spacing in seconds, 1 to 60, default 1). |
+| `GET /v1/workouts/{id}` | One workout of the account; another member's workout answers 404. |
+| `GET /v1/workouts/{id}/metrics` | Performance samples of a workout of the account. Query: `every_n` (sample spacing in seconds, 1 to 60, default 1). |
 | `GET /v1/classes/{id}` | Details of a class (ride). |
 | `GET /openapi.json` | The OpenAPI description. |
 | `GET /healthz` | Liveness probe. |
@@ -73,9 +73,11 @@ provenance attestation:
 gh attestation verify oci://ghcr.io/pecheriere/peloton-relay:<version> --owner pecheriere
 ```
 
-The container answers `peloton-relay healthcheck` (exit 0 when the local server
-is alive, 1 otherwise), which suits a Compose or Kubernetes health check; the
-image defines none itself.
+The image has no shell, so the binary is addressed by its path. The container
+answers `docker exec peloton-relay /peloton-relay healthcheck` (exit 0 when the
+server answers its liveness probe on the listen address, 1 otherwise), which
+suits a Compose or Kubernetes health check (`["CMD", "/peloton-relay",
+"healthcheck"]`); the image defines none itself.
 
 ## Bootstrap
 
@@ -86,14 +88,17 @@ tool and is not part of the image. On a Mac:
 
 ```sh
 cargo run --release -p peloton-relay-login | \
-  ssh <host> sudo docker exec -i <container> peloton-relay seed
+  ssh <host> sudo docker exec -i <container> /peloton-relay seed
 ```
 
 `seed` reads the token set from stdin, verifies it with Peloton and stores it in
 the state directory. The tokens never touch a command line or a disk outside the
-state directory. Run `peloton-relay-login check` for a login that only reports
-non-secret facts. After seeding, the relay refreshes the credential on its own;
-repeat the bootstrap only if Peloton invalidates the refresh token.
+state directory. Seed right after logging in: a token set whose access token has
+already expired fails the check against `/me`; run the login again. For a login
+that only reports non-secret facts, run
+`cargo run --release -p peloton-relay-login -- check`. After seeding, the relay
+refreshes the credential on its own, checking it every 15 minutes even without
+traffic; repeat the bootstrap only if Peloton invalidates the refresh token.
 
 ## Configuration
 
@@ -102,8 +107,11 @@ repeat the bootstrap only if Peloton invalidates the refresh token.
 | `PELOTON_RELAY_LISTEN` | `0.0.0.0:8080` | Socket address the server binds. |
 | `PELOTON_RELAY_STATE_DIR` | `/state` | Directory holding `state.json`; must be writable by the container user. |
 
-Logs are JSON lines on stderr. A failed Peloton authentication is logged once
-per transition into the failed state as `event="peloton_auth_failed"`.
+Logs are JSON lines on stdout. A failed Peloton authentication is logged once
+per transition into the failed state as `event="peloton_auth_failed"`. When
+Peloton rejects an access token the relay has just refreshed after a 401, it
+logs `event="peloton_unauthorized_after_refresh"` once and forces at most one
+refresh per 10 minutes, rather than rotating the credential on every request.
 
 ## Building
 
@@ -112,8 +120,10 @@ cargo build --release -p peloton-relay      # the server
 docker build -t peloton-relay .             # the image
 ```
 
-CI runs `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, and
-`cargo deny check`. No test or CI job talks to Peloton.
+CI runs `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`,
+`cargo deny check` and an arm64 and amd64 image build. A release tag (`v1.2.3`)
+publishes the image only after those checks pass on the tagged commit, and only
+if that commit is on `main`. No test or CI job talks to Peloton.
 
 ## Caveat
 
