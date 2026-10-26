@@ -326,16 +326,19 @@ pub fn check_event(raw: &str, ride: &PelotonId, start: OffsetDateTime) -> Result
     Ok(())
 }
 
-/// Whether `list` holds the spike's item: the raw id itself, or any id that
-/// decodes to `ride` at `start`.
+/// Whether the spike's item is newly listed: an id in `during` but not in
+/// `before` that is the raw id itself or decodes to `ride` at `start`.
 #[must_use]
-pub fn list_contains(
-    list: &BTreeSet<String>,
+pub fn newly_listed(
+    before: &BTreeSet<String>,
+    during: &BTreeSet<String>,
     raw: &str,
     ride: &PelotonId,
     start: OffsetDateTime,
 ) -> bool {
-    list.contains(raw) || list.iter().any(|id| check_event(id, ride, start).is_ok())
+    during
+        .difference(before)
+        .any(|id| id == raw || check_event(id, ride, start).is_ok())
 }
 
 /// One Stack entry, as the spike reads it.
@@ -353,21 +356,23 @@ pub struct StackItem {
 ///
 /// # Errors
 ///
-/// Returns a message when the shape is unexpected, when `numClasses`
-/// disagrees with the list, or when an entry lacks a `playOrder` or a class
+/// Returns a message when the shape is unexpected, when `numClasses` is
+/// missing or disagrees with the list, or when an entry lacks a `playOrder` or a class
 /// id that can be turned into a ride id (nothing is ever silently dropped).
 pub fn stack_items(stack: &Value) -> Result<Vec<StackItem>, String> {
-    let count = stack.get("numClasses").and_then(Value::as_i64);
+    let count = stack
+        .get("numClasses")
+        .and_then(Value::as_i64)
+        .ok_or("Stack response without numClasses")?;
     let Some(list) = stack.pointer("/userStack/stackedClassList") else {
-        return match count {
-            Some(0) => Ok(Vec::new()),
-            _ => Err("Stack response without userStack.stackedClassList".to_owned()),
+        return if count == 0 {
+            Ok(Vec::new())
+        } else {
+            Err("Stack response without userStack.stackedClassList".to_owned())
         };
     };
     let list = list.as_array().ok_or("stackedClassList is not a list")?;
-    if let Some(count) = count
-        && usize::try_from(count).ok() != Some(list.len())
-    {
+    if usize::try_from(count).ok() != Some(list.len()) {
         return Err(format!(
             "numClasses is {count} but the list holds {} entries",
             list.len()
@@ -762,7 +767,7 @@ fn schedule_round_trip(spike: &Spike<'_>, steps: &mut Steps) -> Result<(), Strin
         format!("{} item(s) in the next 14 days", before.len()),
     );
 
-    let outcome = schedule_writes(spike, steps, &window, &plan)?;
+    let outcome = schedule_writes(spike, steps, &window, &plan, &before)?;
 
     match spike.list_schedule(steps, &window, "schedule_after.json") {
         Ok(after) if after == before && outcome.seen_in_list => steps.record(
@@ -790,14 +795,13 @@ fn schedule_round_trip(spike: &Spike<'_>, steps: &mut Steps) -> Result<(), Strin
             );
         }
         Err(e) => {
+            // An add was always attempted by now, and its reply may have been lost.
             steps.record("schedule list (after)", Status::Fail, e);
-            if outcome.wrote {
-                eprintln!();
-                eprintln!(
-                    "!!! Could not re-read the schedule. Check it by hand for {}",
-                    plan.describe()
-                );
-            }
+            eprintln!();
+            eprintln!(
+                "!!! Could not re-read the schedule. Check it by hand for {}",
+                plan.describe()
+            );
         }
     }
 
@@ -809,9 +813,7 @@ fn schedule_round_trip(spike: &Spike<'_>, steps: &mut Steps) -> Result<(), Strin
 
 /// What the schedule writes left behind.
 struct WriteOutcome {
-    /// Peloton reported a scheduled class (so the account was changed).
-    wrote: bool,
-    /// The list showed the spike's item after the add.
+    /// The list showed the spike's item, absent before, after the add.
     seen_in_list: bool,
     /// The raw id still on the account when removal did not succeed.
     left_over: Option<String>,
@@ -824,6 +826,7 @@ fn schedule_writes(
     steps: &mut Steps,
     window: &Window,
     plan: &Plan<'_>,
+    before: &BTreeSet<String>,
 ) -> Result<WriteOutcome, String> {
     let start_iso = iso(plan.start)?;
     let added = spike
@@ -845,7 +848,6 @@ fn schedule_writes(
             );
             eprintln!("note: if the add reached Peloton anyway, the after-list check will show it");
             return Ok(WriteOutcome {
-                wrote: false,
                 seen_in_list: false,
                 left_over: None,
             });
@@ -862,7 +864,7 @@ fn schedule_writes(
     );
 
     let seen_in_list = match spike.list_schedule(steps, window, "schedule_during.json") {
-        Ok(list) if list_contains(&list, &first, plan.ride, plan.start) => {
+        Ok(during) if newly_listed(before, &during, &first, plan.ride, plan.start) => {
             steps.record(
                 "schedule list (with spike item)",
                 Status::Pass,
@@ -874,7 +876,7 @@ fn schedule_writes(
             steps.record(
                 "schedule list (with spike item)",
                 Status::Fail,
-                "the new item is not in the list",
+                "the new item is not in the list (or was already there before)",
             );
             false
         }
@@ -913,7 +915,6 @@ fn schedule_writes(
     let left_over = removed.is_err().then_some(current);
     steps.result("schedule remove", removed);
     Ok(WriteOutcome {
-        wrote: true,
         seen_in_list,
         left_over,
     })
@@ -1111,7 +1112,7 @@ mod tests {
     use time::macros::datetime;
 
     use super::{
-        CallFailure, Restore, StackItem, check_event, json_type, list_contains, restore_ids,
+        CallFailure, Restore, StackItem, check_event, json_type, newly_listed, restore_ids,
         root_field, schedule_ids, scheduled_result, spike_start, stack_items,
     };
     use crate::session::GraphqlReply;
@@ -1243,18 +1244,45 @@ mod tests {
     }
 
     #[test]
-    fn list_contains_matches_raw_or_decoded_ids() {
+    fn newly_listed_requires_an_item_absent_before() {
+        use std::collections::BTreeSet;
         let start = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
         let ours = event(RIDE, 1_700_000_000);
-        let list: std::collections::BTreeSet<String> =
-            ["opaque".to_owned(), ours.clone()].into_iter().collect();
-        assert!(list_contains(&list, "opaque", &ride(OTHER), start));
-        assert!(list_contains(&list, "different-raw", &ride(RIDE), start));
-        let others: std::collections::BTreeSet<String> =
-            [event(OTHER, 1_700_000_000), event(RIDE, 1_700_003_600)]
-                .into_iter()
-                .collect();
-        assert!(!list_contains(&others, &ours, &ride(RIDE), start));
+        let set = |ids: &[&str]| ids.iter().map(|s| (*s).to_owned()).collect::<BTreeSet<_>>();
+        let empty = set(&[]);
+        // By raw id, or by a different raw id that decodes to ride + start.
+        assert!(newly_listed(
+            &empty,
+            &set(&["opaque"]),
+            "opaque",
+            &ride(OTHER),
+            start
+        ));
+        assert!(newly_listed(
+            &empty,
+            &set(&[&ours]),
+            "different-raw",
+            &ride(RIDE),
+            start
+        ));
+        // Already there before: not proof of the spike's add.
+        assert!(!newly_listed(
+            &set(&["opaque"]),
+            &set(&["opaque"]),
+            "opaque",
+            &ride(RIDE),
+            start
+        ));
+        assert!(!newly_listed(
+            &set(&[&ours]),
+            &set(&[&ours]),
+            "different-raw",
+            &ride(RIDE),
+            start
+        ));
+        // Another ride or another time.
+        let others = set(&[&event(OTHER, 1_700_000_000), &event(RIDE, 1_700_003_600)]);
+        assert!(!newly_listed(&empty, &others, &ours, &ride(RIDE), start));
     }
 
     #[test]
@@ -1273,7 +1301,7 @@ mod tests {
     #[test]
     fn stack_items_accepts_base64_class_ids_and_empty_stacks() {
         let encoded = OnDemandClassId::from_ride(&ride(RIDE));
-        let stack = json!({"userStack": {"stackedClassList": [
+        let stack = json!({"numClasses": 1, "userStack": {"stackedClassList": [
             {"playOrder": 1, "pelotonClass": {"classId": encoded.as_str(), "title": "A"}},
         ]}});
         assert_eq!(stack_items(&stack).expect("items")[0].ride, ride(RIDE));
@@ -1282,7 +1310,7 @@ mod tests {
 
     #[test]
     fn stack_items_refuses_undecodable_entries() {
-        let stack = json!({"userStack": {"stackedClassList": [
+        let stack = json!({"numClasses": 1, "userStack": {"stackedClassList": [
             {"playOrder": 1, "pelotonClass": {"classId": "../x", "title": "A"}},
         ]}});
         assert!(stack_items(&stack).is_err());
@@ -1299,8 +1327,21 @@ mod tests {
     }
 
     #[test]
+    fn stack_items_requires_num_classes() {
+        let list = json!([{"playOrder": 1, "pelotonClass": {"classId": RIDE, "title": "A"}}]);
+        for stack in [
+            json!({"userStack": {"stackedClassList": list}}),
+            json!({"numClasses": null, "userStack": {"stackedClassList": list}}),
+            json!({}),
+        ] {
+            let err = stack_items(&stack).expect_err("no numClasses");
+            assert!(err.contains("numClasses"), "{err}");
+        }
+    }
+
+    #[test]
     fn stack_items_refuses_missing_play_order() {
-        let stack = json!({"userStack": {"stackedClassList": [
+        let stack = json!({"numClasses": 2, "userStack": {"stackedClassList": [
             {"playOrder": 1, "pelotonClass": {"classId": RIDE, "title": "A"}},
             {"pelotonClass": {"classId": OTHER, "title": "B"}},
         ]}});
