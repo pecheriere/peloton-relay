@@ -367,3 +367,39 @@ async fn limits_in_flight_requests() {
         .unwrap();
     assert_eq!(peak, 4);
 }
+
+#[tokio::test]
+async fn rejected_refreshed_token_does_not_refresh_again() {
+    let server = MockServer::start().await;
+    rotation().expect(1).mount(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/me"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let logs = captured_logs();
+    let peloton = client(&dir, &server, Some("tok-1"));
+    async {
+        for _ in 0..2 {
+            let err = peloton.me().await.unwrap_err();
+            assert!(matches!(err, UpstreamError::NotAuthenticated), "{err:?}");
+        }
+    }
+    .instrument(tracing::info_span!("case", name = "refresh_storm"))
+    .await;
+    let requests = server.received_requests().await.unwrap();
+    let refreshes = requests
+        .iter()
+        .filter(|r| r.url.path() == "/oauth/token")
+        .count();
+    assert_eq!(refreshes, 1);
+    // tok-1, tok-2, then tok-2 once more with no retry: no point resending it.
+    assert_eq!(requests.len() - refreshes, 3);
+    let warnings = logs
+        .contents()
+        .lines()
+        .filter(|l| l.contains("refresh_storm") && l.contains("peloton_unauthorized_after_refresh"))
+        .count();
+    assert_eq!(warnings, 1, "{}", logs.contents());
+}

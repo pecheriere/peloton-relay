@@ -1,8 +1,9 @@
 //! Client for the read-only subset of the Peloton API.
 //!
 //! Every call authenticates with the [`TokenManager`]'s current access token.
-//! A 401 reports the rejected token back to the manager and retries once with
-//! a fresh one; a second 401 means the credential is unusable. Response
+//! A 401 reports the rejected token back to the manager and retries once when
+//! the manager has a different token; otherwise, or on a second 401, the
+//! credential is unusable for now. Response
 //! bodies never reach errors or logs: a decode failure reports only the path
 //! of the offending field.
 
@@ -14,7 +15,7 @@ use peloton::ids::PelotonId;
 use peloton::upstream::{Me, PerformanceGraph, RideDetails, Workout, WorkoutPage};
 use reqwest::StatusCode;
 use reqwest::header::RETRY_AFTER;
-use secrecy::ExposeSecret as _;
+use secrecy::{ExposeSecret as _, SecretString};
 use serde::de::DeserializeOwned;
 use time::OffsetDateTime;
 use time::UtcOffset;
@@ -174,6 +175,10 @@ impl Peloton {
     }
 
     /// Issues a GET; `path` receives the credential owner's id.
+    ///
+    /// On 401 the token manager decides whether a retry can help (it refreshed,
+    /// or another request already did); a second 401 is reported back too, so
+    /// the manager can tell that even a fresh token is rejected.
     async fn get<T: DeserializeOwned>(
         &self,
         path: impl Fn(&PelotonId) -> String,
@@ -183,40 +188,50 @@ impl Peloton {
             tracing::error!("upstream concurrency limiter closed");
             UpstreamError::Transport
         })?;
-        for attempt in 0..2 {
-            let (token, user) = self
-                .tokens
-                .bearer()
-                .await
-                .map_err(|_| UpstreamError::NotAuthenticated)?;
-            let url = self.url(&path(&user))?;
-            let response = self
-                .http
-                .get(url)
-                .query(params)
-                .bearer_auth(token.expose_secret())
-                .header(PLATFORM_HEADER.0, PLATFORM_HEADER.1)
-                .send()
-                .await
-                .map_err(|err| {
-                    tracing::warn!(
-                        timeout = err.is_timeout(),
-                        connect = err.is_connect(),
-                        "upstream request failed"
-                    );
-                    UpstreamError::Transport
-                })?;
-            let status = response.status();
-            if status == StatusCode::UNAUTHORIZED {
-                if attempt == 0 {
-                    self.tokens.unauthorized(&token).await;
-                    continue;
-                }
-                return Err(UpstreamError::NotAuthenticated);
-            }
-            return interpret(status, response).await;
+        let (token, response) = self.send(&path, params).await?;
+        if response.status() != StatusCode::UNAUTHORIZED {
+            return interpret(response).await;
         }
-        Err(UpstreamError::NotAuthenticated)
+        if !self.tokens.unauthorized(&token).await {
+            return Err(UpstreamError::NotAuthenticated);
+        }
+        let (token, response) = self.send(&path, params).await?;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            self.tokens.unauthorized(&token).await;
+            return Err(UpstreamError::NotAuthenticated);
+        }
+        interpret(response).await
+    }
+
+    /// Sends one authenticated GET; returns the token it used with the response.
+    async fn send(
+        &self,
+        path: &impl Fn(&PelotonId) -> String,
+        params: &[(&str, String)],
+    ) -> Result<(SecretString, reqwest::Response), UpstreamError> {
+        let (token, user) = self
+            .tokens
+            .bearer()
+            .await
+            .map_err(|_| UpstreamError::NotAuthenticated)?;
+        let url = self.url(&path(&user))?;
+        let response = self
+            .http
+            .get(url)
+            .query(params)
+            .bearer_auth(token.expose_secret())
+            .header(PLATFORM_HEADER.0, PLATFORM_HEADER.1)
+            .send()
+            .await
+            .map_err(|err| {
+                tracing::warn!(
+                    timeout = err.is_timeout(),
+                    connect = err.is_connect(),
+                    "upstream request failed"
+                );
+                UpstreamError::Transport
+            })?;
+        Ok((token, response))
     }
 
     fn url(&self, path: &str) -> Result<Url, UpstreamError> {
@@ -234,11 +249,8 @@ fn utc_iso8601(instant: OffsetDateTime) -> Result<String, UpstreamError> {
         .map_err(|_| UpstreamError::Transport)
 }
 
-async fn interpret<T: DeserializeOwned>(
-    status: StatusCode,
-    response: reqwest::Response,
-) -> Result<T, UpstreamError> {
-    match status {
+async fn interpret<T: DeserializeOwned>(response: reqwest::Response) -> Result<T, UpstreamError> {
+    match response.status() {
         s if s.is_success() => {}
         StatusCode::NOT_FOUND => return Err(UpstreamError::NotFound),
         StatusCode::TOO_MANY_REQUESTS => {

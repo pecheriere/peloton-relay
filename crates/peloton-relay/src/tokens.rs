@@ -3,8 +3,13 @@
 //! All state sits behind one async mutex that stays locked across a refresh,
 //! so concurrent callers share a single refresh request (single-flight) and
 //! the rotated refresh token is on disk before anyone gets the new access
-//! token. The locked work runs in its own task: a caller that goes away
-//! mid-refresh cannot drop a rotated refresh token on the floor.
+//! token. The locked work runs in its own tracked task: a caller that goes
+//! away mid-refresh cannot drop a rotated refresh token on the floor, and
+//! [`TokenManager::drain`] lets shutdown wait for that work to finish.
+//!
+//! A 401 forces a refresh at most once per [`REACTIVE_REFRESH_COOLDOWN`]; when
+//! Peloton also rejects the token that refresh minted, the manager logs
+//! `event="peloton_unauthorized_after_refresh"` instead of rotating again.
 
 use std::future::Future;
 use std::io;
@@ -18,6 +23,9 @@ use peloton::oauth::{AuthClient, AuthError};
 use secrecy::{ExposeSecret as _, SecretString};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
+use tokio::time::MissedTickBehavior;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tracing::Instrument as _;
 use tracing::instrument::WithSubscriber as _;
 
@@ -31,6 +39,12 @@ const INITIAL_BACKOFF: Duration = Duration::from_secs(5);
 /// Upper bound for the wait between transient refresh failures.
 const MAX_BACKOFF: Duration = Duration::from_secs(5 * 60);
 
+/// Minimum time between two refreshes forced by 401 responses.
+pub const REACTIVE_REFRESH_COOLDOWN: Duration = Duration::from_secs(10 * 60);
+
+/// How often [`TokenManager::keep_fresh`] checks the credential.
+pub const BACKGROUND_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+
 /// No usable Peloton credential: not seeded yet, unreadable, rejected, or
 /// expired while the token endpoint is unavailable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -41,6 +55,8 @@ pub struct NotAuthenticated;
 #[derive(Debug)]
 pub struct TokenManager {
     shared: Arc<Shared>,
+    /// The detached tasks doing the locked work.
+    tasks: TaskTracker,
 }
 
 #[derive(Debug)]
@@ -81,6 +97,8 @@ struct Ready {
     file_id: Option<FileId>,
     /// An external change was ignored because `state` is not saved yet (logged).
     external_ignored: bool,
+    /// Set when the current access token came from a refresh forced by a 401.
+    reactive: Option<Reactive>,
 }
 
 impl Ready {
@@ -91,8 +109,23 @@ impl Ready {
             backoff: None,
             file_id: Some(file_id),
             external_ignored: false,
+            reactive: None,
         }
     }
+}
+
+/// A refresh forced by a 401 response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Reactive {
+    /// When it happened.
+    at: Instant,
+    /// Whether the rejection of the token it minted was logged.
+    warned: bool,
+}
+
+/// Whether another refresh forced by a 401 is allowed at `now`.
+fn cooldown_elapsed(last: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(last) >= REACTIVE_REFRESH_COOLDOWN
 }
 
 /// Whether the in-memory state is on disk.
@@ -259,6 +292,7 @@ impl TokenManager {
                 inner: Mutex::new(Inner::default()),
                 ready: AtomicBool::new(false),
             }),
+            tasks: TaskTracker::new(),
         }
     }
 
@@ -273,20 +307,55 @@ impl TokenManager {
     /// [`NotAuthenticated`] when no usable credential is available.
     pub async fn bearer(&self) -> Result<(SecretString, PelotonId), NotAuthenticated> {
         let shared = Arc::clone(&self.shared);
-        detached(async move { shared.bearer().await })
+        self.detached(async move { shared.bearer().await })
             .await
             .unwrap_or(Err(NotAuthenticated))
     }
 
-    /// Reports that Peloton rejected `used` with 401.
+    /// Reports that Peloton rejected `used` with 401, and returns whether a
+    /// retry may succeed: the current access token is no longer `used`.
     ///
     /// Refreshes only if `used` is still the current access token, so a burst
-    /// of failed requests causes at most one refresh.
-    pub async fn unauthorized(&self, used: &SecretString) {
+    /// of failed requests causes at most one refresh, and at most once per
+    /// [`REACTIVE_REFRESH_COOLDOWN`], so a token Peloton keeps rejecting does
+    /// not rotate the credential on every request.
+    pub async fn unauthorized(&self, used: &SecretString) -> bool {
         let shared = Arc::clone(&self.shared);
         let used = used.clone();
-        // `None` only when the runtime is shutting down; nothing left to do then.
-        let _ = detached(async move { shared.unauthorized(&used).await }).await;
+        // `None` only when the runtime is shutting down; nothing left to retry then.
+        self.detached(async move { shared.unauthorized(&used).await })
+            .await
+            .unwrap_or(false)
+    }
+
+    /// Calls [`Self::bearer`] every `every` (first right away) until
+    /// `shutdown` is cancelled, so an idle relay still refreshes on time and
+    /// a dead credential is reported without waiting for traffic.
+    ///
+    /// Stopping mid-refresh is safe: the refresh itself is a tracked task.
+    pub async fn keep_fresh(&self, every: Duration, shutdown: &CancellationToken) {
+        let mut ticks = tokio::time::interval(every);
+        ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                () = shutdown.cancelled() => return,
+                () = async {
+                    ticks.tick().await;
+                    // Failures are logged by the manager; there is no caller to tell.
+                    let _ = self.bearer().await;
+                } => {}
+            }
+        }
+    }
+
+    /// Waits up to `timeout` for detached refresh and save work to finish,
+    /// so a rotated refresh token reaches the state file before the process
+    /// exits. Returns `false` when work was still running at the deadline.
+    pub async fn drain(&self, timeout: Duration) -> bool {
+        self.tasks.close();
+        tokio::time::timeout(timeout, self.tasks.wait())
+            .await
+            .is_ok()
     }
 
     /// Whether a credential is loaded, persisted and not rejected.
@@ -299,21 +368,28 @@ impl TokenManager {
     }
 }
 
-/// Runs `work` in its own task so it completes even if the caller is dropped.
-///
-/// The task keeps the caller's span and subscriber. Panics propagate to the
-/// caller; `None` means the runtime cancelled the task.
-async fn detached<T, F>(work: F) -> Option<T>
-where
-    F: Future<Output = T> + Send + 'static,
-    T: Send + 'static,
-{
-    match tokio::spawn(work.in_current_span().with_current_subscriber()).await {
-        Ok(value) => Some(value),
-        Err(err) => match err.try_into_panic() {
-            Ok(payload) => panic::resume_unwind(payload),
-            Err(_) => None,
-        },
+impl TokenManager {
+    /// Runs `work` in its own tracked task so it completes even if the caller
+    /// is dropped, and [`Self::drain`] can wait for it.
+    ///
+    /// The task keeps the caller's span and subscriber. Panics propagate to the
+    /// caller; `None` means the runtime cancelled the task.
+    async fn detached<T, F>(&self, work: F) -> Option<T>
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        match self
+            .tasks
+            .spawn(work.in_current_span().with_current_subscriber())
+            .await
+        {
+            Ok(value) => Some(value),
+            Err(err) => match err.try_into_panic() {
+                Ok(payload) => panic::resume_unwind(payload),
+                Err(_) => None,
+            },
+        }
     }
 }
 
@@ -334,14 +410,41 @@ impl Shared {
         inner.usable(OffsetDateTime::now_utc())
     }
 
-    async fn unauthorized(&self, used: &SecretString) {
+    async fn unauthorized(&self, used: &SecretString) -> bool {
         let mut inner = self.inner.lock().await;
-        let current = matches!(&inner.phase, Phase::Ready(ready)
-            if ready.state.tokens.access_token.expose_secret() == used.expose_secret());
-        if current {
-            self.refresh(&mut inner).await;
+        let now = Instant::now();
+        let force = match &mut inner.phase {
+            Phase::Ready(ready)
+                if ready.state.tokens.access_token.expose_secret() == used.expose_secret() =>
+            {
+                match &mut ready.reactive {
+                    None => true,
+                    Some(reactive) => {
+                        if !reactive.warned {
+                            reactive.warned = true;
+                            tracing::warn!(
+                                event = "peloton_unauthorized_after_refresh",
+                                "Peloton rejected a just-refreshed access token; not refreshing again for now"
+                            );
+                        }
+                        cooldown_elapsed(reactive.at, now)
+                    }
+                }
+            }
+            _ => false,
+        };
+        if force
+            && self.refresh(&mut inner).await
+            && let Phase::Ready(ready) = &mut inner.phase
+        {
+            ready.reactive = Some(Reactive {
+                at: now,
+                warned: false,
+            });
         }
         self.publish(&inner);
+        matches!(&inner.phase, Phase::Ready(ready)
+            if ready.state.tokens.access_token.expose_secret() != used.expose_secret())
     }
 
     fn publish(&self, inner: &Inner) {
@@ -391,32 +494,37 @@ impl Shared {
         }
     }
 
-    /// Refreshes the credential unless a backoff is in effect.
-    async fn refresh(&self, inner: &mut Inner) {
+    /// Refreshes the credential unless a backoff is in effect; returns whether
+    /// Peloton issued new tokens.
+    async fn refresh(&self, inner: &mut Inner) -> bool {
         let Phase::Ready(ready) = &mut inner.phase else {
-            return;
+            return false;
         };
         let now = Instant::now();
         if ready.backoff.is_some_and(|b| !b.allows(now)) {
-            return;
+            return false;
         }
         match self.auth.refresh(&ready.state.tokens.refresh_token).await {
             Ok(tokens) => {
                 ready.state.tokens = tokens;
                 ready.backoff = None;
+                ready.reactive = None;
                 ready.persist = Persist::Pending;
                 tracing::info!(event = "peloton_token_refreshed", expires_at = %ready.state.tokens.expires_at, "refreshed the Peloton access token");
                 self.persist(ready).await;
+                true
             }
             Err(err) if is_terminal(err) => {
                 let dead_refresh = ready.state.tokens.refresh_token.clone();
                 inner.phase = Phase::Failed { dead_refresh };
                 tracing::error!(event = "peloton_auth_failed", reason = %err, "Peloton rejected the refresh token; run seed to sign in again");
+                false
             }
             Err(err) => {
                 let backoff = Backoff::after_failure(ready.backoff, now);
                 ready.backoff = Some(backoff);
                 tracing::warn!(event = "peloton_refresh_retry", reason = %err, retry_in_s = backoff.delay.as_secs(), "could not refresh the Peloton access token");
+                false
             }
         }
     }
@@ -470,7 +578,23 @@ mod tests {
 
     use peloton::oauth::AuthError;
 
-    use super::{Backoff, INITIAL_BACKOFF, MAX_BACKOFF, is_terminal};
+    use super::{
+        Backoff, INITIAL_BACKOFF, MAX_BACKOFF, REACTIVE_REFRESH_COOLDOWN, cooldown_elapsed,
+        is_terminal,
+    };
+
+    #[test]
+    fn reactive_refresh_waits_for_the_cooldown() {
+        let last = Instant::now();
+        assert!(!cooldown_elapsed(last, last));
+        let just_before = (last + REACTIVE_REFRESH_COOLDOWN)
+            .checked_sub(Duration::from_millis(1))
+            .unwrap();
+        assert!(!cooldown_elapsed(last, just_before));
+        assert!(cooldown_elapsed(last, last + REACTIVE_REFRESH_COOLDOWN));
+        // A clock reading before `last` never allows a refresh.
+        assert!(!cooldown_elapsed(last + REACTIVE_REFRESH_COOLDOWN, last));
+    }
 
     #[test]
     fn rejected_grants_and_client_errors_are_terminal() {

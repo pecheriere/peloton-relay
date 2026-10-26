@@ -9,10 +9,11 @@ use peloton::oauth::{AUTH_DOMAIN, AuthClient};
 use peloton_relay::api::{AppState, router};
 use peloton_relay::config::{Config, http_client};
 use peloton_relay::seed::run_seed;
-use peloton_relay::tokens::{DEFAULT_REFRESH_MARGIN, TokenManager};
+use peloton_relay::tokens::{BACKGROUND_REFRESH_INTERVAL, DEFAULT_REFRESH_MARGIN, TokenManager};
 use peloton_relay::upstream::{DEFAULT_MAX_IN_FLIGHT, Peloton};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
+use tokio_util::sync::CancellationToken;
 use url::Url;
 
 /// Read-only Peloton API relay server.
@@ -35,6 +36,8 @@ enum Command {
 
 /// Total time the healthcheck may take.
 const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long shutdown waits for an in-flight refresh to be saved.
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -71,22 +74,49 @@ async fn serve() -> Result<(), String> {
         Arc::clone(&tokens),
         DEFAULT_MAX_IN_FLIGHT,
     ));
-    let app = router(AppState { peloton, tokens });
+    let app = router(AppState {
+        peloton,
+        tokens: Arc::clone(&tokens),
+    });
 
     let listener = TcpListener::bind(config.listen)
         .await
         .map_err(|err| format!("cannot listen on {}: {err}", config.listen))?;
+    let shutdown = CancellationToken::new();
+    let signal = shutdown_signal(shutdown.clone())?;
+    let refresher = tokio::spawn({
+        let tokens = Arc::clone(&tokens);
+        let shutdown = shutdown.clone();
+        async move {
+            tokens
+                .keep_fresh(BACKGROUND_REFRESH_INTERVAL, &shutdown)
+                .await;
+        }
+    });
     tracing::info!(listen = %config.listen, "serving");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal()?)
-        .await
-        .map_err(|err| format!("server failed: {err}"))?;
+    let served = axum::serve(listener, app)
+        .with_graceful_shutdown(signal)
+        .await;
+
+    // Also reached when the server fails: stop refreshing, then let an
+    // in-flight refresh save the rotated refresh token before exiting.
+    shutdown.cancel();
+    if refresher.await.is_err() {
+        tracing::error!("background refresh task failed");
+    }
+    if !tokens.drain(DRAIN_TIMEOUT).await {
+        tracing::warn!(
+            event = "token_work_abandoned",
+            "a token refresh was still running at shutdown"
+        );
+    }
+    served.map_err(|err| format!("server failed: {err}"))?;
     tracing::info!("shut down");
     Ok(())
 }
 
-/// Resolves on SIGTERM or Ctrl-C.
-fn shutdown_signal() -> Result<impl Future<Output = ()>, String> {
+/// Resolves on SIGTERM or Ctrl-C, cancelling `shutdown` first.
+fn shutdown_signal(shutdown: CancellationToken) -> Result<impl Future<Output = ()>, String> {
     let mut term = signal(SignalKind::terminate())
         .map_err(|err| format!("cannot install the SIGTERM handler: {err}"))?;
     Ok(async move {
@@ -94,6 +124,7 @@ fn shutdown_signal() -> Result<impl Future<Output = ()>, String> {
             _ = term.recv() => {}
             _ = tokio::signal::ctrl_c() => {}
         }
+        shutdown.cancel();
     })
 }
 

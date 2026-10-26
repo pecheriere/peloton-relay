@@ -11,6 +11,7 @@ use peloton_relay::store::StoreError;
 use peloton_relay::tokens::{NotAuthenticated, TokenManager};
 use secrecy::{ExposeSecret, SecretString};
 use time::{Duration, OffsetDateTime};
+use tokio_util::sync::CancellationToken;
 use tracing::Instrument as _;
 use url::Url;
 use wiremock::matchers::{body_string_contains, method, path};
@@ -588,4 +589,143 @@ async fn unsaved_tokens_win_over_external_seed() {
         "rotated-refresh"
     );
     assert_eq!(refresh_calls(&server).await, 1);
+}
+
+/// Polls `condition` every 10 ms for up to five seconds.
+async fn eventually(mut condition: impl AsyncFnMut() -> bool) -> bool {
+    for _ in 0..500 {
+        if condition().await {
+            return true;
+        }
+        tokio::time::sleep(StdDuration::from_millis(10)).await;
+    }
+    false
+}
+
+#[tokio::test]
+async fn background_loop_refreshes_without_traffic() {
+    let server = MockServer::start().await;
+    refresh_mock("old-refresh")
+        .respond_with(rotated_tokens())
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(&state("old-access", "old-refresh", Duration::minutes(30)))
+        .unwrap();
+    let tokens = Arc::new(manager(dir.path(), &server));
+    let shutdown = CancellationToken::new();
+    let refresher = tokio::spawn({
+        let tokens = Arc::clone(&tokens);
+        let shutdown = shutdown.clone();
+        async move {
+            tokens
+                .keep_fresh(StdDuration::from_secs(3600), &shutdown)
+                .await;
+        }
+    });
+
+    // No request is made; the loop's first tick alone refreshes the due token.
+    assert!(eventually(async || refresh_calls(&server).await == 1).await);
+    assert!(
+        eventually(async || file
+            .load()
+            .unwrap()
+            .unwrap()
+            .tokens
+            .refresh_token
+            .expose_secret()
+            == "rotated-refresh")
+        .await
+    );
+    shutdown.cancel();
+    tokio::time::timeout(StdDuration::from_secs(1), refresher)
+        .await
+        .expect("loop stops on shutdown")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn background_loop_keeps_checking() {
+    let server = MockServer::start().await;
+    refresh_mock("seeded-refresh")
+        .respond_with(rotated_tokens())
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(&state("old-access", "old-refresh", Duration::hours(48)))
+        .unwrap();
+    let tokens = Arc::new(manager(dir.path(), &server));
+    let shutdown = CancellationToken::new();
+    let refresher = tokio::spawn({
+        let tokens = Arc::clone(&tokens);
+        let shutdown = shutdown.clone();
+        async move {
+            tokens
+                .keep_fresh(StdDuration::from_millis(20), &shutdown)
+                .await;
+        }
+    });
+    assert!(eventually(async || tokens.is_ready()).await);
+    assert_eq!(refresh_calls(&server).await, 0);
+
+    // A later tick picks up a due credential and refreshes it.
+    file.save(&state(
+        "seeded-access",
+        "seeded-refresh",
+        Duration::minutes(30),
+    ))
+    .unwrap();
+    assert!(eventually(async || refresh_calls(&server).await == 1).await);
+    shutdown.cancel();
+    tokio::time::timeout(StdDuration::from_secs(1), refresher)
+        .await
+        .expect("loop stops on shutdown")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn drain_waits_for_an_abandoned_refresh() {
+    let server = MockServer::start().await;
+    refresh_mock("old-refresh")
+        .respond_with(rotated_tokens().set_delay(StdDuration::from_millis(300)))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(&state("old-access", "old-refresh", -Duration::minutes(5)))
+        .unwrap();
+    let tokens = manager(dir.path(), &server);
+
+    let abandoned = tokio::time::timeout(StdDuration::from_millis(50), tokens.bearer()).await;
+    assert!(abandoned.is_err());
+
+    // Shutdown: the rotated refresh token must be on disk once drained.
+    assert!(tokens.drain(StdDuration::from_secs(5)).await);
+    let on_disk = file.load().unwrap().unwrap();
+    assert_eq!(
+        on_disk.tokens.refresh_token.expose_secret(),
+        "rotated-refresh"
+    );
+}
+
+#[tokio::test]
+async fn drain_gives_up_at_the_deadline() {
+    let server = MockServer::start().await;
+    refresh_mock("old-refresh")
+        .respond_with(rotated_tokens().set_delay(StdDuration::from_secs(2)))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    state_file(dir.path())
+        .save(&state("old-access", "old-refresh", -Duration::minutes(5)))
+        .unwrap();
+    let tokens = manager(dir.path(), &server);
+    let abandoned = tokio::time::timeout(StdDuration::from_millis(50), tokens.bearer()).await;
+    assert!(abandoned.is_err());
+    assert!(!tokens.drain(StdDuration::from_millis(50)).await);
 }
