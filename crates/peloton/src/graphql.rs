@@ -50,7 +50,9 @@ pub fn op_url(op: &str, kind: OpKind) -> String {
     format!("{GRAPHQL_URL}?{}={op}", kind.as_str())
 }
 
-/// The class fields the relay reads wherever Peloton returns a class.
+/// The class fields the relay reads wherever Peloton returns a class. A
+/// scheduled on-demand class comes back as a `LiveClass`, so both members
+/// select the same details.
 macro_rules! class_summary_fragment {
     () => {
         "
@@ -64,6 +66,20 @@ fragment ClassSummary on PelotonClass {
     slug
   }
   ... on OnDemandInstructorClass {
+    airTime
+    fitnessDiscipline {
+      slug
+      displayName
+    }
+    difficultyLevel {
+      slug
+      displayName
+    }
+    instructor {
+      name
+    }
+  }
+  ... on LiveClass {
     airTime
     fitnessDiscipline {
       slug
