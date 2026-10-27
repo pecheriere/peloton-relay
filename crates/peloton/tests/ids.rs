@@ -124,3 +124,57 @@ fn scheduled_id_parses_and_rejects() {
     assert!("eyJ".parse::<ScheduledClassId>().is_err());
     assert!(b64("not json").parse::<ScheduledClassId>().is_err());
 }
+
+#[test]
+fn scheduled_id_converts_to_and_from_url_safe_base64() {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    // Valid ids are ASCII JSON without '>', '?' or '~', so their standard
+    // base64 never holds '+' or '/'; padding is what the conversion removes.
+    let encoded = (1_894_017_600_i64..1_894_017_700)
+        .map(|start| b64(&event_json(HOME, RIDE, &start.to_string(), "event")))
+        .find(|encoded| encoded.ends_with('='))
+        .expect("an id with padding");
+    let id: ScheduledClassId = encoded.parse().expect("valid event id");
+    let url_safe = id.url_safe();
+    assert!(
+        url_safe
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+        "{url_safe}"
+    );
+    assert_eq!(
+        URL_SAFE_NO_PAD.decode(url_safe).unwrap(),
+        STANDARD.decode(&encoded).unwrap()
+    );
+    let back = ScheduledClassId::from_url_safe(url_safe).expect("round trip");
+    assert_eq!(back.as_str(), encoded);
+    assert_eq!(back, id);
+}
+
+#[test]
+fn scheduled_id_from_url_safe_rejects_anything_else() {
+    use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
+
+    let event = event_json(HOME, RIDE, "1894017600", "event");
+    let on_demand = OnDemandClassId::from_ride(&ride());
+    let on_demand = URL_SAFE_NO_PAD.encode(STANDARD.decode(on_demand.as_str()).unwrap());
+    for bad in [
+        String::new(),
+        // Standard base64 and padded URL-safe base64 are not the relay's form.
+        STANDARD.encode(&event),
+        URL_SAFE.encode(&event),
+        format!("{}!", URL_SAFE_NO_PAD.encode(&event)),
+        URL_SAFE_NO_PAD.encode(event_json(HOME, RIDE, "1894017600", "on_demand")),
+        URL_SAFE_NO_PAD.encode(event_json(HOME, "XYZ", "1894017600", "event")),
+        URL_SAFE_NO_PAD.encode(event_json(HOME, RIDE, "\"soon\"", "event")),
+        URL_SAFE_NO_PAD.encode("not json"),
+        on_demand,
+        "A".repeat(1024),
+    ] {
+        assert!(
+            ScheduledClassId::from_url_safe(&bad).is_err(),
+            "accepted {bad:?}"
+        );
+    }
+}

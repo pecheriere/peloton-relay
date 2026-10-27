@@ -14,6 +14,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use utoipa::ToSchema;
 
+use crate::stack::StackError;
 use crate::upstream::UpstreamError;
 
 /// The JSON body of every error response.
@@ -49,6 +50,9 @@ pub enum ApiError {
         /// How long Peloton asked us to wait, when it said so.
         retry_after: Option<Duration>,
     },
+    /// The class is already in the Stack.
+    #[error("the class is already in the Stack")]
+    AlreadyInStack,
     /// Peloton refused to schedule the class.
     #[error("Peloton cannot schedule the class")]
     CannotSchedule {
@@ -67,6 +71,7 @@ impl fmt::Debug for ApiError {
             Self::NotFound => f.write_str("NotFound"),
             Self::MethodNotAllowed => f.write_str("MethodNotAllowed"),
             Self::NotAuthenticated => f.write_str("NotAuthenticated"),
+            Self::AlreadyInStack => f.write_str("AlreadyInStack"),
             Self::RateLimited { retry_after } => f
                 .debug_struct("RateLimited")
                 .field("retry_after", retry_after)
@@ -83,33 +88,45 @@ impl ApiError {
             Self::InvalidInput => StatusCode::BAD_REQUEST,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
+            Self::AlreadyInStack => StatusCode::CONFLICT,
             Self::CannotSchedule { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NotAuthenticated | Self::RateLimited { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::Upstream => StatusCode::BAD_GATEWAY,
         }
     }
 
+    /// The machine-readable code of the error body, e.g. `invalid_input`.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidInput => "invalid_input",
+            Self::NotFound => "not_found",
+            Self::MethodNotAllowed => "method_not_allowed",
+            Self::NotAuthenticated => "not_authenticated",
+            Self::RateLimited { .. } => "upstream_rate_limited",
+            Self::AlreadyInStack => "already_in_stack",
+            Self::CannotSchedule { .. } => "cannot_schedule",
+            Self::Upstream => "upstream_error",
+        }
+    }
+
     fn body(&self) -> ErrorBody {
-        let fixed = |error, message| (error, Cow::Borrowed(message));
-        let (error, message) = match self {
-            Self::InvalidInput => fixed("invalid_input", "The request is invalid."),
-            Self::NotFound => fixed("not_found", "No such resource."),
-            Self::MethodNotAllowed => fixed(
-                "method_not_allowed",
-                "This resource does not support that method.",
-            ),
-            Self::NotAuthenticated => fixed(
-                "not_authenticated",
-                "The relay is not authenticated with Peloton.",
-            ),
-            Self::RateLimited { .. } => fixed(
-                "upstream_rate_limited",
-                "Peloton is rate limiting the relay; retry later.",
-            ),
-            Self::CannotSchedule { message } => ("cannot_schedule", Cow::Owned(message.clone())),
-            Self::Upstream => fixed("upstream_error", "Peloton failed to answer the request."),
+        let message = match self {
+            Self::InvalidInput => Cow::Borrowed("The request is invalid."),
+            Self::NotFound => Cow::Borrowed("No such resource."),
+            Self::MethodNotAllowed => Cow::Borrowed("This resource does not support that method."),
+            Self::NotAuthenticated => Cow::Borrowed("The relay is not authenticated with Peloton."),
+            Self::RateLimited { .. } => {
+                Cow::Borrowed("Peloton is rate limiting the relay; retry later.")
+            }
+            Self::AlreadyInStack => Cow::Borrowed("The class is already in the Stack."),
+            Self::CannotSchedule { message } => Cow::Owned(message.clone()),
+            Self::Upstream => Cow::Borrowed("Peloton failed to answer the request."),
         };
-        ErrorBody { error, message }
+        ErrorBody {
+            error: self.code(),
+            message,
+        }
     }
 }
 
@@ -127,6 +144,21 @@ impl From<UpstreamError> for ApiError {
                 tracing::warn!(%error, "upstream request failed");
                 Self::Upstream
             }
+        }
+    }
+}
+
+impl From<StackError> for ApiError {
+    fn from(error: StackError) -> Self {
+        match error {
+            StackError::AlreadyInStack => Self::AlreadyInStack,
+            StackError::NotInStack => Self::NotFound,
+            StackError::Duplicate => Self::InvalidInput,
+            StackError::Undecodable => {
+                tracing::warn!(%error, "Stack write refused");
+                Self::Upstream
+            }
+            StackError::Upstream(error) => error.into(),
         }
     }
 }

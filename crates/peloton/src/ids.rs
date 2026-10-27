@@ -53,17 +53,23 @@ const MAX_CLASS_ID_LEN: usize = 512;
 #[error("invalid Peloton class id")]
 pub struct ParseClassIdError;
 
-/// Decodes a standard, padded base64 string holding a JSON object of type `T`.
-fn decode_class_id<T: serde::de::DeserializeOwned>(s: &str) -> Result<T, ParseClassIdError> {
-    use base64::Engine as _;
-
+/// The bytes of a non-empty, bounded class id in base64 under `engine`, which
+/// only accepts its canonical form.
+fn class_id_bytes(s: &str, engine: &impl base64::Engine) -> Result<Vec<u8>, ParseClassIdError> {
     if s.is_empty() || s.len() > MAX_CLASS_ID_LEN {
         return Err(ParseClassIdError);
     }
-    let json = base64::engine::general_purpose::STANDARD
-        .decode(s)
-        .map_err(|_| ParseClassIdError)?;
-    serde_json::from_slice(&json).map_err(|_| ParseClassIdError)
+    engine.decode(s).map_err(|_| ParseClassIdError)
+}
+
+/// Decodes a standard, padded base64 string holding a JSON object of type `T`,
+/// returning it with the JSON bytes.
+fn decode_class_id<T: serde::de::DeserializeOwned>(
+    s: &str,
+) -> Result<(T, Vec<u8>), ParseClassIdError> {
+    let json = class_id_bytes(s, &base64::engine::general_purpose::STANDARD)?;
+    let value = serde_json::from_slice(&json).map_err(|_| ParseClassIdError)?;
+    Ok((value, json))
 }
 
 /// Peloton's id for an on-demand class, as the GraphQL API expects it:
@@ -135,7 +141,7 @@ impl FromStr for OnDemandClassId {
     type Err = ParseClassIdError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let payload: OnDemandPayload = decode_class_id(s)?;
+        let (payload, _): (OnDemandPayload, _) = decode_class_id(s)?;
         Ok(Self {
             encoded: s.to_owned(),
             ride: payload.ride_id,
@@ -145,9 +151,15 @@ impl FromStr for OnDemandClassId {
 
 /// Peloton's id for a scheduled class (an "event"), issued by Peloton and
 /// passed back verbatim once it decodes to the expected shape.
+///
+/// Peloton's form is standard, padded base64, whose `+`, `/` and `=` do not
+/// fit a URL path segment; [`Self::url_safe`] and [`Self::from_url_safe`]
+/// convert to and from the same bytes in URL-safe base64 without padding.
+/// Both directions accept only canonical base64, so the conversion is exact.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ScheduledClassId {
     encoded: String,
+    url_safe: String,
     ride: PelotonId,
     start: OffsetDateTime,
 }
@@ -182,6 +194,28 @@ impl ScheduledClassId {
         &self.encoded
     }
 
+    /// The same id as URL-safe base64 without padding.
+    #[must_use]
+    pub fn url_safe(&self) -> &str {
+        &self.url_safe
+    }
+
+    /// Parses the URL-safe form produced by [`Self::url_safe`], validating
+    /// it as [`FromStr`] validates Peloton's form.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseClassIdError`] unless `s` is canonical URL-safe base64 without
+    /// padding of a valid scheduled-class id.
+    pub fn from_url_safe(s: &str) -> Result<Self, ParseClassIdError> {
+        use base64::Engine as _;
+
+        let json = class_id_bytes(s, &base64::engine::general_purpose::URL_SAFE_NO_PAD)?;
+        base64::engine::general_purpose::STANDARD
+            .encode(json)
+            .parse()
+    }
+
     /// The ride that is scheduled.
     #[must_use]
     pub fn ride_id(&self) -> &PelotonId {
@@ -199,11 +233,14 @@ impl FromStr for ScheduledClassId {
     type Err = ParseClassIdError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let payload: EventPayload = decode_class_id(s)?;
+        use base64::Engine as _;
+
+        let (payload, json): (EventPayload, _) = decode_class_id(s)?;
         let start = OffsetDateTime::from_unix_timestamp(payload.scheduled_start_time)
             .map_err(|_| ParseClassIdError)?;
         Ok(Self {
             encoded: s.to_owned(),
+            url_safe: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json),
             ride: payload.ride_id,
             start,
         })

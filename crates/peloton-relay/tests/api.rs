@@ -1,22 +1,15 @@
 //! Tests for the HTTP API, driving the router against a mock Peloton.
 
-use std::fs;
-use std::sync::Arc;
-use std::time::Duration as StdDuration;
-
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt as _;
 use peloton::upstream as wire;
-use peloton_relay::api::{AppState, openapi, router};
+use peloton_relay::api::openapi;
 use peloton_relay::model;
-use peloton_relay::tokens::TokenManager;
-use peloton_relay::upstream::Peloton;
 use serde_json::Value;
-use time::Duration;
+use time::OffsetDateTime;
 use tower::ServiceExt as _;
-use url::Url;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -26,51 +19,28 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 )]
 mod common;
 
-use common::{http, state, state_file};
+#[allow(
+    dead_code,
+    reason = "shared by several test crates, each using a subset of the helpers"
+)]
+mod api_common;
+
+use api_common::{ACCESS, REFRESH, assert_error, bare, fixture, send, with_json};
 
 const WORKOUT: &str = "fedcba9876543210fedcba9876543210";
-const ACCESS: &str = "access-secret-1";
-const REFRESH: &str = "refresh-secret-1";
-
-fn fixture(name: &str) -> String {
-    fs::read_to_string(format!(
-        "{}/../peloton/tests/fixtures/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    ))
-    .unwrap()
-}
+/// The relay clock: these routes never read it.
+const NOW: OffsetDateTime = time::macros::datetime!(2030-01-01 00:00 UTC);
 
 fn json(body: String) -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_raw(body, "application/json")
 }
 
 fn app(dir: &tempfile::TempDir, server: &MockServer, seeded: bool) -> Router {
-    if seeded {
-        state_file(dir.path())
-            .save(&state(ACCESS, REFRESH, Duration::hours(48)))
-            .unwrap();
-    }
-    let auth = peloton::oauth::AuthClient::new(http(), Url::parse(&server.uri()).unwrap());
-    let tokens = Arc::new(TokenManager::new(
-        state_file(dir.path()),
-        auth,
-        StdDuration::from_secs(3600),
-    ));
-    let api = Url::parse(&format!("{}/api", server.uri())).unwrap();
-    let peloton = Arc::new(Peloton::new(http(), api, Arc::clone(&tokens), 4));
-    router(AppState { peloton, tokens })
+    api_common::relay(dir, server, seeded, NOW)
 }
 
 async fn get(app: &Router, uri: &str) -> (StatusCode, axum::http::HeaderMap, String) {
-    let response = app
-        .clone()
-        .oneshot(Request::get(uri).body(Body::empty()).unwrap())
-        .await
-        .unwrap();
-    let status = response.status();
-    let headers = response.headers().clone();
-    let body = response.into_body().collect().await.unwrap().to_bytes();
-    (status, headers, String::from_utf8(body.to_vec()).unwrap())
+    send(app, Request::get(uri).body(Body::empty()).unwrap()).await
 }
 
 fn parse(body: &str) -> Value {
@@ -95,12 +65,6 @@ async fn mount_own_workout(server: &MockServer) {
         .respond_with(json(fixture("workout-cycling-class.json")))
         .mount(server)
         .await;
-}
-
-fn assert_error(body: &str, code: &str) {
-    let value = parse(body);
-    assert_eq!(value["error"], code, "{body}");
-    assert!(value["message"].as_str().is_some_and(|m| !m.is_empty()));
 }
 
 #[tokio::test]
@@ -529,8 +493,15 @@ async fn responses_never_contain_tokens() {
         .respond_with(json(fixture("ride_details-cycling-class.json")))
         .mount(&server)
         .await;
+    api_common::mount_every_new_upstream(&server).await;
     let dir = tempfile::tempdir().unwrap();
     let app = app(&dir, &server, true);
+    for request in new_route_requests() {
+        let uri = request.uri().to_string();
+        let (status, headers, body) = send(&app, request).await;
+        assert!(status.as_u16() < 500, "{uri}: {status} {body}");
+        assert_no_tokens(&uri, &headers, &body);
+    }
     for uri in [
         "/v1/me".to_owned(),
         "/v1/workouts".to_owned(),
@@ -544,16 +515,67 @@ async fn responses_never_contain_tokens() {
         "/nope".to_owned(),
     ] {
         let (_, headers, body) = get(&app, &uri).await;
-        for secret in [ACCESS, REFRESH] {
-            assert!(!body.contains(secret), "{uri} leaked a token");
-            assert!(
-                headers
-                    .values()
-                    .all(|v| !v.to_str().unwrap_or_default().contains(secret)),
-                "{uri} leaked a token in headers"
-            );
-        }
+        assert_no_tokens(&uri, &headers, &body);
     }
+}
+
+fn assert_no_tokens(uri: &str, headers: &axum::http::HeaderMap, body: &str) {
+    for secret in [ACCESS, REFRESH] {
+        assert!(!body.contains(secret), "{uri} leaked a token");
+        assert!(
+            headers
+                .values()
+                .all(|v| !v.to_str().unwrap_or_default().contains(secret)),
+            "{uri} leaked a token in headers"
+        );
+    }
+}
+
+/// One request to each library, schedule and Stack route, reads and writes,
+/// plus one rejected write.
+fn new_route_requests() -> Vec<Request<Body>> {
+    let (_, scheduled) = api_common::fixture_scheduled_id();
+    let class = "00000000000000000000000000000f1d";
+    let start = serde_json::json!("2030-01-07T12:00:00Z");
+    let writes = [
+        with_json(
+            "POST",
+            "/v1/schedule",
+            &serde_json::json!({ "class_id": class, "start_time": start }),
+        ),
+        with_json(
+            "PATCH",
+            &format!("/v1/schedule/{scheduled}"),
+            &serde_json::json!({ "start_time": start }),
+        ),
+        bare("DELETE", &format!("/v1/schedule/{scheduled}")),
+        with_json(
+            "POST",
+            "/v1/stack",
+            &serde_json::json!({ "class_id": class }),
+        ),
+        bare("DELETE", &format!("/v1/stack/{class}")),
+        with_json(
+            "PUT",
+            "/v1/stack",
+            &serde_json::json!({ "class_ids": [class] }),
+        ),
+        with_json(
+            "POST",
+            "/v1/stack",
+            &serde_json::json!({ "class_id": "bad" }),
+        ),
+    ];
+    let reads = [
+        "/v1/library?category=cycling&duration=30".to_owned(),
+        "/v1/library/filters?category=cycling".to_owned(),
+        "/v1/schedule".to_owned(),
+        format!("/v1/schedule/{scheduled}"),
+        "/v1/stack".to_owned(),
+    ];
+    let mut requests: Vec<_> = reads.iter().map(|uri| bare("GET", uri)).collect();
+    requests.extend(writes);
+    requests
 }
 
 #[tokio::test]

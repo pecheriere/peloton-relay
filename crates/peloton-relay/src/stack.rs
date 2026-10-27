@@ -8,6 +8,7 @@
 //! item could not be written back faithfully.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use peloton::graphql::ops;
 use peloton::ids::{OnDemandClassId, PelotonId};
@@ -50,6 +51,32 @@ pub trait StackBackend {
         &self,
         ids: &[OnDemandClassId],
     ) -> impl Future<Output = Result<(), UpstreamError>> + Send;
+}
+
+/// A shared backend, so the service and the API's reads use one client (and
+/// so one in-flight limit).
+impl<B: StackBackend + Send + Sync> StackBackend for Arc<B> {
+    fn view(&self) -> impl Future<Output = Result<Vec<StackEntry>, UpstreamError>> + Send {
+        B::view(self)
+    }
+
+    fn class_in_stack(
+        &self,
+        ride: &PelotonId,
+    ) -> impl Future<Output = Result<bool, UpstreamError>> + Send {
+        B::class_in_stack(self, ride)
+    }
+
+    fn add(&self, ride: &PelotonId) -> impl Future<Output = Result<(), UpstreamError>> + Send {
+        B::add(self, ride)
+    }
+
+    fn modify(
+        &self,
+        ids: &[OnDemandClassId],
+    ) -> impl Future<Output = Result<(), UpstreamError>> + Send {
+        B::modify(self, ids)
+    }
 }
 
 /// Why a Stack operation was refused or failed.

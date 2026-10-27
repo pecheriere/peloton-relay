@@ -1,4 +1,4 @@
-//! Read-only Peloton API relay server.
+//! Peloton API relay server.
 
 pub mod api;
 pub mod config;

@@ -7,9 +7,11 @@
 //! does not report is `null`, never a default. Mapping is infallible: all
 //! validation happens when the upstream response is decoded.
 
+use std::collections::HashMap;
+
 use peloton::ids::PelotonId;
 use peloton::upstream;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 
@@ -578,6 +580,492 @@ impl SongInfo {
                 .collect(),
             album: song.album.as_ref().and_then(|a| a.name.clone()),
             start_offset_s: song.start_time_offset,
+        }
+    }
+}
+
+/// A library browse category, as `/v1/library` takes it. Peloton's current
+/// list is served by `/v1/library/filters`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LibraryCategory {
+    /// Tread Bootcamp.
+    Bootcamp,
+    /// Rowing.
+    Caesar,
+    /// Bike Bootcamp.
+    BikeBootcamp,
+    /// Row Bootcamp.
+    CaesarBootcamp,
+    /// Walking.
+    Walking,
+    /// Hiking.
+    Hiking,
+    /// Cycling.
+    Cycling,
+    /// Cardio.
+    Cardio,
+    /// Strength.
+    Strength,
+    /// Meditation.
+    Meditation,
+    /// Outdoor.
+    Outdoor,
+    /// Running.
+    Running,
+    /// Pilates.
+    Pilates,
+    /// Stretching.
+    Stretching,
+    /// Yoga.
+    Yoga,
+}
+
+impl LibraryCategory {
+    /// Every category, in Peloton's order.
+    pub const ALL: [Self; 15] = [
+        Self::Bootcamp,
+        Self::Caesar,
+        Self::BikeBootcamp,
+        Self::CaesarBootcamp,
+        Self::Walking,
+        Self::Hiking,
+        Self::Cycling,
+        Self::Cardio,
+        Self::Strength,
+        Self::Meditation,
+        Self::Outdoor,
+        Self::Running,
+        Self::Pilates,
+        Self::Stretching,
+        Self::Yoga,
+    ];
+
+    /// Peloton's slug, the `browse_category` library parameter.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bootcamp => "bootcamp",
+            Self::Caesar => "caesar",
+            Self::BikeBootcamp => "bike_bootcamp",
+            Self::CaesarBootcamp => "caesar_bootcamp",
+            Self::Walking => "walking",
+            Self::Hiking => "hiking",
+            Self::Cycling => "cycling",
+            Self::Cardio => "cardio",
+            Self::Strength => "strength",
+            Self::Meditation => "meditation",
+            Self::Outdoor => "outdoor",
+            Self::Running => "running",
+            Self::Pilates => "pilates",
+            Self::Stretching => "stretching",
+            Self::Yoga => "yoga",
+        }
+    }
+
+    /// The category with Peloton's slug `slug`.
+    #[must_use]
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.as_str() == slug)
+    }
+}
+
+/// A library sort order, as `/v1/library` takes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LibrarySortBy {
+    /// When the class first aired ("New").
+    OriginalAirTime,
+    /// Trending.
+    Trending,
+    /// Popularity.
+    Popularity,
+    /// Rating.
+    TopRated,
+    /// Difficulty ("Easiest" ascending, "Hardest" descending).
+    Difficulty,
+}
+
+impl LibrarySortBy {
+    /// Every sort order.
+    pub const ALL: [Self; 5] = [
+        Self::OriginalAirTime,
+        Self::Trending,
+        Self::Popularity,
+        Self::TopRated,
+        Self::Difficulty,
+    ];
+
+    /// Peloton's `sort_by` value.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OriginalAirTime => "original_air_time",
+            Self::Trending => "trending",
+            Self::Popularity => "popularity",
+            Self::TopRated => "top_rated",
+            Self::Difficulty => "difficulty",
+        }
+    }
+
+    /// The sort order with Peloton's `sort_by` value `value`.
+    #[must_use]
+    pub fn from_value(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.as_str() == value)
+    }
+}
+
+/// The exact class lengths, in minutes, the library filters by.
+pub const LIBRARY_DURATIONS_MIN: [u32; 10] = [5, 10, 15, 20, 30, 45, 60, 75, 90, 120];
+
+/// `GET /v1/library`: one page of the on-demand class library.
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub struct LibraryPage {
+    /// Classes on this page, in the requested order.
+    pub classes: Vec<LibraryClass>,
+    /// Zero-based page index.
+    pub page: u32,
+    /// Number of pages.
+    pub page_count: u32,
+    /// Number of classes across all pages.
+    pub total: u32,
+}
+
+impl LibraryPage {
+    /// Maps a page of Peloton's class library, joining each class with its
+    /// instructor and class types.
+    #[must_use]
+    pub fn from_upstream(page: &upstream::LibraryPage) -> Self {
+        let instructors: HashMap<&PelotonId, &upstream::Instructor> =
+            page.instructors.iter().map(|i| (&i.id, i)).collect();
+        let class_types: HashMap<&PelotonId, &upstream::LibraryClassType> =
+            page.class_types.iter().map(|t| (&t.id, t)).collect();
+        Self {
+            classes: page
+                .data
+                .iter()
+                .map(|class| LibraryClass::from_upstream(class, &instructors, &class_types))
+                .collect(),
+            page: page.page,
+            page_count: page.page_count,
+            total: page.total,
+        }
+    }
+}
+
+/// A class as listed in [`LibraryPage`].
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub struct LibraryClass {
+    /// Class id, as `/v1/classes/{id}`, `/v1/schedule` and `/v1/stack` take it.
+    #[schema(value_type = String)]
+    pub id: PelotonId,
+    /// Title.
+    pub title: Option<String>,
+    /// Description.
+    pub description: Option<String>,
+    /// Discipline slug, e.g. "cycling".
+    pub discipline: Option<String>,
+    /// Planned length.
+    pub duration_s: Option<u32>,
+    /// Peloton's difficulty estimate, 0–10.
+    pub difficulty: Option<f64>,
+    /// When the class first aired.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub aired_at: Option<OffsetDateTime>,
+    /// Instructor; its name is `null` when Peloton did not list it.
+    pub instructor: Option<InstructorInfo>,
+    /// Class type names, e.g. "Low Impact" (types Peloton did not name are
+    /// left out).
+    pub class_types: Vec<String>,
+    /// How many times the member took the class.
+    pub times_taken: Option<u32>,
+}
+
+impl LibraryClass {
+    fn from_upstream(
+        class: &upstream::LibraryClass,
+        instructors: &HashMap<&PelotonId, &upstream::Instructor>,
+        class_types: &HashMap<&PelotonId, &upstream::LibraryClassType>,
+    ) -> Self {
+        Self {
+            id: class.id.clone(),
+            title: class.title.clone(),
+            description: class.description.clone(),
+            discipline: class.fitness_discipline.clone(),
+            duration_s: class.duration,
+            difficulty: class.difficulty_estimate,
+            aired_at: class.original_air_time,
+            instructor: class.instructor_id.as_ref().map(|id| InstructorInfo {
+                id: id.clone(),
+                name: instructors.get(id).and_then(|i| i.name.clone()),
+            }),
+            class_types: class
+                .class_type_ids
+                .iter()
+                .filter_map(|id| {
+                    let class_type = class_types.get(id)?;
+                    class_type
+                        .display_name
+                        .clone()
+                        .or_else(|| class_type.name.clone())
+                })
+                .collect(),
+            times_taken: class.total_user_workouts,
+        }
+    }
+}
+
+/// `GET /v1/library/filters`: the values `/v1/library` currently accepts for
+/// one category, from Peloton. Values the relay cannot pass on are left out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct LibraryFilters {
+    /// The category these values are for.
+    pub category: String,
+    /// Every category (`category`).
+    pub categories: Vec<CategoryOption>,
+    /// Class types of this category (`class_type`), e.g. "Low Impact".
+    pub class_types: Vec<FilterOption>,
+    /// Instructors of this category (`instructor`).
+    pub instructors: Vec<FilterOption>,
+    /// Class lengths in minutes (`duration`).
+    pub durations_min: Vec<u32>,
+    /// Sort orders (`sort` and `desc`), as Peloton's app names them.
+    pub sorts: Vec<SortOption>,
+}
+
+/// One of [`LibraryFilters::categories`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct CategoryOption {
+    /// The `category` value.
+    pub slug: String,
+    /// Display name.
+    pub name: Option<String>,
+}
+
+/// One class type or instructor of [`LibraryFilters`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct FilterOption {
+    /// The `class_type` or `instructor` value.
+    #[schema(value_type = String)]
+    pub id: PelotonId,
+    /// Display name.
+    pub name: Option<String>,
+}
+
+/// One of [`LibraryFilters::sorts`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct SortOption {
+    /// The `sort` value.
+    pub sort: LibrarySortBy,
+    /// The `desc` value; `true` when Peloton does not say.
+    pub desc: bool,
+    /// Display name, e.g. "Easiest".
+    pub name: Option<String>,
+}
+
+impl LibraryFilters {
+    /// Maps Peloton's filters of `category` and its browse categories.
+    #[must_use]
+    pub fn from_upstream(
+        category: &str,
+        filters: &upstream::RideFilters,
+        categories: &upstream::BrowseCategories,
+    ) -> Self {
+        let values = |name: &'static str| {
+            filters
+                .filters
+                .iter()
+                .filter(move |f| f.name.as_deref() == Some(name))
+                .flat_map(|f| &f.values)
+        };
+        let options = |name: &'static str| {
+            values(name)
+                .filter_map(|v| {
+                    Some(FilterOption {
+                        id: v.value.as_deref()?.parse().ok()?,
+                        name: v.display_name.clone(),
+                    })
+                })
+                .collect()
+        };
+        Self {
+            category: category.to_owned(),
+            categories: categories
+                .browse_categories
+                .iter()
+                .filter_map(|c| {
+                    let slug = LibraryCategory::from_slug(c.slug.as_deref()?)?;
+                    Some(CategoryOption {
+                        slug: slug.as_str().to_owned(),
+                        name: c.name.clone(),
+                    })
+                })
+                .collect(),
+            class_types: options("class_type_id"),
+            instructors: options("instructor_id"),
+            durations_min: values("duration")
+                .filter_map(|v| {
+                    let seconds: u32 = v.value.as_deref()?.parse().ok()?;
+                    let minutes = seconds / 60;
+                    (seconds.is_multiple_of(60) && LIBRARY_DURATIONS_MIN.contains(&minutes))
+                        .then_some(minutes)
+                })
+                .collect(),
+            sorts: filters
+                .sorts
+                .iter()
+                .filter_map(|s| {
+                    let value = s.value.as_ref()?;
+                    Some(SortOption {
+                        sort: LibrarySortBy::from_value(value.sort.as_deref()?)?,
+                        desc: value.desc.unwrap_or(true),
+                        name: s.display_name.clone(),
+                    })
+                })
+                .collect(),
+        }
+    }
+}
+
+/// A class as the schedule and the Stack describe it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct ClassSummary {
+    /// Class id; `null` when Peloton sent none usable.
+    #[schema(value_type = Option<String>)]
+    pub class_id: Option<PelotonId>,
+    /// Title.
+    pub title: Option<String>,
+    /// Discipline slug in lower case, e.g. "cycling".
+    pub discipline: Option<String>,
+    /// Planned length.
+    pub duration_s: Option<u32>,
+    /// When the class first aired.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub aired_at: Option<OffsetDateTime>,
+    /// Peloton's difficulty level slug, when it sets one.
+    pub difficulty_level: Option<String>,
+    /// Instructor name.
+    pub instructor_name: Option<String>,
+}
+
+impl ClassSummary {
+    /// Maps a GraphQL class; every field is `null` when Peloton sent none.
+    #[must_use]
+    pub fn from_upstream(class: Option<&upstream::PelotonClass>) -> Self {
+        Self {
+            class_id: class.and_then(|c| c.class_id.clone()),
+            title: class.and_then(|c| c.title.clone()),
+            discipline: class
+                .and_then(|c| c.fitness_discipline.as_ref())
+                .and_then(|d| d.slug.as_deref())
+                .map(str::to_ascii_lowercase),
+            duration_s: class.and_then(|c| c.duration),
+            aired_at: class.and_then(|c| c.air_time),
+            difficulty_level: class
+                .and_then(|c| c.difficulty_level.as_ref())
+                .and_then(|d| d.slug.clone()),
+            instructor_name: class
+                .and_then(|c| c.instructor.as_ref())
+                .and_then(|i| i.name.clone()),
+        }
+    }
+}
+
+/// The `kind` of a scheduled on-demand class.
+const ON_DEMAND: &str = "on_demand";
+
+/// `GET /v1/schedule`: everything on the member's schedule in the window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct ScheduleList {
+    /// Items in Peloton's order, of every kind.
+    pub items: Vec<ScheduledClassView>,
+}
+
+impl ScheduleList {
+    /// Maps Peloton's schedule items.
+    #[must_use]
+    pub fn from_upstream(items: &[upstream::ScheduleItem]) -> Self {
+        Self {
+            items: items
+                .iter()
+                .map(|item| match item {
+                    upstream::ScheduleItem::ScheduledClass(class) => {
+                        ScheduledClassView::from_upstream(class)
+                    }
+                    upstream::ScheduleItem::Other { typename } => ScheduledClassView {
+                        scheduled_id: None,
+                        kind: typename.clone(),
+                        start_time: None,
+                        end_time: None,
+                        class: None,
+                    },
+                })
+                .collect(),
+        }
+    }
+}
+
+/// An item of the member's schedule: a scheduled class, or another kind of
+/// item Peloton lists, which carries only its `kind`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct ScheduledClassView {
+    /// Scheduled-class id for `/v1/schedule/{scheduled_id}` (URL-safe base64);
+    /// it changes when the class is rescheduled. `null` for other kinds.
+    pub scheduled_id: Option<String>,
+    /// "`on_demand`" for a scheduled on-demand class, else Peloton's type name
+    /// for the item.
+    pub kind: String,
+    /// When the class starts.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub start_time: Option<OffsetDateTime>,
+    /// When it ends.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub end_time: Option<OffsetDateTime>,
+    /// The class; `null` for other kinds, or when Peloton sent none.
+    pub class: Option<ClassSummary>,
+}
+
+impl ScheduledClassView {
+    /// Maps a class on Peloton's schedule.
+    #[must_use]
+    pub fn from_upstream(scheduled: &upstream::ScheduledClass) -> Self {
+        Self {
+            scheduled_id: Some(scheduled.id.url_safe().to_owned()),
+            kind: ON_DEMAND.to_owned(),
+            start_time: scheduled.scheduled_start_time,
+            end_time: scheduled.scheduled_end_time,
+            class: scheduled
+                .peloton_class
+                .as_ref()
+                .map(|class| ClassSummary::from_upstream(Some(class))),
+        }
+    }
+}
+
+/// `GET /v1/stack`: the Stack, the queue of classes that plays on the bike.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct StackView {
+    /// Classes in play order, first to play first. An item Peloton sent
+    /// without its class is listed with every field `null`.
+    pub items: Vec<ClassSummary>,
+    /// Total length of the classes.
+    pub total_s: Option<u32>,
+}
+
+impl StackView {
+    /// Maps Peloton's Stack, ordering it by play order (items without one
+    /// last, in Peloton's order).
+    #[must_use]
+    pub fn from_upstream(stack: &upstream::UserStack) -> Self {
+        let mut classes: Vec<&upstream::StackedClass> =
+            stack.user_stack.stacked_class_list.iter().collect();
+        classes.sort_by_key(|item| item.play_order.unwrap_or(u32::MAX));
+        Self {
+            items: classes
+                .into_iter()
+                .map(|item| ClassSummary::from_upstream(item.peloton_class.as_ref()))
+                .collect(),
+            total_s: stack.total_time,
         }
     }
 }

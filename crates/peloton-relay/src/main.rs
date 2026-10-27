@@ -6,9 +6,10 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use peloton::endpoints::API_BASE;
 use peloton::oauth::{AUTH_DOMAIN, AuthClient};
-use peloton_relay::api::{AppState, router};
+use peloton_relay::api::{AppState, Clock, router};
 use peloton_relay::config::{Config, http_client};
 use peloton_relay::seed::run_seed;
+use peloton_relay::stack::StackService;
 use peloton_relay::tokens::{BACKGROUND_REFRESH_INTERVAL, DEFAULT_REFRESH_MARGIN, TokenManager};
 use peloton_relay::upstream::{DEFAULT_MAX_IN_FLIGHT, Peloton};
 use tokio::net::TcpListener;
@@ -16,7 +17,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-/// Read-only Peloton API relay server.
+/// Peloton API relay server.
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
@@ -75,8 +76,10 @@ async fn serve() -> Result<(), String> {
         DEFAULT_MAX_IN_FLIGHT,
     ));
     let app = router(AppState {
+        stack: Arc::new(StackService::new(Arc::clone(&peloton))),
         peloton,
         tokens: Arc::clone(&tokens),
+        clock: Clock::system(),
     });
 
     let listener = TcpListener::bind(config.listen)

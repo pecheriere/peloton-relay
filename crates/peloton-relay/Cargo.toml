@@ -1,6 +1,6 @@
 [package]
 name = "peloton-relay"
-description = "Read-only Peloton API relay server"
+description = "Peloton API relay server"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -29,6 +29,7 @@ utoipa.workspace = true
 base64.workspace = true
 http-body-util = "0.1"
 tempfile.workspace = true
+time = { workspace = true, features = ["macros"] }
 tower = { version = "0.5", features = ["util"] }
 wiremock.workspace = true
 
