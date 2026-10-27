@@ -10,7 +10,7 @@ publish.workspace = true
 [dependencies]
 base64.workspace = true
 clap.workspace = true
-peloton = { path = "../peloton", version = "0.1.0" }
+peloton = { path = "../peloton", version = "0.2.0" }
 rand.workspace = true
 reqwest.workspace = true
 secrecy.workspace = true
