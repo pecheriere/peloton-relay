@@ -10,6 +10,7 @@ use peloton_relay::model;
 use serde_json::Value;
 use time::OffsetDateTime;
 use tower::ServiceExt as _;
+use tracing::Instrument as _;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -667,7 +668,14 @@ fn openapi_documents_every_error_response() {
     );
     // Unknown routes and wrong methods are documented once, for the whole API.
     let description = document["info"]["description"].as_str().unwrap();
-    for text in ["404", "not_found", "405", "method_not_allowed"] {
+    for text in [
+        "404",
+        "not_found",
+        "405",
+        "method_not_allowed",
+        "500",
+        "internal_error",
+    ] {
         assert!(description.contains(text), "{description}");
     }
 }
@@ -706,4 +714,44 @@ async fn graphql_failure_is_upstream_error() {
         serde_json::from_slice::<Value>(&body).unwrap()["error"],
         "upstream_error"
     );
+}
+
+#[tokio::test]
+async fn panicking_handler_answers_500_without_the_payload() {
+    use axum::routing::get;
+
+    let logs = common::captured_logs();
+    let app = Router::new()
+        .route("/boom", get(boom))
+        .layer(peloton_relay::api::catch_panics());
+    let (status, headers, body) = get_with_span(&app, "/boom", "handler_panic").await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(headers[header::CONTENT_TYPE], "application/json");
+    assert_eq!(
+        parse(&body),
+        serde_json::json!({ "error": "internal_error", "message": "internal error" })
+    );
+    let ours: String = logs
+        .contents()
+        .lines()
+        .filter(|line| line.contains("handler_panic"))
+        .collect();
+    assert!(ours.contains("handler_panicked"), "{ours}");
+    assert!(!ours.contains("secret-payload"), "{ours}");
+}
+
+/// A handler that always panics, with a payload that must not leak.
+async fn boom() -> StatusCode {
+    panic!("secret-payload");
+}
+
+/// `GET uri` inside a span named `case`.
+async fn get_with_span(
+    app: &Router,
+    uri: &str,
+    case: &str,
+) -> (StatusCode, axum::http::HeaderMap, String) {
+    send(app, Request::get(uri).body(Body::empty()).unwrap())
+        .instrument(tracing::info_span!("case", name = case))
+        .await
 }

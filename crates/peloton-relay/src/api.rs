@@ -1,6 +1,7 @@
 //! The relay's HTTP API: reads of the account, its class library, schedule
 //! and Stack, and validated, audit-logged writes to the schedule and Stack.
 
+use std::any::Any;
 use std::sync::Arc;
 
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request, State};
@@ -13,6 +14,7 @@ use peloton::ids::{PelotonId, ScheduledClassId};
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime, UtcOffset};
+use tower_http::catch_panic::CatchPanicLayer;
 use utoipa::openapi::RefOr;
 use utoipa::openapi::schema::{ObjectBuilder, Schema, Type};
 use utoipa::{IntoParams, OpenApi, ToSchema};
@@ -98,7 +100,23 @@ pub fn router(state: AppState) -> Router {
         .route("/readyz", get(readyz))
         .fallback(|| async { ApiError::NotFound })
         .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
+        .layer(catch_panics())
         .with_state(state)
+}
+
+/// Answers a request whose handler panicked with 500 `internal_error`.
+///
+/// Neither the response nor the log carries the panic's payload, which could
+/// hold request or upstream data; the log says only that a handler panicked.
+/// The process's panic hook (see [`crate::logging::install_panic_hook`]) does
+/// the same for the panic itself.
+#[must_use]
+pub fn catch_panics() -> CatchPanicLayer<fn(Box<dyn Any + Send + 'static>) -> Response> {
+    fn answer(_payload: Box<dyn Any + Send + 'static>) -> Response {
+        tracing::error!(event = "handler_panicked", "a request handler panicked");
+        ApiError::Internal.into_response()
+    }
+    CatchPanicLayer::custom(answer as fn(Box<dyn Any + Send + 'static>) -> Response)
 }
 
 /// The `OpenAPI` 3.1 description of the API, generated from the handlers.
@@ -106,7 +124,7 @@ pub fn router(state: AppState) -> Router {
 #[openapi(
     info(
         title = "Peloton relay",
-        description = "Relay of a Peloton account: its profile, workouts, metrics and classes, the on-demand class library, and the member's schedule and Stack, which it can also change.\n\nEvery error has an `ErrorBody`. Any path not listed here answers 404 `not_found`, and any method a listed path does not list answers 405 `method_not_allowed`. Writes (tag `peloton-write`) require the gateway capability `pecheriere.dev/cap/peloton-write`.\n\nExample: find a 20-min low-impact ride and schedule it Monday 08:00 America/Los_Angeles.\n\n1. `GET /v1/library/filters?category=cycling` and take the `id` of the class type named \"Low Impact\".\n2. `GET /v1/library?category=cycling&class_type=<that id>&duration=20` and pick a class `id`.\n3. `POST /v1/schedule` with `{\"class_id\": \"<class id>\", \"start_time\": \"2026-11-02T08:00:00-08:00\"}`: 08:00 on Monday 2 November 2026 in America/Los_Angeles, whose offset that day is -08:00 (always send the offset in effect on that day). The answer holds the class's `scheduled_id`.\n4. `GET /v1/schedule` lists it; `PATCH /v1/schedule/{scheduled_id}` moves it (and gives it a new `scheduled_id`), `DELETE` removes it."
+        description = "Relay of a Peloton account: its profile, workouts, metrics and classes, the on-demand class library, and the member's schedule and Stack, which it can also change.\n\nEvery error has an `ErrorBody`. Any path not listed here answers 404 `not_found`, any method a listed path does not list answers 405 `method_not_allowed`, and a request the relay fails to handle answers 500 `internal_error`. Writes (tag `peloton-write`) require the gateway capability `pecheriere.dev/cap/peloton-write`.\n\nExample: find a 20-min low-impact ride and schedule it Monday 08:00 America/Los_Angeles.\n\n1. `GET /v1/library/filters?category=cycling` and take the `id` of the class type named \"Low Impact\".\n2. `GET /v1/library?category=cycling&class_type=<that id>&duration=20` and pick a class `id`.\n3. `POST /v1/schedule` with `{\"class_id\": \"<class id>\", \"start_time\": \"2026-11-02T08:00:00-08:00\"}`: 08:00 on Monday 2 November 2026 in America/Los_Angeles, whose offset that day is -08:00 (always send the offset in effect on that day). The answer holds the class's `scheduled_id`.\n4. `GET /v1/schedule` lists it; `PATCH /v1/schedule/{scheduled_id}` moves it (and gives it a new `scheduled_id`), `DELETE` removes it."
     ),
     paths(
         me,

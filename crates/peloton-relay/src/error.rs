@@ -62,6 +62,9 @@ pub enum ApiError {
     /// Peloton failed or answered something unusable.
     #[error("upstream error")]
     Upstream,
+    /// The relay failed while handling the request (a handler panicked).
+    #[error("internal error")]
+    Internal,
 }
 
 impl fmt::Debug for ApiError {
@@ -78,6 +81,7 @@ impl fmt::Debug for ApiError {
                 .finish(),
             Self::CannotSchedule { .. } => f.debug_struct("CannotSchedule").finish_non_exhaustive(),
             Self::Upstream => f.write_str("Upstream"),
+            Self::Internal => f.write_str("Internal"),
         }
     }
 }
@@ -92,6 +96,7 @@ impl ApiError {
             Self::CannotSchedule { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NotAuthenticated | Self::RateLimited { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::Upstream => StatusCode::BAD_GATEWAY,
+            Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
@@ -107,6 +112,7 @@ impl ApiError {
             Self::AlreadyInStack => "already_in_stack",
             Self::CannotSchedule { .. } => "cannot_schedule",
             Self::Upstream => "upstream_error",
+            Self::Internal => "internal_error",
         }
     }
 
@@ -122,6 +128,7 @@ impl ApiError {
             Self::AlreadyInStack => Cow::Borrowed("The class is already in the Stack."),
             Self::CannotSchedule { message } => Cow::Owned(message.clone()),
             Self::Upstream => Cow::Borrowed("Peloton failed to answer the request."),
+            Self::Internal => Cow::Borrowed("internal error"),
         };
         ErrorBody {
             error: self.code(),

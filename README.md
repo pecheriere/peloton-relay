@@ -36,6 +36,7 @@ Errors have the body `{"error": "<code>", "message": "<text>"}`:
 | 502 | `upstream_error` | Peloton failed or returned something unexpected. |
 | 503 | `not_authenticated` | The relay holds no usable Peloton credential; see [Bootstrap](#bootstrap). |
 | 503 | `upstream_rate_limited` | Peloton is rate limiting the relay; a `Retry-After` header is set. |
+| 500 | `internal_error` | The relay failed while handling the request. |
 
 ## Security model
 

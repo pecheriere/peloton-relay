@@ -33,6 +33,19 @@ pub fn init() -> Result<(), tracing::subscriber::SetGlobalDefaultError> {
     tracing::subscriber::set_global_default(subscriber(io::stdout, filter))
 }
 
+/// Replaces the default panic hook, which prints the panic's payload to
+/// stderr, with one logging an error event `panic` with only the source
+/// location: a payload could hold request or upstream data.
+pub fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        tracing::error!(
+            event = "panic",
+            location = info.location().map(tracing::field::display),
+            "a thread panicked"
+        );
+    }));
+}
+
 #[cfg(test)]
 mod tests {
     use std::io;
@@ -75,5 +88,30 @@ mod tests {
         assert_eq!(json["event"], "peloton_auth_failed");
         assert_eq!(json["level"], "ERROR");
         assert!(json.get("fields").is_none());
+    }
+
+    #[test]
+    fn panic_hook_logs_the_location_without_the_payload() {
+        let buffer = Buffer::default();
+        let subscriber = super::subscriber(buffer.clone(), EnvFilter::new("info"));
+        super::install_panic_hook();
+        let caught = tracing::subscriber::with_default(subscriber, || {
+            std::panic::catch_unwind(|| panic!("secret-payload"))
+        });
+        // Back to the default hook (each test runs in its own process under
+        // nextest; this keeps `cargo test` runs tidy too).
+        drop(std::panic::take_hook());
+        assert!(caught.is_err());
+        let line = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        assert!(!line.contains("secret-payload"), "{line}");
+        let json: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(json["event"], "panic");
+        assert_eq!(json["level"], "ERROR");
+        assert!(
+            json["location"]
+                .as_str()
+                .is_some_and(|l| l.contains("logging.rs")),
+            "{json}"
+        );
     }
 }

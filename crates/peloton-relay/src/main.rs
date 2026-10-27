@@ -60,6 +60,7 @@ async fn main() -> ExitCode {
 async fn serve() -> Result<(), String> {
     let config = Config::from_env().map_err(|err| err.to_string())?;
     peloton_relay::logging::init().map_err(|err| format!("cannot set up logging: {err}"))?;
+    peloton_relay::logging::install_panic_hook();
 
     let http = http_client().map_err(|err| format!("cannot build the HTTP client: {err}"))?;
     let auth_base = Url::parse(&format!("https://{AUTH_DOMAIN}")).map_err(|err| err.to_string())?;
