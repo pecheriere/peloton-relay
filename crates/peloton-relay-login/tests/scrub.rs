@@ -328,7 +328,10 @@ fn scrub_shifts_timestamps_and_keeps_metrics() {
     assert_eq!(workout["created_at"], 1_777_000_000 + SHIFT);
     assert_eq!(workout["start_time"], 1_777_000_065 + SHIFT);
     assert_eq!(workout["end_time"], 1_777_001_265 + SHIFT);
-    assert_eq!(workout["ride"]["original_air_time"], 1_700_000_000 + SHIFT);
+    assert_eq!(
+        workout["ride"]["original_air_time"], 1_700_000_000,
+        "class times are public"
+    );
     assert_eq!(workout["total_work"], 123_456.7);
     assert_eq!(workout["distance"], 3.217);
     assert_eq!(workout["fitness_discipline"], "cycling");
@@ -917,4 +920,117 @@ fn scrub_redacts_scheduled_ids_shifted_out_of_range() {
     ];
     let output = scrub_files(files, PARAMS);
     assert_eq!(find(&output, "odd.json")[0].1["id"], "redacted");
+}
+
+/// When the synthetic class first aired (public catalogue data).
+const AIR: i64 = 1_650_000_000;
+
+fn member_and_class_inputs() -> Vec<(String, Value)> {
+    let class = json!({
+        "id": RIDE,
+        "title": "20 min Synthetic Ride",
+        "original_air_time": AIR,
+        "scheduled_start_time": AIR + 300,
+        "instructor": {"id": INSTRUCTOR, "name": "Marisol Okonkwo", "created_at": AIR - 86_400}
+    });
+    vec![
+        (
+            format!("workout-{WORKOUT}.json"),
+            json!({
+                "id": WORKOUT,
+                "created_at": 1_777_000_000,
+                "device_time_created_at": 1_777_000_000 + LOCAL_OFFSET,
+                "start_time": 1_777_000_065,
+                "end_time": 1_777_001_265,
+                "ride": class.clone()
+            }),
+        ),
+        (
+            "workout-no-air-time.json".to_owned(),
+            json!({
+                "id": WORKOUT,
+                "start_time": 1_777_000_065,
+                "ride": {"id": RIDE, "created_at": AIR + 600}
+            }),
+        ),
+        (
+            format!("ride_details-{RIDE}.json"),
+            json!({"ride": class.clone(), "related_rides": {"rides": [class.clone()]}}),
+        ),
+        (
+            "library_archived.json".to_owned(),
+            json!({"data": [class], "page": 0, "page_count": 1, "total": 1}),
+        ),
+        (
+            "me.json".to_owned(),
+            json!({"id": USER, "created_at": 1_311_111_111}),
+        ),
+    ]
+}
+
+fn numbers(value: &Value, out: &mut Vec<i64>) {
+    match value {
+        Value::Number(n) => out.extend(n.as_i64()),
+        Value::Array(items) => items.iter().for_each(|v| numbers(v, out)),
+        Value::Object(map) => map.values().for_each(|v| numbers(v, out)),
+        _ => {}
+    }
+}
+
+#[test]
+fn scrub_shifts_member_times_but_not_class_times() {
+    let other = ScrubParams {
+        time_shift_s: SHIFT - 86_400 * 333 - 777,
+        calorie_factor: CALORIE_FACTOR,
+    };
+    let mut class_times = Vec::new();
+    for params in [PARAMS, other] {
+        let shift = params.time_shift_s;
+        let output = scrub_files(member_and_class_inputs(), params);
+
+        let workout = &find(&output, "workout-")
+            .into_iter()
+            .find(|(n, _)| n != "workout-no-air-time.json")
+            .expect("workout")
+            .1;
+        assert_eq!(workout["created_at"], 1_777_000_000 + shift);
+        assert_eq!(workout["device_time_created_at"], workout["created_at"]);
+        assert_eq!(workout["start_time"], 1_777_000_065 + shift);
+        assert_eq!(workout["end_time"], 1_777_001_265 + shift);
+        let me = &find(&output, "me.json")[0].1;
+        assert_eq!(me["created_at"], 1_311_111_111 + shift);
+
+        let details = &find(&output, "ride_details-")[0].1;
+        let library = &find(&output, "library_archived.json")[0].1;
+        let classes = [
+            &workout["ride"],
+            &details["ride"],
+            &details["related_rides"]["rides"][0],
+            &library["data"][0],
+        ];
+        for class in classes {
+            assert_eq!(class["original_air_time"], AIR, "{class}");
+            assert_eq!(class["scheduled_start_time"], AIR + 300, "{class}");
+            assert_eq!(class["instructor"]["created_at"], AIR - 86_400, "{class}");
+        }
+        let bare = &find(&output, "workout-no-air-time.json")[0].1;
+        assert_eq!(bare["ride"]["created_at"], AIR + 600, "a ride is a class");
+        assert_eq!(bare["start_time"], 1_777_000_065 + shift);
+        class_times.push(classes.map(Value::clone));
+
+        let mut all = Vec::new();
+        for (_, value) in &output {
+            numbers(value, &mut all);
+        }
+        for public in [AIR, AIR + 300, AIR - 86_400, AIR + 600] {
+            assert!(
+                !all.contains(&(public + shift)),
+                "a shifted class time would reveal the shift"
+            );
+        }
+    }
+    assert_eq!(
+        class_times[0], class_times[1],
+        "class times do not depend on the run"
+    );
 }

@@ -27,9 +27,15 @@
 //!   together could single the member out on the public leaderboard);
 //! - GPS points become a fixed synthetic track with nothing else kept;
 //!   per-month activity buckets are emptied;
-//! - every epoch timestamp is shifted by one offset, random per run; a
+//! - every epoch timestamp of the member (workouts, the profile, anything
+//!   outside a class) is shifted by one offset, random per run; a
 //!   device-local `device_time_*` copy of a timestamp (which would reveal
 //!   the member's UTC offset) is set to the shifted UTC value, or dropped;
+//! - class times are public catalogue data and are kept as they are: a class
+//!   is an object carrying `original_air_time` (a ride, a library item, a
+//!   related ride) or the value of a `ride` key, and every timestamp inside
+//!   it, nested objects included, is left unshifted, so no public time can
+//!   be matched against its shifted copy;
 //! - Peloton's base64 class ids (on-demand class ids and scheduled-class
 //!   ids, which embed the member's own event id) are decoded, their ids
 //!   mapped like any other id and their scheduled start shifted as below,
@@ -139,6 +145,10 @@ const FIXED_FTP: u32 = 200;
 /// Peloton's heart-rate zone lower bounds in percent of the maximum.
 const HEART_RATE_ZONE_PERCENTS: [u32; 5] = [0, 65, 75, 85, 95];
 const DEVICE_TIME_PREFIX: &str = "device_time_";
+/// A key only class objects carry.
+const CLASS_MARKER: &str = "original_air_time";
+/// A key whose value is always a class.
+const CLASS_KEY: &str = "ride";
 const GRAPH_PREFIX: &str = "performance_graph-";
 /// Scores computed from zone durations; nulled because they encode the old zones.
 const ZONE_SCORES: &[&str] = &[
@@ -324,6 +334,9 @@ struct Scrubber {
     /// Whether the object being scrubbed is inside the `heart_rate` metric;
     /// only its `zones` are heart-rate zones.
     in_heart_rate: bool,
+    /// Whether the value being scrubbed is inside a class, whose times are
+    /// public and not shifted.
+    in_class: bool,
     /// Earliest schedule time (start or end) seen while collecting, epoch
     /// seconds.
     earliest_schedule: Option<i64>,
@@ -344,6 +357,7 @@ impl Scrubber {
             zone_durations: HashMap::new(),
             zone_context: ZoneDurations::default(),
             in_heart_rate: false,
+            in_class: false,
             earliest_schedule: None,
             schedule_shift_s: 0,
         }
@@ -418,7 +432,9 @@ impl Scrubber {
             Value::Array(items) => Value::Array(items.into_iter().map(|v| self.value(v)).collect()),
             Value::String(text) => Value::String(self.string(&text)),
             Value::Number(number) => match number.as_i64() {
-                Some(n) if EPOCH_RANGE.contains(&n) => json!(n + self.params.time_shift_s),
+                Some(n) if EPOCH_RANGE.contains(&n) && !self.in_class => {
+                    json!(n + self.params.time_shift_s)
+                }
                 _ => Value::Number(number),
             },
             other => other,
@@ -446,10 +462,15 @@ impl Scrubber {
         {
             self.zone_context = *durations;
         }
+        let in_class = self.in_class;
+        self.in_class |= map.contains_key(CLASS_MARKER);
         let person = is_person(&map);
         let mut out = Map::new();
         for (key, child) in map {
+            let outer = self.in_class;
+            self.in_class |= key == CLASS_KEY;
             let scrubbed = self.key_rule(&key, child, person);
+            self.in_class = outer;
             out.insert(self.string(&key), scrubbed);
         }
         let slug = out.get("slug").and_then(Value::as_str).map(str::to_owned);
@@ -474,6 +495,7 @@ impl Scrubber {
         align_device_times(&mut out);
         self.zone_context = outer_context;
         self.in_heart_rate = in_heart_rate;
+        self.in_class = in_class;
         Value::Object(out)
     }
 

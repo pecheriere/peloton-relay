@@ -5,9 +5,9 @@
     {
       "achievement_templates": [],
       "calories": 233.77,
-      "created": 1495341025,
-      "created_at": 1495341025,
-      "device_time_created_at": 1495341025,
+      "created": 1342329628,
+      "created_at": 1342329628,
+      "device_time_created_at": 1342329628,
       "device_type": "home_bike_plus",
       "distance": 4.97,
       "effort_zones": {
@@ -20,7 +20,7 @@
         },
         "total_effort_points": null
       },
-      "end_time": 1495342285,
+      "end_time": 1342330888,
       "fitbit_id": null,
       "fitness_discipline": "cycling",
       "has_leaderboard_metrics": true,
@@ -46,7 +46,7 @@
         "title": null
       },
       "service_id": null,
-      "start_time": 1495341090,
+      "start_time": 1342329693,
       "status": "COMPLETE",
       "strava_id": null,
       "timezone": "Etc/UTC",
@@ -63,12 +63,12 @@
     },
     {
       "calories": 33.31,
-      "created": 1493353483,
-      "created_at": 1493353483,
-      "device_time_created_at": 1493353483,
+      "created": 1340342086,
+      "created_at": 1340342086,
+      "device_time_created_at": 1340342086,
       "device_type": "home_bike_plus",
       "effort_zones": null,
-      "end_time": 1493354443,
+      "end_time": 1340343046,
       "fitbit_id": null,
       "fitness_discipline": "yoga",
       "has_leaderboard_metrics": false,
@@ -259,7 +259,7 @@
         "vod_stream_url": "https://example.invalid/redacted"
       },
       "service_id": null,
-      "start_time": 1493353545,
+      "start_time": 1340342148,
       "status": "COMPLETE",
       "strava_id": null,
       "timezone": "Etc/UTC",
@@ -275,9 +275,9 @@
     },
     {
       "calories": 381.36,
-      "created": 1492918851,
-      "created_at": 1492918851,
-      "device_time_created_at": 1492918851,
+      "created": 1339907454,
+      "created_at": 1339907454,
+      "device_time_created_at": 1339907454,
       "device_type": "home_bike_plus",
       "distance": 7.88,
       "effort_zones": {
@@ -290,7 +290,7 @@
         },
         "total_effort_points": null
       },
-      "end_time": 1492920718,
+      "end_time": 1339909321,
       "fitbit_id": null,
       "fitness_discipline": "cycling",
       "has_leaderboard_metrics": true,
@@ -483,7 +483,7 @@
         "vod_stream_url": "https://example.invalid/redacted"
       },
       "service_id": null,
-      "start_time": 1492918919,
+      "start_time": 1339907522,
       "status": "COMPLETE",
       "strava_id": null,
       "timezone": "Etc/UTC",
@@ -500,12 +500,12 @@
     },
     {
       "calories": 14.41,
-      "created": 1492578394,
-      "created_at": 1492578394,
-      "device_time_created_at": 1492578394,
+      "created": 1339566997,
+      "created_at": 1339566997,
+      "device_time_created_at": 1339566997,
       "device_type": "home_bike_plus",
       "effort_zones": null,
-      "end_time": 1492578695,
+      "end_time": 1339567298,
       "fitbit_id": null,
       "fitness_discipline": "stretching",
       "has_leaderboard_metrics": false,
@@ -694,7 +694,7 @@
         "vod_stream_url": null
       },
       "service_id": null,
-      "start_time": 1492578397,
+      "start_time": 1339567000,
       "status": "COMPLETE",
       "strava_id": null,
       "timezone": "Etc/UTC",
@@ -710,9 +710,9 @@
     },
     {
       "calories": 103.56,
-      "created": 1491452662,
-      "created_at": 1491452662,
-      "device_time_created_at": 1491452662,
+      "created": 1338441265,
+      "created_at": 1338441265,
+      "device_time_created_at": 1338441265,
       "device_type": "home_bike_plus",
       "distance": 2.65,
       "effort_zones": {
@@ -725,7 +725,7 @@
         },
         "total_effort_points": null
       },
-      "end_time": 1491453282,
+      "end_time": 1338441885,
       "fitbit_id": null,
       "fitness_discipline": "cycling",
       "has_leaderboard_metrics": true,
@@ -916,7 +916,7 @@
         "vod_stream_url": "https://example.invalid/redacted"
       },
       "service_id": null,
-      "start_time": 1491452685,
+      "start_time": 1338441288,
       "status": "COMPLETE",
       "strava_id": null,
       "timezone": "Etc/UTC",
@@ -934,7 +934,7 @@
   ],
   "limit": 30,
   "next": {
-    "created_at": 1491278910,
+    "created_at": 1338267513,
     "workout_id": "00000000000000000000000000000f27"
   },
   "page": 0,
