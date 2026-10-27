@@ -749,9 +749,12 @@ fn whole_stack(op: &Op, response: StackResponse) -> Result<UserStack, UpstreamEr
     Ok(stack)
 }
 
+/// `instant` in UTC as RFC 3339, or [`UpstreamError::Transport`] (the
+/// request cannot be built) when it is outside the years 0 to 9999 in UTC.
 fn utc_iso8601(instant: OffsetDateTime) -> Result<String, UpstreamError> {
     instant
-        .to_offset(UtcOffset::UTC)
+        .checked_to_offset(UtcOffset::UTC)
+        .ok_or(UpstreamError::Transport)?
         .format(&Rfc3339)
         .map_err(|_| UpstreamError::Transport)
 }

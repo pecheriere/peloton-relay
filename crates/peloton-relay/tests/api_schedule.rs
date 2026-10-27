@@ -222,6 +222,13 @@ async fn schedule_rejects_bad_windows() {
         "/v1/schedule?from=2030-01-05T00:00:00Z&to=2030-01-05T00:00:00Z",
         "/v1/schedule?from=2030-01-05T00:00:00Z&to=2030-01-04T00:00:00Z",
         "/v1/schedule?from=2030-01-01T00:00:00Z&to=2030-02-01T00:00:01Z",
+        // The default window would end past the year 9999.
+        "/v1/schedule?from=9999-12-31T23:59:59Z",
+        // Valid RFC 3339 whose UTC instants are past the year 9999.
+        "/v1/schedule?from=9999-12-31T20:00:00-05:00&to=9999-12-31T22:00:00-05:00",
+        "/v1/schedule?to=9999-12-31T20:00:00-05:00",
+        // Valid RFC 3339 whose UTC instant is before the year 0.
+        "/v1/schedule?from=0000-01-01T00:30:00+01:00",
         "/v1/schedule?bogus=1",
     ] {
         let (status, _, body) = send(&app, bare("GET", uri)).await;
@@ -382,6 +389,7 @@ async fn rejects_bad_start_time() {
         // More than 14 days ahead.
         json!("2030-01-15T00:00:01Z"),
         json!("2030-01-14T16:00:01-08:00"),
+        json!("9999-12-31T20:00:00-05:00"),
     ];
     for start in starts {
         for request in [
@@ -991,7 +999,7 @@ async fn writes_log_peloton_write_event() {
             ),
             vec![
                 "op=\"stack_replace\"".to_owned(),
-                format!("class_ids=\"{RIDE},{}\"", ride(2)),
+                format!("class_ids={RIDE},{}", ride(2)),
                 "outcome=\"ok\"".to_owned(),
             ],
         ),

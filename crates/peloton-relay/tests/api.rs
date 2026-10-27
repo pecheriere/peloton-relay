@@ -254,6 +254,11 @@ async fn rejects_invalid_query() {
         "/v1/workouts?to=2026-01-01",
         "/v1/workouts?from=2026-03-01T00:00:00Z&to=2026-01-01T00:00:00Z",
         "/v1/workouts?from=2026-03-01T00:00:00Z&to=2026-03-01T00:00:00Z",
+        // Valid RFC 3339 whose UTC instant is past the year 9999.
+        "/v1/workouts?from=9999-12-31T20:00:00-05:00",
+        "/v1/workouts?to=9999-12-31T20:00:00-05:00",
+        // Valid RFC 3339 whose UTC instant is before the year 0.
+        "/v1/workouts?from=0000-01-01T00:30:00+01:00",
         "/v1/me?x=1",
     ] {
         let (status, headers, body) = get(&app, uri).await;

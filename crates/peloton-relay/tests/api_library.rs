@@ -579,3 +579,25 @@ fn openapi_marks_writes_and_documents_their_errors() {
     let example = &document["components"]["schemas"]["ScheduleRequest"]["example"];
     assert_eq!(example["start_time"], "2026-11-02T08:00:00-08:00");
 }
+
+#[test]
+fn openapi_constrains_scheduled_ids() {
+    let document = serde_json::to_value(openapi()).unwrap();
+    for (route, method) in [
+        ("/v1/schedule/{scheduled_id}", "get"),
+        ("/v1/schedule/{scheduled_id}", "patch"),
+        ("/v1/schedule/{scheduled_id}", "delete"),
+    ] {
+        let parameter = &document["paths"][route][method]["parameters"][0];
+        assert_eq!(parameter["name"], "scheduled_id", "{method} {route}");
+        assert_eq!(
+            parameter["schema"]["pattern"], "^[A-Za-z0-9_-]+$",
+            "{method} {route}"
+        );
+        assert_eq!(parameter["schema"]["maxLength"], 512, "{method} {route}");
+    }
+    let field =
+        &document["components"]["schemas"]["ScheduledClassView"]["properties"]["scheduled_id"];
+    assert_eq!(field["pattern"], "^[A-Za-z0-9_-]+$", "{field}");
+    assert_eq!(field["maxLength"], 512, "{field}");
+}

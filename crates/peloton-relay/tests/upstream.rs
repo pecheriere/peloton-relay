@@ -629,3 +629,33 @@ async fn browse_categories_lists_on_demand_categories() {
         .unwrap();
     assert!(!categories.browse_categories.is_empty());
 }
+
+#[tokio::test]
+async fn unrepresentable_utc_times_fail_without_a_request() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let peloton = client(&dir, &server, Some("tok-1"))
+        .with_graphql_url(Url::parse(&format!("{}/graphql", server.uri())).unwrap());
+    // Valid RFC 3339, but past the year 9999 once in UTC.
+    let late = OffsetDateTime::parse("9999-12-31T20:00:00-05:00", &Rfc3339).unwrap();
+    let early = OffsetDateTime::parse("9999-12-31T19:00:00-05:00", &Rfc3339).unwrap();
+    let workouts = peloton
+        .workouts(&WorkoutQuery {
+            from: Some(late),
+            ..query()
+        })
+        .await;
+    assert_eq!(workouts.unwrap_err(), UpstreamError::Transport);
+    assert_eq!(
+        peloton.schedule(early, late).await.unwrap_err(),
+        UpstreamError::Transport
+    );
+    assert_eq!(
+        peloton
+            .add_to_schedule(&workout_id(), late)
+            .await
+            .unwrap_err(),
+        UpstreamError::Transport
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+}

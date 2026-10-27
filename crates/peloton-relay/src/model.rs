@@ -1011,6 +1011,7 @@ impl ScheduleList {
 pub struct ScheduledClassView {
     /// Scheduled-class id for `/v1/schedule/{scheduled_id}` (URL-safe base64);
     /// it changes when the class is rescheduled. `null` for other kinds.
+    #[schema(pattern = "^[A-Za-z0-9_-]+$", max_length = 512)]
     pub scheduled_id: Option<String>,
     /// "`on_demand`" for a scheduled on-demand class, else Peloton's type name
     /// for the item.

@@ -223,35 +223,46 @@ impl<S: Send + Sync, T: serde::de::DeserializeOwned> FromRequest<S> for Body<T> 
     }
 }
 
-/// An optional RFC 3339 instant.
-fn instant(text: Option<String>) -> Result<Option<OffsetDateTime>, ApiError> {
-    text.map(|t| OffsetDateTime::parse(&t, &Rfc3339).map_err(|_| ApiError::InvalidInput))
-        .transpose()
+/// An RFC 3339 instant, in UTC.
+///
+/// Its UTC date must fall in the years 0 to 9999, the range RFC 3339 can
+/// express: a valid local time near either end can be outside it in UTC
+/// (e.g. `9999-12-31T20:00:00-05:00`), and converting or formatting it later
+/// would fail.
+fn utc_instant(text: &str) -> Result<OffsetDateTime, ApiError> {
+    OffsetDateTime::parse(text, &Rfc3339)
+        .ok()
+        .and_then(|at| at.checked_to_offset(UtcOffset::UTC))
+        .filter(|at| (0..=9999).contains(&at.year()))
+        .ok_or(ApiError::InvalidInput)
+}
+
+/// An optional RFC 3339 instant, in UTC; see [`utc_instant`].
+fn instant(text: Option<&str>) -> Result<Option<OffsetDateTime>, ApiError> {
+    text.map(utc_instant).transpose()
 }
 
 /// A validated class start time.
 struct StartTime {
-    /// The instant, in whole seconds.
+    /// The instant in UTC, in whole seconds.
     at: OffsetDateTime,
     /// The same instant in UTC, as RFC 3339.
     utc: String,
 }
 
 impl StartTime {
-    /// Parses `text` as RFC 3339 with an explicit offset and truncates it to
-    /// whole seconds; it must then be after `now` and at most
-    /// [`MAX_SCHEDULE_AHEAD`] later.
+    /// Parses `text` as RFC 3339 with an explicit offset (see
+    /// [`utc_instant`]) and truncates it to whole seconds; it must then be
+    /// after `now` and at most [`MAX_SCHEDULE_AHEAD`] later.
     fn parse(text: &str, now: OffsetDateTime) -> Result<Self, ApiError> {
-        let at = OffsetDateTime::parse(text, &Rfc3339)
-            .map_err(|_| ApiError::InvalidInput)?
-            .truncate_to_second();
-        if at <= now || at > now + MAX_SCHEDULE_AHEAD {
+        let at = utc_instant(text)?.truncate_to_second();
+        let latest = now
+            .checked_add(MAX_SCHEDULE_AHEAD)
+            .ok_or(ApiError::InvalidInput)?;
+        if at <= now || at > latest {
             return Err(ApiError::InvalidInput);
         }
-        let utc = at
-            .to_offset(UtcOffset::UTC)
-            .format(&Rfc3339)
-            .map_err(|_| ApiError::InvalidInput)?;
+        let utc = at.format(&Rfc3339).map_err(|_| ApiError::InvalidInput)?;
         Ok(Self { at, utc })
     }
 }
@@ -286,7 +297,7 @@ impl Write {
             event = "peloton_write",
             op = self.op,
             class_id = self.class_id.as_ref().map(tracing::field::display),
-            class_ids = self.class_ids.as_deref(),
+            class_ids = self.class_ids.as_deref().map(tracing::field::display),
             scheduled_id = self.scheduled_id.as_deref().map(tracing::field::display),
             start_time = self.start_time.as_deref().map(tracing::field::display),
             new_scheduled_id = new_scheduled_id.map(tracing::field::display),
@@ -353,8 +364,8 @@ impl WorkoutsParams {
         if !(1..=MAX_LIMIT).contains(&limit) {
             return Err(ApiError::InvalidInput);
         }
-        let from = instant(self.from)?;
-        let to = instant(self.to)?;
+        let from = instant(self.from.as_deref())?;
+        let to = instant(self.to.as_deref())?;
         if let (Some(from), Some(to)) = (from, to)
             && from >= to
         {
@@ -494,8 +505,14 @@ struct ScheduleParams {
 
 impl ScheduleParams {
     fn window(self, now: OffsetDateTime) -> Result<(OffsetDateTime, OffsetDateTime), ApiError> {
-        let from = instant(self.from)?.unwrap_or(now);
-        let to = instant(self.to)?.unwrap_or(from + DEFAULT_SCHEDULE_WINDOW);
+        let from = instant(self.from.as_deref())?.unwrap_or(now);
+        let to = match instant(self.to.as_deref())? {
+            Some(to) => to,
+            None => from
+                .checked_add(DEFAULT_SCHEDULE_WINDOW)
+                .ok_or(ApiError::InvalidInput)?,
+        };
+        // Both are in the years 0 to 9999, so the difference cannot overflow.
         if from >= to || to - from > MAX_SCHEDULE_WINDOW {
             return Err(ApiError::InvalidInput);
         }
@@ -759,7 +776,7 @@ async fn schedule(
 #[utoipa::path(
     get,
     path = "/v1/schedule/{scheduled_id}",
-    params(("scheduled_id" = String, Path, description = "Scheduled-class id as the relay issues it (`scheduled_id`): URL-safe base64 without padding")),
+    params(("scheduled_id" = String, Path, pattern = "^[A-Za-z0-9_-]+$", max_length = 512, description = "Scheduled-class id as the relay issues it (`scheduled_id`): URL-safe base64 without padding")),
     responses(
         (status = 200, body = ScheduledClassView),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
@@ -834,7 +851,7 @@ async fn schedule_add(
     patch,
     path = "/v1/schedule/{scheduled_id}",
     tag = "peloton-write",
-    params(("scheduled_id" = String, Path, description = "Scheduled-class id as the relay issues it (`scheduled_id`): URL-safe base64 without padding")),
+    params(("scheduled_id" = String, Path, pattern = "^[A-Za-z0-9_-]+$", max_length = 512, description = "Scheduled-class id as the relay issues it (`scheduled_id`): URL-safe base64 without padding")),
     request_body = RescheduleRequest,
     responses(
         (status = 200, description = "Moved; the class with its new `scheduled_id`.", body = ScheduledClassView),
@@ -875,7 +892,7 @@ async fn schedule_move(
     delete,
     path = "/v1/schedule/{scheduled_id}",
     tag = "peloton-write",
-    params(("scheduled_id" = String, Path, description = "Scheduled-class id as the relay issues it (`scheduled_id`): URL-safe base64 without padding")),
+    params(("scheduled_id" = String, Path, pattern = "^[A-Za-z0-9_-]+$", max_length = 512, description = "Scheduled-class id as the relay issues it (`scheduled_id`): URL-safe base64 without padding")),
     responses(
         (status = 204, description = "Removed."),
         (status = 400, description = "`invalid_input`: a path, query or body value is malformed or out of range, the query has a parameter, or the body has an unknown field.", body = ErrorBody),
