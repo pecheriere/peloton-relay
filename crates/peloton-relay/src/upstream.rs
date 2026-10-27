@@ -133,8 +133,6 @@ pub struct LibraryQuery {
     pub instructor: Option<PelotonId>,
     /// Exact class length in seconds (`duration`).
     pub duration_s: Option<u32>,
-    /// Difficulty value (`difficulty`).
-    pub difficulty: Option<String>,
     /// Sort order (`sort_by` and `desc`).
     pub sort: Option<LibrarySort>,
     /// Zero-based page index.
@@ -298,7 +296,7 @@ impl Peloton {
     ///
     /// See [`UpstreamError`].
     pub async fn library(&self, query: &LibraryQuery) -> Result<LibraryPage, UpstreamError> {
-        let mut params = Vec::with_capacity(9);
+        let mut params = Vec::with_capacity(8);
         if let Some(category) = &query.category {
             params.push(("browse_category", category.clone()));
         }
@@ -310,9 +308,6 @@ impl Peloton {
         }
         if let Some(duration) = query.duration_s {
             params.push(("duration", duration.to_string()));
-        }
-        if let Some(difficulty) = &query.difficulty {
-            params.push(("difficulty", difficulty.clone()));
         }
         if let Some(sort) = &query.sort {
             params.push(("sort_by", sort.by.clone()));
@@ -467,33 +462,34 @@ impl Peloton {
         self.gql(&ops::CHECK_CLASS_IN_STACK, &variables).await
     }
 
-    /// `AddClassToStack`: appends the on-demand class of `ride`; returns the
-    /// new Stack. Sent once, as [`Self::add_to_schedule`].
+    /// `AddClassToStack`: appends the on-demand class of `ride`. Sent once,
+    /// as [`Self::add_to_schedule`]; done once Peloton answers success, whatever
+    /// Stack it lists with it (read it back with [`Self::stack`]).
     ///
     /// # Errors
     ///
-    /// As [`Self::stack`].
-    pub async fn add_to_stack(&self, ride: &PelotonId) -> Result<UserStack, UpstreamError> {
-        let op = ops::ADD_CLASS_TO_STACK;
+    /// [`UpstreamError::Decode`] at `data.addClassToStack` when Peloton
+    /// answers anything but success. See [`UpstreamError`] for the others.
+    pub async fn add_to_stack(&self, ride: &PelotonId) -> Result<(), UpstreamError> {
         let variables =
             json!({ "input": { "pelotonClassId": OnDemandClassId::from_ride(ride).as_str() } });
-        let response = self.gql(&op, &variables).await?;
-        whole_stack(&op, response)
+        let StackWrite::StackResponseSuccess =
+            self.gql(&ops::ADD_CLASS_TO_STACK, &variables).await?;
+        Ok(())
     }
 
     /// `ModifyStack`: replaces the whole Stack with `ids`, in that order,
     /// sent verbatim (Peloton's own `joinToken`s for classes already in the
-    /// Stack); returns the new Stack. Sent once, as [`Self::add_to_schedule`].
+    /// Stack). Sent once and done, as [`Self::add_to_stack`].
     ///
     /// # Errors
     ///
-    /// As [`Self::stack`].
-    pub async fn modify_stack(&self, ids: &[OnDemandClassId]) -> Result<UserStack, UpstreamError> {
-        let op = ops::MODIFY_STACK;
+    /// As [`Self::add_to_stack`], at `data.modifyStack`.
+    pub async fn modify_stack(&self, ids: &[OnDemandClassId]) -> Result<(), UpstreamError> {
         let ids: Vec<&str> = ids.iter().map(OnDemandClassId::as_str).collect();
         let variables = json!({ "input": { "pelotonClassIdList": ids } });
-        let response = self.gql(&op, &variables).await?;
-        whole_stack(&op, response)
+        let StackWrite::StackResponseSuccess = self.gql(&ops::MODIFY_STACK, &variables).await?;
+        Ok(())
     }
 
     /// Sends GraphQL operation `op` with `variables` and decodes the root
@@ -734,8 +730,16 @@ fn scheduled(op: &Op, result: ScheduleResult) -> Result<ScheduledClass, Upstream
     }
 }
 
-/// The Stack of a Stack read or mutation's answer, refused unless Peloton's
-/// count matches the list it sent.
+/// The answer to a Stack write: only whether it succeeded counts, so a write
+/// Peloton applied is never reported as failed over the Stack listed with it.
+#[derive(Deserialize)]
+#[serde(tag = "__typename")]
+enum StackWrite {
+    StackResponseSuccess,
+}
+
+/// The Stack of a Stack read, refused unless Peloton's count matches the list
+/// it sent.
 fn whole_stack(op: &Op, response: StackResponse) -> Result<UserStack, UpstreamError> {
     let StackResponse::StackResponseSuccess(stack) = response;
     let listed = u32::try_from(stack.user_stack.stacked_class_list.len()).ok();

@@ -697,12 +697,31 @@ async fn every_write(peloton: &Peloton) -> Vec<Result<(), UpstreamError>> {
         peloton.add_to_schedule(&ride(1), start).await.map(|_| ()),
         peloton.reschedule(&scheduled_id(), start).await.map(|_| ()),
         peloton.remove_from_schedule(&scheduled_id()).await,
-        peloton.add_to_stack(&ride(1)).await.map(|_| ()),
+        peloton.add_to_stack(&ride(1)).await,
         peloton
             .modify_stack(&[OnDemandClassId::from_ride(&ride(1))])
-            .await
-            .map(|_| ()),
+            .await,
     ]
+}
+
+#[tokio::test]
+async fn writes_are_sent_once_on_429() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "30"))
+        .expect(5)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    for result in every_write(&client(&dir, &server)).await {
+        assert_eq!(
+            result,
+            Err(UpstreamError::RateLimited {
+                retry_after: Some(StdDuration::from_secs(30))
+            })
+        );
+    }
 }
 
 #[tokio::test]
@@ -837,14 +856,56 @@ async fn stack_ops_send_pelotons_class_ids() {
         .await;
     let dir = tempfile::tempdir().unwrap();
     let peloton = client(&dir, &server);
-    let added = peloton.add_to_stack(&fixture_ride()).await.unwrap();
-    assert_eq!(added.num_classes, Some(1));
+    peloton.add_to_stack(&fixture_ride()).await.unwrap();
     let ids = [
         OnDemandClassId::from_ride(&ride(2)),
         OnDemandClassId::from_ride(&ride(1)),
     ];
-    let modified = peloton.modify_stack(&ids).await.unwrap();
-    assert!(modified.user_stack.stacked_class_list.is_empty());
+    peloton.modify_stack(&ids).await.unwrap();
+}
+
+#[tokio::test]
+async fn stack_writes_succeed_whatever_stack_peloton_lists() {
+    // Peloton applied the write; an odd Stack listed with the answer must
+    // not report it as failed.
+    let mut odd = stack_root(Some(3), &[]);
+    let root = odd["data"]["viewUserStack"].take();
+    let server = gateway(&json!({ "data": {
+        "addClassToStack": root.clone(),
+        "modifyStack": root,
+    } }))
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let peloton = client(&dir, &server);
+    peloton.add_to_stack(&ride(1)).await.unwrap();
+    peloton.modify_stack(&[]).await.unwrap();
+    for success in [
+        json!({ "__typename": "StackResponseSuccess" }),
+        json!({ "__typename": "StackResponseSuccess", "userStack": null }),
+    ] {
+        let server = gateway(&json!({ "data": { "modifyStack": success } })).await;
+        client(&dir, &server).modify_stack(&[]).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn stack_write_without_success_is_upstream_error() {
+    for root in [
+        json!({ "__typename": "StackResponseError", "message": "secret-xyz" }),
+        json!({ "numClasses": 0 }),
+    ] {
+        let server = gateway(&json!({ "data": { "addClassToStack": root } })).await;
+        let dir = tempfile::tempdir().unwrap();
+        let err = client(&dir, &server)
+            .add_to_stack(&ride(1))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, UpstreamError::Decode { path } if path.starts_with("data.addClassToStack")),
+            "{err:?}"
+        );
+        assert!(!format!("{err} {err:?}").contains("secret-xyz"));
+    }
 }
 
 /// Peloton's own layout of an on-demand class id, which differs from the

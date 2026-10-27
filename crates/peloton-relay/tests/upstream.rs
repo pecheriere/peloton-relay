@@ -492,7 +492,8 @@ async fn library_query_params() {
         .and(query_param("class_type_id", class_type))
         .and(query_param("instructor_id", instructor))
         .and(query_param("duration", "1200"))
-        .and(query_param("difficulty", "beginner"))
+        // Peloton has no difficulty filter, only a difficulty sort.
+        .and(query_param_is_missing("difficulty"))
         .and(query_param("sort_by", "original_air_time"))
         .and(query_param("desc", "true"))
         .and(query_param("page", "3"))
@@ -508,7 +509,6 @@ async fn library_query_params() {
             class_type: Some(class_type.parse().unwrap()),
             instructor: Some(instructor.parse().unwrap()),
             duration_s: Some(1200),
-            difficulty: Some("beginner".to_owned()),
             sort: Some(LibrarySort {
                 by: "original_air_time".to_owned(),
                 desc: true,
@@ -520,7 +520,7 @@ async fn library_query_params() {
         .unwrap();
     assert_eq!(page.data.len(), 5);
     let requests = server.received_requests().await.unwrap();
-    assert_eq!(requests[0].url.query_pairs().count(), 9);
+    assert_eq!(requests[0].url.query_pairs().count(), 8);
 }
 
 #[tokio::test]
@@ -552,7 +552,6 @@ async fn library_omits_unset_filters() {
             class_type: None,
             instructor: None,
             duration_s: None,
-            difficulty: None,
             sort: None,
             page: 0,
             limit: 20,
@@ -579,7 +578,6 @@ async fn library_sort_ascending_says_so() {
             class_type: None,
             instructor: None,
             duration_s: None,
-            difficulty: None,
             sort: Some(LibrarySort {
                 by: "difficulty".to_owned(),
                 desc: false,

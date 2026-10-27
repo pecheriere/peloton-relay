@@ -211,11 +211,11 @@ impl StackBackend for Peloton {
     }
 
     async fn add(&self, ride: &PelotonId) -> Result<(), UpstreamError> {
-        self.add_to_stack(ride).await.map(|_| ())
+        self.add_to_stack(ride).await
     }
 
     async fn modify(&self, ids: &[OnDemandClassId]) -> Result<(), UpstreamError> {
-        self.modify_stack(ids).await.map(|_| ())
+        self.modify_stack(ids).await
     }
 }
 
