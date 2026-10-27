@@ -9,8 +9,11 @@
 //!
 //! GraphQL unions are dispatched on `__typename`: a member the relay does not
 //! know fails decoding, except among schedule items, where Peloton's other
-//! kinds (invites) are kept as [`ScheduleItem::Other`]. Lists a write is built
-//! from (the Stack) are required, so a missing list never reads as empty.
+//! kinds (invites) are kept as [`ScheduleItem::Other`] with their type name.
+//! Page counters and the lists the relay reports or writes back whole (the
+//! schedule, the Stack) are required, so a missing list never reads as empty,
+//! and one malformed scheduled-class id fails its whole list: a schedule is
+//! never reported as partial.
 
 use serde::de::{DeserializeOwned, Error as _};
 use serde::{Deserialize, Deserializer};
@@ -480,9 +483,6 @@ pub struct LibraryClass {
     /// Estimated difficulty on Peloton's 0–10 scale.
     #[serde(default)]
     pub difficulty_estimate: Option<f64>,
-    /// Difficulty level label, when Peloton sets one.
-    #[serde(default)]
-    pub difficulty_level: Option<String>,
     /// When the class first aired.
     #[serde(default, with = "time::serde::timestamp::option")]
     pub original_air_time: Option<OffsetDateTime>,
@@ -622,15 +622,37 @@ pub struct ScheduleItems {
     pub your_schedule_items: Vec<ScheduleItem>,
 }
 
-/// One of [`ScheduleItems::your_schedule_items`].
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "__typename")]
+/// One of [`ScheduleItems::your_schedule_items`], dispatched on its
+/// `__typename`, which must be a string.
+#[derive(Debug, Clone)]
 pub enum ScheduleItem {
     /// A class the member scheduled.
     ScheduledClass(Box<ScheduledClass>),
     /// Any other kind of item, such as an invite.
-    #[serde(other)]
-    Other,
+    Other {
+        /// Peloton's type name for the item, e.g. "`InviteDetails`".
+        typename: String,
+    },
+}
+
+impl<'de> Deserialize<'de> for ScheduleItem {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        let Some(typename) = value.get("__typename").and_then(Value::as_str) else {
+            return Err(D::Error::custom(
+                "schedule item without a string __typename",
+            ));
+        };
+        if typename == "ScheduledClass" {
+            serde_json::from_value(value)
+                .map(Self::ScheduledClass)
+                .map_err(D::Error::custom)
+        } else {
+            Ok(Self::Other {
+                typename: typename.to_owned(),
+            })
+        }
+    }
 }
 
 /// GraphQL `scheduledClass` and the schedule mutations.

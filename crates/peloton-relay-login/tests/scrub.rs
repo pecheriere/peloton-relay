@@ -879,3 +879,42 @@ fn scrub_replaces_unparseable_schedule_times() {
     assert_eq!(output[0].1["scheduledStartTime"], iso(SYNTHETIC_START));
     assert_eq!(output[0].1["scheduledEndTime"], Value::Null);
 }
+
+#[test]
+fn scrub_moves_end_times_without_a_start() {
+    let files = vec![(
+        "schedule.json".to_owned(),
+        json!({"items": [
+            {"scheduledEndTime": iso(START + 1800)},
+            {"scheduledEndTime": iso(START + 5400)}
+        ]}),
+    )];
+    let output = scrub_files(files, PARAMS);
+    assert_eq!(
+        output[0].1["items"],
+        json!([
+            {"scheduledEndTime": iso(SYNTHETIC_START)},
+            {"scheduledEndTime": iso(SYNTHETIC_START + 3600)}
+        ]),
+        "the earliest end time lands on the synthetic instant"
+    );
+}
+
+#[test]
+fn scrub_redacts_scheduled_ids_shifted_out_of_range() {
+    use base64::Engine as _;
+    let extreme = base64::engine::general_purpose::STANDARD.encode(format!(
+        r#"{{"home_peloton_id": "{HOME}", "ride_id": "{RIDE}", "scheduled_start_time": {}, "studio_peloton_id": null, "type": "event"}}"#,
+        // 9999-12-31T23:59:59Z: valid, but the shift moves it past year 9999.
+        253_402_300_799_i64
+    ));
+    let files = vec![
+        (
+            "schedule.json".to_owned(),
+            json!({"scheduledStartTime": iso(START)}),
+        ),
+        ("odd.json".to_owned(), json!({"id": extreme})),
+    ];
+    let output = scrub_files(files, PARAMS);
+    assert_eq!(find(&output, "odd.json")[0].1["id"], "redacted");
+}

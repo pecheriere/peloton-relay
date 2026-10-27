@@ -36,8 +36,8 @@
 //!   then re-encoded in Peloton's exact layout, so they stay valid; any other
 //!   opaque token, or a class id of an unexpected shape, is replaced;
 //! - schedule times (scheduled starts and ends, in ids and as RFC 3339
-//!   strings) are moved by one offset that puts the run's earliest scheduled
-//!   start at a fixed synthetic instant, so neither the date nor the member's
+//!   strings) are moved by one offset that puts the run's earliest schedule
+//!   time at a fixed synthetic instant, so neither the date nor the member's
 //!   time of day survives; an unparseable one becomes that instant;
 //! - the guests and invitees of a scheduled class are emptied; per-member
 //!   library fields (bookmarked, times taken, taken by friends) are reset;
@@ -123,7 +123,7 @@ const RESET_KEYS: &[(&str, Fixed)] = &[
 const SCHEDULE_TIME_KEYS: &[&str] = &["scheduledStartTime", "scheduledEndTime"];
 /// The scheduled start inside a scheduled-class id.
 const ID_START_KEY: &str = "scheduled_start_time";
-/// Where the earliest scheduled start of a run lands: 2030-01-07T12:00:00Z.
+/// Where the earliest schedule time of a run lands: 2030-01-07T12:00:00Z.
 const SYNTHETIC_SCHEDULE_START: i64 = 1_894_017_600;
 /// Peloton's schedule time layout, e.g. `2030-01-07T12:00:00.000Z`.
 const SCHEDULE_TIME_FORMAT: &[BorrowedFormatItem<'static>] = time::macros::format_description!(
@@ -324,7 +324,8 @@ struct Scrubber {
     /// Whether the object being scrubbed is inside the `heart_rate` metric;
     /// only its `zones` are heart-rate zones.
     in_heart_rate: bool,
-    /// Earliest scheduled start seen while collecting, epoch seconds.
+    /// Earliest schedule time (start or end) seen while collecting, epoch
+    /// seconds.
     earliest_schedule: Option<i64>,
     /// Seconds added to every schedule time.
     schedule_shift_s: i64,
@@ -354,12 +355,14 @@ impl Scrubber {
                 if is_person(map) {
                     self.collect_person(map);
                 }
-                if let Some(start) = map
-                    .get(SCHEDULE_TIME_KEYS[0])
-                    .and_then(Value::as_str)
-                    .and_then(|text| OffsetDateTime::parse(text, &Rfc3339).ok())
-                {
-                    self.note_schedule(start.unix_timestamp());
+                for key in SCHEDULE_TIME_KEYS {
+                    if let Some(time) = map
+                        .get(*key)
+                        .and_then(Value::as_str)
+                        .and_then(|text| OffsetDateTime::parse(text, &Rfc3339).ok())
+                    {
+                        self.note_schedule(time.unix_timestamp());
+                    }
                 }
                 for child in map.values() {
                     self.collect(child);
@@ -589,7 +592,7 @@ impl Scrubber {
                 let value = match value {
                     Value::String(id) => Value::String(self.ids_in(&id)),
                     Value::Number(start) if key == ID_START_KEY => {
-                        json!(start.as_i64()? + self.schedule_shift_s)
+                        json!(start.as_i64()?.checked_add(self.schedule_shift_s)?)
                     }
                     other => other,
                 };

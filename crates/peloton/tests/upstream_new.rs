@@ -326,15 +326,25 @@ fn schedule_list_keeps_other_items_and_rejects_other_roots() {
     }))
     .unwrap();
     let ScheduleList::YourScheduleItemList(items) = list;
-    assert!(matches!(
-        items.your_schedule_items.as_slice(),
-        [ScheduleItem::Other, ScheduleItem::ScheduledClass(_)]
-    ));
+    let [
+        ScheduleItem::Other { typename },
+        ScheduleItem::ScheduledClass(_),
+    ] = items.your_schedule_items.as_slice()
+    else {
+        panic!("an invite, then a class: {items:?}");
+    };
+    assert_eq!(typename, "InviteDetails", "the kind is kept");
 
     for odd in [
         json!({"__typename": "InviteFriendsError", "message": "no"}),
         json!({"__typename": "YourScheduleItemList"}),
         json!({"__typename": "YourScheduleItemList", "yourScheduleItems": null}),
+        json!({"__typename": "YourScheduleItemList", "yourScheduleItems": [{"id": SCHEDULED_ID}]}),
+        json!({"__typename": "YourScheduleItemList", "yourScheduleItems": [{"__typename": 7}]}),
+        json!({"__typename": "YourScheduleItemList", "yourScheduleItems": ["ScheduledClass"]}),
+        json!({"__typename": "YourScheduleItemList", "yourScheduleItems": [
+            {"__typename": "ScheduledClass", "id": "not-base64"}
+        ]}),
     ] {
         assert!(
             serde_json::from_value::<ScheduleList>(odd.clone()).is_err(),
@@ -374,5 +384,23 @@ fn stack_requires_its_list_but_keeps_odd_items() {
             serde_json::from_value::<StackResponse>(odd.clone()).is_err(),
             "{odd}"
         );
+    }
+}
+
+#[test]
+fn library_page_ignores_the_unverified_difficulty_level() {
+    for level in [json!("advanced"), json!(3), json!({"slug": "advanced"})] {
+        let page: LibraryPage = serde_json::from_value(json!({
+            "data": [{
+                "id": "000000000000000000000000000000f2",
+                "difficulty_estimate": 7.5,
+                "difficulty_level": level,
+            }],
+            "page": 0,
+            "page_count": 1,
+            "total": 1,
+        }))
+        .unwrap();
+        assert_eq!(page.data[0].difficulty_estimate, Some(7.5));
     }
 }
