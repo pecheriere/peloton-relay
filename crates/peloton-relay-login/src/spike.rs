@@ -269,6 +269,28 @@ pub fn schedule_ids(list: &Value) -> BTreeSet<String> {
     out
 }
 
+/// The scheduled-class ids in a `userScheduledItemsList` union result.
+///
+/// # Errors
+///
+/// Returns the variant's type and message when Peloton answered with an
+/// error variant instead of a list, so it never reads as an empty schedule.
+pub fn listed_ids(list: &Value) -> Result<BTreeSet<String>, String> {
+    let typename = list.get("__typename").and_then(Value::as_str);
+    if typename != Some("YourScheduleItemList") {
+        let message = list.get("message").and_then(Value::as_str).unwrap_or("");
+        return Err(format!(
+            "schedule list answered {}: {message}",
+            typename.unwrap_or("no __typename")
+        ));
+    }
+    let items = list
+        .get("yourScheduleItems")
+        .filter(|items| items.is_array())
+        .ok_or("yourScheduleItems is not a list")?;
+    Ok(schedule_ids(items))
+}
+
 /// Reads a schedule mutation's union result into the raw scheduled-class id
 /// Peloton returned. The id is not decoded here: whatever Peloton issued is
 /// what later calls must send back.
@@ -598,7 +620,7 @@ impl Spike<'_> {
             &json!({ "startTime": window.start, "endTime": window.end }),
             file,
         )
-        .map(|list| schedule_ids(&list))
+        .and_then(|list| listed_ids(&list))
     }
 
     fn view_stack(&self, steps: &mut Steps, file: &str) -> Result<Vec<StackItem>, String> {
@@ -1103,8 +1125,8 @@ mod tests {
     use time::macros::datetime;
 
     use super::{
-        CallFailure, Restore, StackItem, check_event, json_type, newly_listed, restore_ids,
-        root_field, schedule_ids, scheduled_result, spike_start, stack_items,
+        CallFailure, Restore, StackItem, check_event, json_type, listed_ids, newly_listed,
+        restore_ids, root_field, schedule_ids, scheduled_result, spike_start, stack_items,
     };
     use crate::session::GraphqlReply;
     use peloton::ids::{OnDemandClassId, PelotonId};
@@ -1205,6 +1227,24 @@ mod tests {
         let wrapped = json!({"items": [{"id": "a"}, {"nested": {"id": "b"}}], "count": 2});
         assert_eq!(schedule_ids(&flat), schedule_ids(&wrapped));
         assert_eq!(schedule_ids(&flat).len(), 2);
+    }
+
+    #[test]
+    fn listed_ids_reads_the_list_variant_only() {
+        let list = json!({
+            "__typename": "YourScheduleItemList",
+            "yourScheduleItems": [{"__typename": "ScheduledClass", "id": "a"}, {"__typename": "InviteDetails"}],
+        });
+        assert_eq!(listed_ids(&list).map(|ids| ids.len()), Ok(1));
+        let empty = json!({"__typename": "YourScheduleItemList", "yourScheduleItems": []});
+        assert_eq!(listed_ids(&empty).map(|ids| ids.len()), Ok(0));
+        let error = json!({"__typename": "InviteFriendsError", "message": "down"});
+        assert_eq!(
+            listed_ids(&error),
+            Err("schedule list answered InviteFriendsError: down".to_owned())
+        );
+        let shapeless = json!({"__typename": "YourScheduleItemList"});
+        assert!(listed_ids(&shapeless).is_err());
     }
 
     #[test]

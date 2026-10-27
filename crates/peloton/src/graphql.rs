@@ -127,9 +127,14 @@ pub const YOUR_SCHEDULE_ITEMS: &str =
     "query YourScheduleItems($startTime: DateTime!, $endTime: DateTime!) {
   userScheduledItemsList(startTime: $startTime, endTime: $endTime) {
     __typename
-    ... on ScheduledClass {
-      id
-      scheduledStartTime
+    ... on YourScheduleItemList {
+      yourScheduleItems {
+        __typename
+        ... on ScheduledClass {
+          id
+          scheduledStartTime
+        }
+      }
     }
   }
 }
