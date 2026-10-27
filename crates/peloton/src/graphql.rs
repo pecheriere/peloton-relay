@@ -101,15 +101,16 @@ macro_rules! stack_fields {
     };
 }
 
-/// The schedule union returned by the schedule mutations.
+/// The schedule union returned by the schedule mutations, with `$fields`
+/// selected on a `ScheduledClass`.
 macro_rules! schedule_result {
-    () => {
-        "
+    ($fields:expr) => {
+        concat!(
+            "
     __typename
-    ... on ScheduledClass {
-      id
-      scheduledStartTime
-    }
+    ... on ScheduledClass {",
+            $fields,
+            "    }
     ... on ScheduledClassDoesNotExistError {
       code
       message
@@ -119,64 +120,88 @@ macro_rules! schedule_result {
       message
     }
 "
+        )
+    };
+}
+
+/// The fields the relay reads from a scheduled class.
+macro_rules! scheduled_class_fields {
+    () => {
+        "
+      id
+      scheduledStartTime
+      scheduledEndTime
+      pelotonClass {
+        ...ClassSummary
+      }
+"
     };
 }
 
 /// Lists the user's scheduled items between `$startTime` and `$endTime`.
-pub const YOUR_SCHEDULE_ITEMS: &str =
+pub const YOUR_SCHEDULE_ITEMS: &str = concat!(
     "query YourScheduleItems($startTime: DateTime!, $endTime: DateTime!) {
   userScheduledItemsList(startTime: $startTime, endTime: $endTime) {
     __typename
     ... on YourScheduleItemList {
       yourScheduleItems {
         __typename
-        ... on ScheduledClass {
-          id
-          scheduledStartTime
-        }
+        ... on ScheduledClass {",
+    scheduled_class_fields!(),
+    "        }
       }
     }
   }
 }
-";
+",
+    class_summary_fragment!()
+);
 
 /// Reads one scheduled class by its scheduled-class id `$id`.
-pub const SCHEDULED_CLASS: &str = "query ScheduledClass($id: String!) {
+pub const SCHEDULED_CLASS: &str = concat!(
+    "query ScheduledClass($id: String!) {
   scheduledClass(scheduledClassId: $id) {
     __typename
-    ... on ScheduledClass {
-      id
-      scheduledStartTime
-    }
+    ... on ScheduledClass {",
+    scheduled_class_fields!(),
+    "    }
   }
 }
-";
+",
+    class_summary_fragment!()
+);
 
 /// Schedules the on-demand class `$id` at `$startTime`.
 pub const ADD_CLASS_TO_SCHEDULE: &str = concat!(
     "mutation AddClassToSchedule($id: ID!, $startTime: DateTime!) {
   addClassToSchedule(scheduledClassInput: {id: $id, scheduledStartTime: $startTime}) {",
-    schedule_result!(),
+    schedule_result!(scheduled_class_fields!()),
     "  }
 }
-"
+",
+    class_summary_fragment!()
 );
 
 /// Moves the scheduled class `$id` to `$startTime`; Peloton issues a new id.
 pub const RESCHEDULE_CLASS: &str = concat!(
     "mutation RescheduleClass($id: ID!, $startTime: DateTime!) {
   rescheduleClass(rescheduleClassInput: {id: $id, scheduledStartTime: $startTime}) {",
-    schedule_result!(),
+    schedule_result!(scheduled_class_fields!()),
     "  }
 }
-"
+",
+    class_summary_fragment!()
 );
 
 /// Removes the scheduled class `$id`.
 pub const REMOVE_CLASS_FROM_SCHEDULE: &str = concat!(
     "mutation RemoveClassFromSchedule($id: String!) {
   removeClassFromSchedule(scheduledClassId: $id) {",
-    schedule_result!(),
+    schedule_result!(
+        "
+      id
+"
+    ),
     "  }
 }
 "

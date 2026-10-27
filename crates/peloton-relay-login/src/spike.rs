@@ -4,13 +4,12 @@
 //! Steps, each reported PASS, FAIL or SKIP:
 //! 1. `CheckDoesClassExistInUserStack` with a locally encoded class id. A
 //!    rejected token stops the spike before anything else is sent.
-//! 2. Schema introspection, saved when the gateway allows it.
-//! 3. The three library reads (REST), saved.
-//! 4. Schedule: list, add at the first whole hour at least 13 days ahead,
+//! 2. The three library reads (REST), saved.
+//! 3. Schedule: list, add at the first whole hour at least 13 days ahead,
 //!    prove the new item is listed, read it, move it one hour, remove it, and
 //!    check the list is as before. Later calls always send back the raw ids
 //!    Peloton returned, whether or not they decode as expected.
-//! 5. Stack: read and print it (refusing a partial list), add the class, write
+//! 4. Stack: read and print it (refusing a partial list), add the class, write
 //!    the saved Stack back with `ModifyStack` using Peloton's own `joinToken`s,
 //!    and check the read-back order is identical.
 
@@ -39,46 +38,11 @@ const SCHEDULE_WINDOW: Duration = Duration::days(14);
 /// Longest GraphQL error message echoed to the terminal.
 const MAX_MESSAGE: usize = 160;
 
-/// A compact introspection query: every type with its fields, arguments,
-/// input fields, union members and enum values.
-const INTROSPECTION: &str = "query IntrospectionQuery {
-  __schema {
-    queryType { name }
-    mutationType { name }
-    types {
-      kind
-      name
-      fields(includeDeprecated: true) {
-        name
-        args { name type { ...TypeRef } }
-        type { ...TypeRef }
-      }
-      inputFields { name type { ...TypeRef } }
-      interfaces { name }
-      possibleTypes { name }
-      enumValues(includeDeprecated: true) { name }
-    }
-  }
-}
-
-fragment TypeRef on __Type {
-  kind
-  name
-  ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } }
-}
-";
-
 const CHECK: Op = Op {
     name: "CheckDoesClassExistInUserStack",
     kind: OpKind::Query,
     document: CHECK_CLASS_IN_STACK,
     field: "checkDoesClassExistInUserStack",
-};
-const SCHEMA: Op = Op {
-    name: "IntrospectionQuery",
-    kind: OpKind::Query,
-    document: INTROSPECTION,
-    field: "__schema",
 };
 const LIST: Op = Op {
     name: "YourScheduleItems",
@@ -650,7 +614,6 @@ pub fn run(session: &Session, dir: &Path, class: &PelotonId) -> Result<(), Strin
     let mut steps = Steps::default();
 
     let in_stack = check_class(&spike, &mut steps)?;
-    introspect(&spike, &mut steps);
     spike.rest(
         &mut steps,
         "library search",
@@ -715,20 +678,6 @@ fn check_class(spike: &Spike<'_>, steps: &mut Steps) -> Result<Option<bool>, Str
     }
 }
 
-/// Step 2.
-fn introspect(spike: &Spike<'_>, steps: &mut Steps) {
-    let step = "schema introspection";
-    match spike.call(steps, &SCHEMA, &json!({}), "graphql_schema.json") {
-        Ok(_) => steps.record(step, Status::Pass, "saved graphql_schema.json"),
-        Err(CallFailure::Auth) => steps.record(step, Status::Skip, "gateway refused introspection"),
-        Err(CallFailure::Other(message)) => steps.record(
-            step,
-            Status::Skip,
-            format!("gateway refused introspection ({message})"),
-        ),
-    }
-}
-
 /// The schedule window the spike lists, as sent upstream.
 struct Window {
     start: String,
@@ -748,7 +697,7 @@ impl Plan<'_> {
     }
 }
 
-/// Step 4.
+/// Step 3.
 fn schedule_round_trip(spike: &Spike<'_>, steps: &mut Steps) -> Result<(), String> {
     let now = OffsetDateTime::now_utc();
     let window = Window {
@@ -983,7 +932,7 @@ fn print_left_over(raw: &str, plan: &Plan<'_>) {
     eprintln!("!!! Remove this from your Peloton schedule by hand: {what}");
 }
 
-/// Step 5.
+/// Step 4.
 fn stack_round_trip(spike: &Spike<'_>, steps: &mut Steps, in_stack: Option<bool>) {
     let saved = match spike.view_stack(steps, "stack_before.json") {
         Ok(saved) => saved,
