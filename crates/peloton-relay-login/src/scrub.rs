@@ -31,11 +31,12 @@
 //!   outside a class) is shifted by one offset, random per run; a
 //!   device-local `device_time_*` copy of a timestamp (which would reveal
 //!   the member's UTC offset) is set to the shifted UTC value, or dropped;
-//! - class times are public catalogue data and are kept as they are: a class
-//!   is an object carrying `original_air_time` (a ride, a library item, a
-//!   related ride) or the value of a `ride` key, and every timestamp inside
-//!   it, nested objects included, is left unshifted, so no public time can
-//!   be matched against its shifted copy;
+//! - known catalogue times of a class (its air time and scheduled start) are
+//!   public and kept as they are, so no public time can be matched against
+//!   its shifted copy: a class is an object carrying `original_air_time` (a
+//!   ride, a library item, a related ride) or the value of a `ride` key, and
+//!   inside it only `original_air_time` and `scheduled_start_time` are left
+//!   unshifted; any other timestamp in a class is shifted like a member time;
 //! - Peloton's base64 class ids (on-demand class ids and scheduled-class
 //!   ids, which embed the member's own event id) are decoded, their ids
 //!   mapped like any other id and their scheduled start shifted as below,
@@ -149,6 +150,8 @@ const DEVICE_TIME_PREFIX: &str = "device_time_";
 const CLASS_MARKER: &str = "original_air_time";
 /// A key whose value is always a class.
 const CLASS_KEY: &str = "ride";
+/// Public catalogue times left unshifted inside a class.
+const CLASS_TIME_KEYS: &[&str] = &["original_air_time", "scheduled_start_time"];
 const GRAPH_PREFIX: &str = "performance_graph-";
 /// Scores computed from zone durations; nulled because they encode the old zones.
 const ZONE_SCORES: &[&str] = &[
@@ -334,8 +337,8 @@ struct Scrubber {
     /// Whether the object being scrubbed is inside the `heart_rate` metric;
     /// only its `zones` are heart-rate zones.
     in_heart_rate: bool,
-    /// Whether the value being scrubbed is inside a class, whose times are
-    /// public and not shifted.
+    /// Whether the value being scrubbed is inside a class, whose
+    /// [`CLASS_TIME_KEYS`] are public and not shifted.
     in_class: bool,
     /// Earliest schedule time (start or end) seen while collecting, epoch
     /// seconds.
@@ -432,9 +435,7 @@ impl Scrubber {
             Value::Array(items) => Value::Array(items.into_iter().map(|v| self.value(v)).collect()),
             Value::String(text) => Value::String(self.string(&text)),
             Value::Number(number) => match number.as_i64() {
-                Some(n) if EPOCH_RANGE.contains(&n) && !self.in_class => {
-                    json!(n + self.params.time_shift_s)
-                }
+                Some(n) if EPOCH_RANGE.contains(&n) => json!(n + self.params.time_shift_s),
                 _ => Value::Number(number),
             },
             other => other,
@@ -537,6 +538,9 @@ impl Scrubber {
         }
         if ZONE_SCORES.contains(&key) && child.is_number() {
             return Value::Null;
+        }
+        if self.in_class && CLASS_TIME_KEYS.contains(&key) && child.is_number() {
+            return child;
         }
         if CALORIE_KEYS.contains(&key) && child.is_number() {
             return scale(&child, self.params.calorie_factor);

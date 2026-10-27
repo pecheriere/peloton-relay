@@ -950,7 +950,7 @@ fn member_and_class_inputs() -> Vec<(String, Value)> {
             json!({
                 "id": WORKOUT,
                 "start_time": 1_777_000_065,
-                "ride": {"id": RIDE, "created_at": AIR + 600}
+                "ride": {"id": RIDE, "scheduled_start_time": AIR + 600}
             }),
         ),
         (
@@ -1011,18 +1011,31 @@ fn scrub_shifts_member_times_but_not_class_times() {
         for class in classes {
             assert_eq!(class["original_air_time"], AIR, "{class}");
             assert_eq!(class["scheduled_start_time"], AIR + 300, "{class}");
-            assert_eq!(class["instructor"]["created_at"], AIR - 86_400, "{class}");
+            assert_eq!(
+                class["instructor"]["created_at"],
+                AIR - 86_400 + shift,
+                "only known catalogue times stay: {class}"
+            );
         }
         let bare = &find(&output, "workout-no-air-time.json")[0].1;
-        assert_eq!(bare["ride"]["created_at"], AIR + 600, "a ride is a class");
+        assert_eq!(
+            bare["ride"]["scheduled_start_time"],
+            AIR + 600,
+            "a ride is a class"
+        );
         assert_eq!(bare["start_time"], 1_777_000_065 + shift);
-        class_times.push(classes.map(Value::clone));
+        class_times.push(classes.map(|c| {
+            (
+                c["original_air_time"].clone(),
+                c["scheduled_start_time"].clone(),
+            )
+        }));
 
         let mut all = Vec::new();
         for (_, value) in &output {
             numbers(value, &mut all);
         }
-        for public in [AIR, AIR + 300, AIR - 86_400, AIR + 600] {
+        for public in [AIR, AIR + 300, AIR + 600] {
             assert!(
                 !all.contains(&(public + shift)),
                 "a shifted class time would reveal the shift"
@@ -1033,4 +1046,35 @@ fn scrub_shifts_member_times_but_not_class_times() {
         class_times[0], class_times[1],
         "class times do not depend on the run"
     );
+}
+
+#[test]
+fn scrub_shifts_unknown_times_inside_a_class() {
+    let class = json!({
+        "id": RIDE,
+        "original_air_time": AIR,
+        "scheduled_start_time": AIR + 300,
+        "member_bookmarked_at": 1_777_000_000,
+        "progress": {"last_taken_at": 1_777_000_500}
+    });
+    let files = vec![(
+        format!("workout-{WORKOUT}.json"),
+        json!({"id": WORKOUT, "ride": class.clone(), "related": [class]}),
+    )];
+    let output = scrub_files(files, PARAMS);
+    let workout = &output[0].1;
+    for class in [&workout["ride"], &workout["related"][0]] {
+        assert_eq!(class["original_air_time"], AIR, "{class}");
+        assert_eq!(class["scheduled_start_time"], AIR + 300, "{class}");
+        assert_eq!(
+            class["member_bookmarked_at"],
+            1_777_000_000 + SHIFT,
+            "{class}"
+        );
+        assert_eq!(
+            class["progress"]["last_taken_at"],
+            1_777_000_500 + SHIFT,
+            "{class}"
+        );
+    }
 }
