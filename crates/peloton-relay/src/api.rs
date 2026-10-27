@@ -2,6 +2,7 @@
 //! and Stack, and validated, audit-logged writes to the schedule and Stack.
 
 use std::any::Any;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request, State};
@@ -124,7 +125,7 @@ pub fn catch_panics() -> CatchPanicLayer<fn(Box<dyn Any + Send + 'static>) -> Re
 #[openapi(
     info(
         title = "Peloton relay",
-        description = "Relay of a Peloton account: its profile, workouts, metrics and classes, the on-demand class library, and the member's schedule and Stack, which it can also change.\n\nEvery error has an `ErrorBody`. Any path not listed here answers 404 `not_found`, any method a listed path does not list answers 405 `method_not_allowed`, and a request the relay fails to handle answers 500 `internal_error`. Writes (tag `peloton-write`) require the gateway capability `pecheriere.dev/cap/peloton-write`.\n\nExample: find a 20-min low-impact ride and schedule it Monday 08:00 America/Los_Angeles.\n\n1. `GET /v1/library/filters?category=cycling` and take the `id` of the class type named \"Low Impact\".\n2. `GET /v1/library?category=cycling&class_type=<that id>&duration=20` and pick a class `id`.\n3. `POST /v1/schedule` with `{\"class_id\": \"<class id>\", \"start_time\": \"2026-11-02T08:00:00-08:00\"}`: 08:00 on Monday 2 November 2026 in America/Los_Angeles, whose offset that day is -08:00 (always send the offset in effect on that day). The answer holds the class's `scheduled_id`.\n4. `GET /v1/schedule` lists it; `PATCH /v1/schedule/{scheduled_id}` moves it (and gives it a new `scheduled_id`), `DELETE` removes it."
+        description = "Relay of a Peloton account: its profile, workouts, metrics and classes, the on-demand class library, and the member's schedule and Stack, which it can also change.\n\nEvery error has an `ErrorBody`. Any path not listed here answers 404 `not_found`, any method a listed path does not list answers 405 `method_not_allowed`, and a request the relay fails to handle answers 500 `internal_error`. Writes (tag `peloton-write`) change the member's account; a proxy in front of the relay can authorise them separately from reads.\n\nExample: find a 20-min low-impact ride and schedule it Monday 08:00 Europe/Berlin.\n\n1. `GET /v1/library/filters?category=cycling` and take the `id` of the class type named \"Low Impact\".\n2. `GET /v1/library?category=cycling&class_type=<that id>&duration=20` and pick a class `id`.\n3. `POST /v1/schedule` with `{\"class_id\": \"<class id>\", \"start_time\": \"2026-11-02T08:00:00+01:00\"}`: 08:00 on Monday 2 November 2026 in Europe/Berlin, whose offset that day is +01:00 (always send the offset in effect on that day). The answer holds the class's `scheduled_id`.\n4. `GET /v1/schedule` lists it; `PATCH /v1/schedule/{scheduled_id}` moves it (and gives it a new `scheduled_id`), `DELETE` removes it."
     ),
     paths(
         me,
@@ -166,7 +167,7 @@ pub fn catch_panics() -> CatchPanicLayer<fn(Box<dyn Any + Send + 'static>) -> Re
     )),
     tags((
         name = "peloton-write",
-        description = "Writes to the member's schedule and Stack. They require the gateway capability `pecheriere.dev/cap/peloton-write` (the read capability alone gets 403 at the gateway), and each one is audit-logged."
+        description = "Writes to the member's schedule and Stack. Every write is a POST, PATCH, PUT or DELETE under `/v1/schedule` or `/v1/stack` (every read is a GET), so a proxy in front of the relay can authorise writes separately from reads. Each one is audit-logged."
     ))
 )]
 struct ApiDoc;
@@ -543,7 +544,7 @@ impl ScheduleParams {
 #[serde(deny_unknown_fields)]
 #[schema(example = json!({
     "class_id": "0123456789abcdef0123456789abcdef",
-    "start_time": "2026-11-02T08:00:00-08:00"
+    "start_time": "2026-11-02T08:00:00+01:00"
 }))]
 struct ScheduleRequest {
     /// Class id (32 lowercase hex) of an on-demand class, from `/v1/library`.
@@ -559,7 +560,7 @@ struct ScheduleRequest {
 /// Body of `PATCH /v1/schedule/{scheduled_id}`.
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-#[schema(example = json!({ "start_time": "2026-11-03T07:30:00-08:00" }))]
+#[schema(example = json!({ "start_time": "2026-11-03T07:30:00+01:00" }))]
 struct RescheduleRequest {
     /// The new start, as [`ScheduleRequest::start_time`].
     #[schema(format = DateTime)]
@@ -816,7 +817,8 @@ async fn scheduled(
 
 /// Schedules an on-demand class at a day and time.
 ///
-/// Requires the gateway capability `pecheriere.dev/cap/peloton-write`. Audit-logged.
+/// Write route: deployments should only allow it for clients granted write
+/// access (see the README, Security model). Audit-logged.
 #[utoipa::path(
     post,
     path = "/v1/schedule",
@@ -827,6 +829,7 @@ async fn scheduled(
             headers(("Location" = String, description = "The scheduled class's path."))
         ),
         (status = 400, description = "`invalid_input`: a path, query or body value is malformed or out of range, the query has a parameter, or the body has an unknown field.", body = ErrorBody),
+        (status = 404, description = "`not_found`: Peloton has no such on-demand class.", body = ErrorBody),
         (status = 422, description = "`cannot_schedule`: Peloton refused, e.g. a conflict or a time outside its window; the message is Peloton's explanation.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected; whether the write happened is unknown, so read before retrying.", body = ErrorBody),
         (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
@@ -864,7 +867,8 @@ async fn schedule_add(
 /// Moves a scheduled class to another time. Peloton gives it a new
 /// `scheduled_id`; the old one stops working.
 ///
-/// Requires the gateway capability `pecheriere.dev/cap/peloton-write`. Audit-logged.
+/// Write route: deployments should only allow it for clients granted write
+/// access (see the README, Security model). Audit-logged.
 #[utoipa::path(
     patch,
     path = "/v1/schedule/{scheduled_id}",
@@ -905,7 +909,8 @@ async fn schedule_move(
 
 /// Removes a class from the member's schedule.
 ///
-/// Requires the gateway capability `pecheriere.dev/cap/peloton-write`. Audit-logged.
+/// Write route: deployments should only allow it for clients granted write
+/// access (see the README, Security model). Audit-logged.
 #[utoipa::path(
     delete,
     path = "/v1/schedule/{scheduled_id}",
@@ -915,6 +920,7 @@ async fn schedule_move(
         (status = 204, description = "Removed."),
         (status = 400, description = "`invalid_input`: a path, query or body value is malformed or out of range, the query has a parameter, or the body has an unknown field.", body = ErrorBody),
         (status = 404, description = "`not_found`: no such scheduled class.", body = ErrorBody),
+        (status = 422, description = "`cannot_schedule`: Peloton refused to remove the class; the message is Peloton's explanation.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected; whether the write happened is unknown, so read before retrying.", body = ErrorBody),
         (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
@@ -963,7 +969,8 @@ async fn stack(
 
 /// Appends a class to the Stack.
 ///
-/// Requires the gateway capability `pecheriere.dev/cap/peloton-write`. Audit-logged.
+/// Write route: deployments should only allow it for clients granted write
+/// access (see the README, Security model). Audit-logged.
 #[utoipa::path(
     post,
     path = "/v1/stack",
@@ -1001,7 +1008,8 @@ async fn stack_add(
 
 /// Removes a class from the Stack, keeping the others in order.
 ///
-/// Requires the gateway capability `pecheriere.dev/cap/peloton-write`. Audit-logged.
+/// Write route: deployments should only allow it for clients granted write
+/// access (see the README, Security model). Audit-logged.
 #[utoipa::path(
     delete,
     path = "/v1/stack/{class_id}",
@@ -1035,7 +1043,8 @@ async fn stack_remove(
 
 /// Replaces the whole Stack: its classes and their order.
 ///
-/// Requires the gateway capability `pecheriere.dev/cap/peloton-write`. Audit-logged.
+/// Write route: deployments should only allow it for clients granted write
+/// access (see the README, Security model). Audit-logged.
 #[utoipa::path(
     put,
     path = "/v1/stack",
@@ -1056,7 +1065,10 @@ async fn stack_replace(
     Params(NoParams {}): Params<NoParams>,
     Body(request): Body<StackReplaceRequest>,
 ) -> Result<StackWritten, ApiError> {
-    if request.class_ids.len() > MAX_STACK_CLASSES {
+    let mut seen = HashSet::with_capacity(request.class_ids.len());
+    let distinct = request.class_ids.iter().all(|id| seen.insert(id));
+    // Input validation, so not a write; `StackService` checks it again.
+    if request.class_ids.len() > MAX_STACK_CLASSES || !distinct {
         return Err(ApiError::InvalidInput);
     }
     let ids: Vec<String> = request.class_ids.iter().map(ToString::to_string).collect();

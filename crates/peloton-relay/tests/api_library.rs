@@ -484,7 +484,6 @@ fn openapi_lists_new_routes_and_filter_enums() {
 #[test]
 fn openapi_marks_writes_and_documents_their_errors() {
     let document = serde_json::to_value(openapi()).unwrap();
-    let capability = "pecheriere.dev/cap/peloton-write";
     let tag = document["tags"]
         .as_array()
         .unwrap()
@@ -492,13 +491,19 @@ fn openapi_marks_writes_and_documents_their_errors() {
         .find(|t| t["name"] == "peloton-write")
         .expect("write tag")
         .clone();
-    assert!(tag["description"].as_str().unwrap().contains(capability));
+    assert!(
+        tag["description"]
+            .as_str()
+            .unwrap()
+            .contains("separately from reads"),
+        "{tag}"
+    );
     let operation = |route: &str, method: &str| document["paths"][route][method].clone();
     let writes = [
         (
             "/v1/schedule",
             "post",
-            &["201", "400", "422", "502", "503"][..],
+            &["201", "400", "404", "422", "502", "503"][..],
         ),
         (
             "/v1/schedule/{scheduled_id}",
@@ -508,7 +513,7 @@ fn openapi_marks_writes_and_documents_their_errors() {
         (
             "/v1/schedule/{scheduled_id}",
             "delete",
-            &["204", "400", "404", "502", "503"],
+            &["204", "400", "404", "422", "502", "503"],
         ),
         (
             "/v1/stack",
@@ -526,7 +531,11 @@ fn openapi_marks_writes_and_documents_their_errors() {
         let op = operation(route, method);
         assert_eq!(op["tags"], json!(["peloton-write"]), "{method} {route}");
         let description = op["description"].as_str().unwrap_or_default();
-        assert!(description.contains(capability), "{method} {route}");
+        let description = description.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            description.contains("clients granted write access"),
+            "{method} {route}: {description}"
+        );
         for status in statuses {
             assert!(
                 op["responses"][*status].is_object(),
@@ -564,20 +573,6 @@ fn openapi_marks_writes_and_documents_their_errors() {
             "{route} is a read"
         );
     }
-
-    // One worked example: find a 20-min low-impact ride and schedule it.
-    let description = document["info"]["description"].as_str().unwrap();
-    for text in [
-        "/v1/library/filters?category=cycling",
-        "duration=20",
-        "POST /v1/schedule",
-        "America/Los_Angeles",
-        "2026-11-02T08:00:00-08:00",
-    ] {
-        assert!(description.contains(text), "missing {text}: {description}");
-    }
-    let example = &document["components"]["schemas"]["ScheduleRequest"]["example"];
-    assert_eq!(example["start_time"], "2026-11-02T08:00:00-08:00");
 }
 
 #[test]
@@ -600,4 +595,32 @@ fn openapi_constrains_scheduled_ids() {
         &document["components"]["schemas"]["ScheduledClassView"]["properties"]["scheduled_id"];
     assert_eq!(field["pattern"], "^[A-Za-z0-9_-]+$", "{field}");
     assert_eq!(field["maxLength"], 512, "{field}");
+}
+
+#[test]
+fn openapi_names_no_deployment() {
+    // Any deployment can serve this document: no owner-specific capability
+    // or host names (a capability URI has a `/cap/` path).
+    let text = serde_json::to_string(&openapi()).unwrap();
+    for owner_specific in ["/cap/", "tailnet", "gateway capability"] {
+        assert!(!text.contains(owner_specific), "{owner_specific}");
+    }
+}
+
+#[test]
+fn openapi_walks_through_one_example() {
+    let document = serde_json::to_value(openapi()).unwrap();
+    // One worked example: find a 20-min low-impact ride and schedule it.
+    let description = document["info"]["description"].as_str().unwrap();
+    for text in [
+        "/v1/library/filters?category=cycling",
+        "duration=20",
+        "POST /v1/schedule",
+        "Europe/Berlin",
+        "2026-11-02T08:00:00+01:00",
+    ] {
+        assert!(description.contains(text), "missing {text}: {description}");
+    }
+    let example = &document["components"]["schemas"]["ScheduleRequest"]["example"];
+    assert_eq!(example["start_time"], "2026-11-02T08:00:00+01:00");
 }

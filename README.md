@@ -60,7 +60,7 @@ anything is sent to Peloton.
   rejected), in the future and at most 14 days ahead by the relay's clock;
   fractions of a second are dropped. It is sent to Peloton in UTC. For a local
   wall-clock time, send the offset in effect on that day, e.g.
-  `2026-11-02T08:00:00-08:00` for 08:00 in Los Angeles that Monday.
+  `2026-11-02T08:00:00+01:00` for 08:00 in Berlin that Monday.
 - Peloton decides everything else (conflicts, slots, its own window); a refusal
   answers 422 `cannot_schedule` with Peloton's explanation.
 - `scheduled_id` is Peloton's id for the scheduled class re-encoded as URL-safe

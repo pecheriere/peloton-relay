@@ -1086,3 +1086,27 @@ async fn rejected_inputs_are_not_writes() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(audit_events(case).is_empty());
 }
+
+#[tokio::test]
+async fn duplicate_stack_replace_is_rejected_before_any_write() {
+    // Installs the capture before anything logs.
+    captured_logs();
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let case = "write_duplicate_replace";
+    let twice = [
+        ride(1).to_string(),
+        ride(2).to_string(),
+        ride(1).to_string(),
+    ];
+    let (status, _, body) = send(
+        &app(&dir, &server),
+        with_json("PUT", "/v1/stack", &json!({ "class_ids": twice })),
+    )
+    .instrument(tracing::info_span!("case", name = case))
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_error(&body, "invalid_input");
+    assert!(audit_events(case).is_empty());
+    assert_eq!(upstream_hits(&server).await, 0);
+}
