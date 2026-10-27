@@ -128,7 +128,7 @@ impl ApiError {
             Self::AlreadyInStack => Cow::Borrowed("The class is already in the Stack."),
             Self::CannotSchedule { message } => Cow::Owned(message.clone()),
             Self::Upstream => Cow::Borrowed("Peloton failed to answer the request."),
-            Self::Internal => Cow::Borrowed("internal error"),
+            Self::Internal => Cow::Borrowed("The relay failed to handle the request."),
         };
         ErrorBody {
             error: self.code(),

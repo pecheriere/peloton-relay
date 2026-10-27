@@ -729,7 +729,7 @@ async fn panicking_handler_answers_500_without_the_payload() {
     assert_eq!(headers[header::CONTENT_TYPE], "application/json");
     assert_eq!(
         parse(&body),
-        serde_json::json!({ "error": "internal_error", "message": "internal error" })
+        serde_json::json!({ "error": "internal_error", "message": "The relay failed to handle the request." })
     );
     let ours: String = logs
         .contents()
