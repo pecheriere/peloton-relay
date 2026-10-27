@@ -5,6 +5,7 @@
 //! ever reach a response.
 
 use std::borrow::Cow;
+use std::fmt;
 use std::time::Duration;
 
 use axum::Json;
@@ -25,7 +26,10 @@ pub struct ErrorBody {
 }
 
 /// An error the API reports to its clients.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+///
+/// `Debug` never shows [`ApiError::CannotSchedule`]'s message, so logging an
+/// error with `?` cannot leak it.
+#[derive(Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ApiError {
     /// The request failed validation.
     #[error("invalid input")]
@@ -54,6 +58,23 @@ pub enum ApiError {
     /// Peloton failed or answered something unusable.
     #[error("upstream error")]
     Upstream,
+}
+
+impl fmt::Debug for ApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidInput => f.write_str("InvalidInput"),
+            Self::NotFound => f.write_str("NotFound"),
+            Self::MethodNotAllowed => f.write_str("MethodNotAllowed"),
+            Self::NotAuthenticated => f.write_str("NotAuthenticated"),
+            Self::RateLimited { retry_after } => f
+                .debug_struct("RateLimited")
+                .field("retry_after", retry_after)
+                .finish(),
+            Self::CannotSchedule { .. } => f.debug_struct("CannotSchedule").finish_non_exhaustive(),
+            Self::Upstream => f.write_str("Upstream"),
+        }
+    }
 }
 
 impl ApiError {

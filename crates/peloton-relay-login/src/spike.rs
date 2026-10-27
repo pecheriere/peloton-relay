@@ -17,10 +17,11 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use peloton::endpoints;
-use peloton::graphql::{
-    ADD_CLASS_TO_SCHEDULE, ADD_CLASS_TO_STACK, CHECK_CLASS_IN_STACK, MODIFY_STACK, Op, OpKind,
-    REMOVE_CLASS_FROM_SCHEDULE, RESCHEDULE_CLASS, SCHEDULED_CLASS, VIEW_USER_STACK,
-    YOUR_SCHEDULE_ITEMS,
+use peloton::graphql::Op;
+use peloton::graphql::ops::{
+    ADD_CLASS_TO_SCHEDULE as ADD, ADD_CLASS_TO_STACK as STACK_ADD, CHECK_CLASS_IN_STACK as CHECK,
+    MODIFY_STACK as MODIFY, REMOVE_CLASS_FROM_SCHEDULE as REMOVE, RESCHEDULE_CLASS as MOVE,
+    SCHEDULED_CLASS as READ, VIEW_USER_STACK as VIEW, YOUR_SCHEDULE_ITEMS as LIST,
 };
 use peloton::ids::{OnDemandClassId, PelotonId, ScheduledClassId};
 use secrecy::SecretString;
@@ -37,61 +38,6 @@ const SCHEDULE_LEAD: Duration = Duration::days(13);
 const SCHEDULE_WINDOW: Duration = Duration::days(14);
 /// Longest GraphQL error message echoed to the terminal.
 const MAX_MESSAGE: usize = 160;
-
-const CHECK: Op = Op {
-    name: "CheckDoesClassExistInUserStack",
-    kind: OpKind::Query,
-    document: CHECK_CLASS_IN_STACK,
-    field: "checkDoesClassExistInUserStack",
-};
-const LIST: Op = Op {
-    name: "YourScheduleItems",
-    kind: OpKind::Query,
-    document: YOUR_SCHEDULE_ITEMS,
-    field: "userScheduledItemsList",
-};
-const READ: Op = Op {
-    name: "ScheduledClass",
-    kind: OpKind::Query,
-    document: SCHEDULED_CLASS,
-    field: "scheduledClass",
-};
-const ADD: Op = Op {
-    name: "AddClassToSchedule",
-    kind: OpKind::Mutation,
-    document: ADD_CLASS_TO_SCHEDULE,
-    field: "addClassToSchedule",
-};
-const MOVE: Op = Op {
-    name: "RescheduleClass",
-    kind: OpKind::Mutation,
-    document: RESCHEDULE_CLASS,
-    field: "rescheduleClass",
-};
-const REMOVE: Op = Op {
-    name: "RemoveClassFromSchedule",
-    kind: OpKind::Mutation,
-    document: REMOVE_CLASS_FROM_SCHEDULE,
-    field: "removeClassFromSchedule",
-};
-const VIEW: Op = Op {
-    name: "ViewUserStack",
-    kind: OpKind::Query,
-    document: VIEW_USER_STACK,
-    field: "viewUserStack",
-};
-const STACK_ADD: Op = Op {
-    name: "AddClassToStack",
-    kind: OpKind::Mutation,
-    document: ADD_CLASS_TO_STACK,
-    field: "addClassToStack",
-};
-const MODIFY: Op = Op {
-    name: "ModifyStack",
-    kind: OpKind::Mutation,
-    document: MODIFY_STACK,
-    field: "modifyStack",
-};
 
 /// Why a GraphQL call did not yield data.
 #[derive(Debug, PartialEq, Eq)]

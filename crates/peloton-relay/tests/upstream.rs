@@ -6,7 +6,7 @@ use std::time::{Duration as StdDuration, Instant};
 
 use peloton::ids::PelotonId;
 use peloton_relay::tokens::TokenManager;
-use peloton_relay::upstream::{Peloton, UpstreamError, WorkoutQuery};
+use peloton_relay::upstream::{LibraryQuery, LibrarySort, Peloton, UpstreamError, WorkoutQuery};
 use time::Duration;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -477,4 +477,157 @@ async fn graph_of_own_workout_checks_ownership_first() {
         .unwrap();
     let requests = server.received_requests().await.unwrap();
     assert_eq!(requests[0].url.path(), format!("/api/workout/{WORKOUT}"));
+}
+
+#[tokio::test]
+async fn library_query_params() {
+    let class_type = "00000000000000000000000000000f2c";
+    let instructor = "00000000000000000000000000000f15";
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/ride/archived"))
+        .and(header("authorization", "Bearer tok-1"))
+        .and(header("peloton-platform", "web"))
+        .and(query_param("browse_category", "cycling"))
+        .and(query_param("class_type_id", class_type))
+        .and(query_param("instructor_id", instructor))
+        .and(query_param("duration", "1200"))
+        .and(query_param("difficulty", "beginner"))
+        .and(query_param("sort_by", "original_air_time"))
+        .and(query_param("desc", "true"))
+        .and(query_param("page", "3"))
+        .and(query_param("limit", "10"))
+        .respond_with(json(fixture("library_archived.json")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let page = client(&dir, &server, Some("tok-1"))
+        .library(&LibraryQuery {
+            category: Some("cycling".to_owned()),
+            class_type: Some(class_type.parse().unwrap()),
+            instructor: Some(instructor.parse().unwrap()),
+            duration_s: Some(1200),
+            difficulty: Some("beginner".to_owned()),
+            sort: Some(LibrarySort {
+                by: "original_air_time".to_owned(),
+                desc: true,
+            }),
+            page: 3,
+            limit: 10,
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.data.len(), 5);
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests[0].url.query_pairs().count(), 9);
+}
+
+#[tokio::test]
+async fn library_omits_unset_filters() {
+    let server = MockServer::start().await;
+    let mut mock = Mock::given(method("GET"))
+        .and(path("/api/v2/ride/archived"))
+        .and(query_param("page", "0"))
+        .and(query_param("limit", "20"));
+    for param in [
+        "browse_category",
+        "class_type_id",
+        "instructor_id",
+        "duration",
+        "difficulty",
+        "sort_by",
+        "desc",
+    ] {
+        mock = mock.and(query_param_is_missing(param));
+    }
+    mock.respond_with(json(fixture("library_archived.json")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    client(&dir, &server, Some("tok-1"))
+        .library(&LibraryQuery {
+            category: None,
+            class_type: None,
+            instructor: None,
+            duration_s: None,
+            difficulty: None,
+            sort: None,
+            page: 0,
+            limit: 20,
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn library_sort_ascending_says_so() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/ride/archived"))
+        .and(query_param("sort_by", "difficulty"))
+        .and(query_param("desc", "false"))
+        .respond_with(json(fixture("library_archived.json")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    client(&dir, &server, Some("tok-1"))
+        .library(&LibraryQuery {
+            category: None,
+            class_type: None,
+            instructor: None,
+            duration_s: None,
+            difficulty: None,
+            sort: Some(LibrarySort {
+                by: "difficulty".to_owned(),
+                desc: false,
+            }),
+            page: 0,
+            limit: 20,
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn ride_filters_sends_platform_header() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/ride/filters"))
+        .and(header("authorization", "Bearer tok-1"))
+        .and(header("peloton-platform", "web"))
+        .and(query_param("library_type", "on_demand"))
+        .and(query_param("browse_category", "cycling"))
+        .respond_with(json(fixture("ride_filters.json")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let filters = client(&dir, &server, Some("tok-1"))
+        .ride_filters("cycling")
+        .await
+        .unwrap();
+    assert!(!filters.filters.is_empty());
+    assert!(!filters.sorts.is_empty());
+}
+
+#[tokio::test]
+async fn browse_categories_lists_on_demand_categories() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/browse_categories"))
+        .and(header("peloton-platform", "web"))
+        .and(query_param("library_type", "on_demand"))
+        .respond_with(json(fixture("browse_categories.json")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let categories = client(&dir, &server, Some("tok-1"))
+        .browse_categories()
+        .await
+        .unwrap();
+    assert!(!categories.browse_categories.is_empty());
 }

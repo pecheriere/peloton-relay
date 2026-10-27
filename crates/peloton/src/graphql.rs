@@ -275,41 +275,121 @@ pub const CHECK_CLASS_IN_STACK: &str =
 }
 ";
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        ADD_CLASS_TO_SCHEDULE, ADD_CLASS_TO_STACK, CHECK_CLASS_IN_STACK, MODIFY_STACK, OpKind,
-        REMOVE_CLASS_FROM_SCHEDULE, RESCHEDULE_CLASS, SCHEDULED_CLASS, VIEW_USER_STACK,
-        YOUR_SCHEDULE_ITEMS, op_url,
+/// Each document above as an [`Op`], named after it.
+pub mod ops {
+    use super::{Op, OpKind};
+
+    /// [`super::YOUR_SCHEDULE_ITEMS`].
+    pub const YOUR_SCHEDULE_ITEMS: Op = Op {
+        name: "YourScheduleItems",
+        kind: OpKind::Query,
+        document: super::YOUR_SCHEDULE_ITEMS,
+        field: "userScheduledItemsList",
     };
 
-    const OPERATIONS: [(&str, OpKind, &str); 9] = [
-        ("YourScheduleItems", OpKind::Query, YOUR_SCHEDULE_ITEMS),
-        ("ScheduledClass", OpKind::Query, SCHEDULED_CLASS),
-        (
-            "AddClassToSchedule",
-            OpKind::Mutation,
-            ADD_CLASS_TO_SCHEDULE,
-        ),
-        ("RescheduleClass", OpKind::Mutation, RESCHEDULE_CLASS),
-        (
-            "RemoveClassFromSchedule",
-            OpKind::Mutation,
-            REMOVE_CLASS_FROM_SCHEDULE,
-        ),
-        ("ViewUserStack", OpKind::Query, VIEW_USER_STACK),
-        ("AddClassToStack", OpKind::Mutation, ADD_CLASS_TO_STACK),
-        ("ModifyStack", OpKind::Mutation, MODIFY_STACK),
-        (
-            "CheckDoesClassExistInUserStack",
-            OpKind::Query,
-            CHECK_CLASS_IN_STACK,
-        ),
+    /// [`super::SCHEDULED_CLASS`].
+    pub const SCHEDULED_CLASS: Op = Op {
+        name: "ScheduledClass",
+        kind: OpKind::Query,
+        document: super::SCHEDULED_CLASS,
+        field: "scheduledClass",
+    };
+
+    /// [`super::ADD_CLASS_TO_SCHEDULE`].
+    pub const ADD_CLASS_TO_SCHEDULE: Op = Op {
+        name: "AddClassToSchedule",
+        kind: OpKind::Mutation,
+        document: super::ADD_CLASS_TO_SCHEDULE,
+        field: "addClassToSchedule",
+    };
+
+    /// [`super::RESCHEDULE_CLASS`].
+    pub const RESCHEDULE_CLASS: Op = Op {
+        name: "RescheduleClass",
+        kind: OpKind::Mutation,
+        document: super::RESCHEDULE_CLASS,
+        field: "rescheduleClass",
+    };
+
+    /// [`super::REMOVE_CLASS_FROM_SCHEDULE`].
+    pub const REMOVE_CLASS_FROM_SCHEDULE: Op = Op {
+        name: "RemoveClassFromSchedule",
+        kind: OpKind::Mutation,
+        document: super::REMOVE_CLASS_FROM_SCHEDULE,
+        field: "removeClassFromSchedule",
+    };
+
+    /// [`super::VIEW_USER_STACK`].
+    pub const VIEW_USER_STACK: Op = Op {
+        name: "ViewUserStack",
+        kind: OpKind::Query,
+        document: super::VIEW_USER_STACK,
+        field: "viewUserStack",
+    };
+
+    /// [`super::ADD_CLASS_TO_STACK`].
+    pub const ADD_CLASS_TO_STACK: Op = Op {
+        name: "AddClassToStack",
+        kind: OpKind::Mutation,
+        document: super::ADD_CLASS_TO_STACK,
+        field: "addClassToStack",
+    };
+
+    /// [`super::MODIFY_STACK`].
+    pub const MODIFY_STACK: Op = Op {
+        name: "ModifyStack",
+        kind: OpKind::Mutation,
+        document: super::MODIFY_STACK,
+        field: "modifyStack",
+    };
+
+    /// [`super::CHECK_CLASS_IN_STACK`].
+    pub const CHECK_CLASS_IN_STACK: Op = Op {
+        name: "CheckDoesClassExistInUserStack",
+        kind: OpKind::Query,
+        document: super::CHECK_CLASS_IN_STACK,
+        field: "checkDoesClassExistInUserStack",
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Op, OpKind, op_url, ops};
+
+    const OPERATIONS: [Op; 9] = [
+        ops::YOUR_SCHEDULE_ITEMS,
+        ops::SCHEDULED_CLASS,
+        ops::ADD_CLASS_TO_SCHEDULE,
+        ops::RESCHEDULE_CLASS,
+        ops::REMOVE_CLASS_FROM_SCHEDULE,
+        ops::VIEW_USER_STACK,
+        ops::ADD_CLASS_TO_STACK,
+        ops::MODIFY_STACK,
+        ops::CHECK_CLASS_IN_STACK,
     ];
 
     #[test]
+    fn each_op_reads_the_root_field_its_document_selects() {
+        for op in OPERATIONS {
+            // The root field is the only selection indented by two spaces.
+            let root = op.document.lines().any(|line| {
+                line.strip_prefix("  ")
+                    .and_then(|rest| rest.strip_prefix(op.field))
+                    .is_some_and(|rest| rest.starts_with('(') || rest.starts_with(" {"))
+            });
+            assert!(root, "{}: root field", op.name);
+        }
+    }
+
+    #[test]
     fn each_document_holds_its_named_operation_only() {
-        for (name, kind, document) in OPERATIONS {
+        for Op {
+            name,
+            kind,
+            document,
+            ..
+        } in OPERATIONS
+        {
             let header = format!("{} {name}", kind.as_str());
             assert!(document.starts_with(&header), "{name}: header");
             let next = document.as_bytes()[header.len()];
@@ -322,7 +402,7 @@ mod tests {
 
     #[test]
     fn documents_are_balanced_and_define_only_used_fragments() {
-        for (name, _, document) in OPERATIONS {
+        for Op { name, document, .. } in OPERATIONS {
             let opens = document.matches('{').count();
             let closes = document.matches('}').count();
             assert_eq!(opens, closes, "{name}: braces");

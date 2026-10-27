@@ -9,10 +9,12 @@
 
 use std::collections::HashSet;
 
+use peloton::graphql::ops;
 use peloton::ids::{OnDemandClassId, PelotonId};
+use peloton::upstream::PelotonClass;
 use tokio::sync::Mutex;
 
-use crate::upstream::UpstreamError;
+use crate::upstream::{Peloton, UpstreamError};
 
 /// A Stack item whose class id did not decode as an on-demand class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +45,7 @@ pub trait StackBackend {
     /// Appends the on-demand class of `ride`.
     fn add(&self, ride: &PelotonId) -> impl Future<Output = Result<(), UpstreamError>> + Send;
 
-    /// Replaces the whole Stack with `ids`, in that order.
+    /// Replaces the whole Stack with `ids`, in that order, sent verbatim.
     fn modify(
         &self,
         ids: &[OnDemandClassId],
@@ -85,12 +87,6 @@ impl<B: StackBackend + Sync> StackService<B> {
             backend,
             writes: Mutex::new(()),
         }
-    }
-
-    /// The backend this service writes through.
-    #[must_use]
-    pub fn backend(&self) -> &B {
-        &self.backend
     }
 
     /// The Stack in play order, undecodable items included.
@@ -178,5 +174,60 @@ impl<B: StackBackend + Sync> StackService<B> {
             .into_iter()
             .map(|entry| entry.class.map_err(|Undecodable| StackError::Undecodable))
             .collect()
+    }
+}
+
+/// Peloton's Stack. An item's class id is the `joinToken` Peloton issued for
+/// it, kept verbatim so a write-back sends exactly what Peloton gave; an item
+/// without one, or whose token names another ride than its `classId`, is
+/// [`Undecodable`].
+impl StackBackend for Peloton {
+    async fn view(&self) -> Result<Vec<StackEntry>, UpstreamError> {
+        let stack = self.stack().await?;
+        stack
+            .user_stack
+            .stacked_class_list
+            .into_iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let Some(play_order) = item.play_order else {
+                    let path = format!(
+                        "data.{}.userStack.stackedClassList[{index}].playOrder",
+                        ops::VIEW_USER_STACK.field
+                    );
+                    tracing::warn!(%path, "Stack item has no play order");
+                    return Err(UpstreamError::Decode { path });
+                };
+                Ok(StackEntry {
+                    play_order,
+                    class: issued_id(item.peloton_class.as_ref()),
+                })
+            })
+            .collect()
+    }
+
+    async fn class_in_stack(&self, ride: &PelotonId) -> Result<bool, UpstreamError> {
+        Peloton::class_in_stack(self, ride).await
+    }
+
+    async fn add(&self, ride: &PelotonId) -> Result<(), UpstreamError> {
+        self.add_to_stack(ride).await.map(|_| ())
+    }
+
+    async fn modify(&self, ids: &[OnDemandClassId]) -> Result<(), UpstreamError> {
+        self.modify_stack(ids).await.map(|_| ())
+    }
+}
+
+/// The class id Peloton issued for a Stack item: its `joinToken`, when that
+/// is an on-demand class id for the item's own `classId`.
+fn issued_id(class: Option<&PelotonClass>) -> Result<OnDemandClassId, Undecodable> {
+    let class = class.ok_or(Undecodable)?;
+    let token = class.join_token.as_deref().ok_or(Undecodable)?;
+    let id: OnDemandClassId = token.parse().map_err(|_| Undecodable)?;
+    if class.class_id.as_ref() == Some(id.ride_id()) {
+        Ok(id)
+    } else {
+        Err(Undecodable)
     }
 }

@@ -18,29 +18,34 @@ enum Call {
     Modify(Vec<String>),
 }
 
+/// The calls a [`FakeStack`] received, readable after the service owns it.
+#[derive(Clone, Default)]
+struct Calls(Arc<Mutex<Vec<Call>>>);
+
+impl Calls {
+    fn calls(&self) -> Vec<Call> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 /// A Stack held in memory. Every call yields to the runtime before and after
 /// touching the state, so unserialised callers would interleave.
-#[derive(Default)]
 struct FakeStack {
     entries: Mutex<Vec<StackEntry>>,
-    calls: Mutex<Vec<Call>>,
+    calls: Calls,
 }
 
 impl FakeStack {
     fn with(entries: Vec<StackEntry>) -> Self {
         Self {
             entries: Mutex::new(entries),
-            calls: Mutex::new(Vec::new()),
+            calls: Calls::default(),
         }
-    }
-
-    fn calls(&self) -> Vec<Call> {
-        self.calls.lock().unwrap().clone()
     }
 
     async fn record(&self, call: Call) {
         tokio::time::sleep(Duration::from_millis(5)).await;
-        self.calls.lock().unwrap().push(call);
+        self.calls.0.lock().unwrap().push(call);
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
 }
@@ -117,31 +122,31 @@ fn undecodable(play_order: u32) -> StackEntry {
     }
 }
 
-fn service(entries: Vec<StackEntry>) -> StackService<FakeStack> {
-    StackService::new(FakeStack::with(entries))
+/// A service over a fake Stack holding `entries`, with the fake's call log.
+fn service(entries: Vec<StackEntry>) -> (StackService<FakeStack>, Calls) {
+    let fake = FakeStack::with(entries);
+    let calls = fake.calls.clone();
+    (StackService::new(fake), calls)
 }
 
 #[tokio::test]
 async fn add_rejects_class_already_in_stack() {
-    let stack = service(vec![entry(0, &ride(1))]);
+    let (stack, log) = service(vec![entry(0, &ride(1))]);
     let err = stack.add(&ride(1)).await.unwrap_err();
     assert!(matches!(err, StackError::AlreadyInStack), "{err:?}");
-    assert_eq!(stack.backend().calls(), [Call::Check(ride(1))]);
+    assert_eq!(log.calls(), [Call::Check(ride(1))]);
 }
 
 #[tokio::test]
 async fn add_appends_a_new_class() {
-    let stack = service(vec![entry(0, &ride(1))]);
+    let (stack, log) = service(vec![entry(0, &ride(1))]);
     stack.add(&ride(2)).await.unwrap();
-    assert_eq!(
-        stack.backend().calls(),
-        [Call::Check(ride(2)), Call::Add(ride(2))]
-    );
+    assert_eq!(log.calls(), [Call::Check(ride(2)), Call::Add(ride(2))]);
 }
 
 #[tokio::test]
 async fn view_is_in_play_order_and_keeps_undecodable_entries() {
-    let stack = service(vec![entry(2, &ride(3)), undecodable(1), entry(0, &ride(1))]);
+    let (stack, _) = service(vec![entry(2, &ride(3)), undecodable(1), entry(0, &ride(1))]);
     let entries = stack.view().await.unwrap();
     let orders: Vec<u32> = entries.iter().map(|e| e.play_order).collect();
     assert_eq!(orders, [0, 1, 2]);
@@ -150,16 +155,16 @@ async fn view_is_in_play_order_and_keeps_undecodable_entries() {
 
 #[tokio::test]
 async fn remove_missing_is_not_in_stack() {
-    let stack = service(vec![entry(0, &ride(1))]);
+    let (stack, log) = service(vec![entry(0, &ride(1))]);
     let err = stack.remove(&ride(2)).await.unwrap_err();
     assert!(matches!(err, StackError::NotInStack), "{err:?}");
-    assert_eq!(stack.backend().calls(), [Call::View]);
+    assert_eq!(log.calls(), [Call::View]);
 }
 
 #[tokio::test]
 async fn remove_keeps_order_of_others() {
     // Listed out of play order: the play order is what counts.
-    let stack = service(vec![
+    let (stack, log) = service(vec![
         entry(1, &ride(2)),
         entry(0, &ride(1)),
         entry(3, &ride(4)),
@@ -170,73 +175,70 @@ async fn remove_keeps_order_of_others() {
         .iter()
         .map(|r| issued(r).as_str().to_owned())
         .collect();
-    assert_eq!(stack.backend().calls(), [Call::View, Call::Modify(written)]);
+    assert_eq!(log.calls(), [Call::View, Call::Modify(written)]);
 }
 
 #[tokio::test]
 async fn remove_takes_out_every_copy() {
-    let stack = service(vec![
+    let (stack, log) = service(vec![
         entry(0, &ride(1)),
         entry(1, &ride(2)),
         entry(2, &ride(1)),
     ]);
     stack.remove(&ride(1)).await.unwrap();
     let written = vec![issued(&ride(2)).as_str().to_owned()];
-    assert_eq!(stack.backend().calls(), [Call::View, Call::Modify(written)]);
+    assert_eq!(log.calls(), [Call::View, Call::Modify(written)]);
 }
 
 #[tokio::test]
 async fn replace_rejects_duplicates() {
-    let stack = service(vec![entry(0, &ride(1))]);
+    let (stack, log) = service(vec![entry(0, &ride(1))]);
     let err = stack
         .replace(&[ride(2), ride(3), ride(2)])
         .await
         .unwrap_err();
     assert!(matches!(err, StackError::Duplicate), "{err:?}");
-    assert!(stack.backend().calls().is_empty());
+    assert!(log.calls().is_empty());
 }
 
 #[tokio::test]
 async fn replace_empty_clears() {
-    let stack = service(vec![entry(0, &ride(1)), entry(1, &ride(2))]);
+    let (stack, log) = service(vec![entry(0, &ride(1)), entry(1, &ride(2))]);
     stack.replace(&[]).await.unwrap();
-    assert_eq!(
-        stack.backend().calls(),
-        [Call::View, Call::Modify(Vec::new())]
-    );
+    assert_eq!(log.calls(), [Call::View, Call::Modify(Vec::new())]);
 }
 
 #[tokio::test]
 async fn replace_reuses_pelotons_ids_and_encodes_new_ones() {
-    let stack = service(vec![entry(0, &ride(1)), entry(1, &ride(2))]);
+    let (stack, log) = service(vec![entry(0, &ride(1)), entry(1, &ride(2))]);
     stack.replace(&[ride(3), ride(2)]).await.unwrap();
     let written = vec![
         OnDemandClassId::from_ride(&ride(3)).as_str().to_owned(),
         issued(&ride(2)).as_str().to_owned(),
     ];
-    assert_eq!(stack.backend().calls(), [Call::View, Call::Modify(written)]);
+    assert_eq!(log.calls(), [Call::View, Call::Modify(written)]);
 }
 
 #[tokio::test]
 async fn stack_write_refuses_undecodable_item() {
     let entries = || vec![entry(0, &ride(1)), undecodable(1), entry(2, &ride(2))];
 
-    let stack = service(entries());
+    let (stack, log) = service(entries());
     let err = stack.remove(&ride(1)).await.unwrap_err();
     assert!(matches!(err, StackError::Undecodable), "{err:?}");
-    assert_eq!(stack.backend().calls(), [Call::View]);
+    assert_eq!(log.calls(), [Call::View]);
 
     // Even when the class to remove is not visibly there: the undecodable
     // item might be it.
-    let stack = service(entries());
+    let (stack, log) = service(entries());
     let err = stack.remove(&ride(9)).await.unwrap_err();
     assert!(matches!(err, StackError::Undecodable), "{err:?}");
-    assert_eq!(stack.backend().calls(), [Call::View]);
+    assert_eq!(log.calls(), [Call::View]);
 
-    let stack = service(entries());
+    let (stack, log) = service(entries());
     let err = stack.replace(&[ride(1)]).await.unwrap_err();
     assert!(matches!(err, StackError::Undecodable), "{err:?}");
-    assert_eq!(stack.backend().calls(), [Call::View]);
+    assert_eq!(log.calls(), [Call::View]);
 }
 
 #[tokio::test]
@@ -287,7 +289,8 @@ fn assert_not_interleaved(calls: &[Call]) {
 
 #[tokio::test]
 async fn concurrent_stack_writes_are_serialised() {
-    let stack = Arc::new(service(vec![entry(0, &ride(1)), entry(1, &ride(2))]));
+    let (stack, log) = service(vec![entry(0, &ride(1)), entry(1, &ride(2))]);
+    let stack = Arc::new(stack);
     let writes = vec![
         tokio::spawn({
             let stack = Arc::clone(&stack);
@@ -310,13 +313,14 @@ async fn concurrent_stack_writes_are_serialised() {
     for write in writes {
         write.await.unwrap().unwrap();
     }
-    let calls = stack.backend().calls();
+    let calls = log.calls();
     assert_not_interleaved(&calls);
 }
 
 #[tokio::test]
 async fn concurrent_adds_of_one_class_add_it_once() {
-    let stack = Arc::new(service(Vec::new()));
+    let (stack, _) = service(Vec::new());
+    let stack = Arc::new(stack);
     let adds: Vec<_> = (0..3)
         .map(|_| {
             let stack = Arc::clone(&stack);
