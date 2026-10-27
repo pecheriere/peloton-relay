@@ -1,0 +1,26 @@
+{
+  "data": {
+    "scheduledClass": {
+      "__typename": "ScheduledClass",
+      "id": "eyJob21lX3BlbG90b25faWQiOiAiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBmM2IiLCAicmlkZV9pZCI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGYxZCIsICJzY2hlZHVsZWRfc3RhcnRfdGltZSI6IDE4OTQwMTc2MDAsICJzdHVkaW9fcGVsb3Rvbl9pZCI6IG51bGwsICJ0eXBlIjogImV2ZW50In0=",
+      "pelotonClass": {
+        "__typename": "LiveClass",
+        "airTime": "2026-10-26T17:00:00.000Z",
+        "classId": "00000000000000000000000000000f1d",
+        "difficultyLevel": null,
+        "duration": 1800,
+        "fitnessDiscipline": {
+          "displayName": "Cycling",
+          "slug": "CYCLING"
+        },
+        "instructor": {
+          "name": "redacted"
+        },
+        "joinToken": "eyJob21lX3BlbG90b25faWQiOiAiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBmM2IiLCAicmlkZV9pZCI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGYxZCIsICJzY2hlZHVsZWRfc3RhcnRfdGltZSI6IDE4OTQwMTc2MDAsICJzdHVkaW9fcGVsb3Rvbl9pZCI6IG51bGwsICJ0eXBlIjogImV2ZW50In0=",
+        "title": "30 min Groove Ride"
+      },
+      "scheduledEndTime": "2030-01-07T12:30:00.000Z",
+      "scheduledStartTime": "2030-01-07T12:00:00.000Z"
+    }
+  }
+}

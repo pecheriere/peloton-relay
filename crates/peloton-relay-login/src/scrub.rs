@@ -30,6 +30,17 @@
 //! - every epoch timestamp is shifted by one offset, random per run; a
 //!   device-local `device_time_*` copy of a timestamp (which would reveal
 //!   the member's UTC offset) is set to the shifted UTC value, or dropped;
+//! - Peloton's base64 class ids (on-demand class ids and scheduled-class
+//!   ids, which embed the member's own event id) are decoded, their ids
+//!   mapped like any other id and their scheduled start shifted as below,
+//!   then re-encoded in Peloton's exact layout, so they stay valid; any other
+//!   opaque token, or a class id of an unexpected shape, is replaced;
+//! - schedule times (scheduled starts and ends, in ids and as RFC 3339
+//!   strings) are moved by one offset that puts the run's earliest scheduled
+//!   start at a fixed synthetic instant, so neither the date nor the member's
+//!   time of day survives; an unparseable one becomes that instant;
+//! - the guests and invitees of a scheduled class are emptied; per-member
+//!   library fields (bookmarked, times taken, taken by friends) are reset;
 //! - everything else, notably all measured metric series, is kept as is.
 
 use std::collections::HashMap;
@@ -37,8 +48,14 @@ use std::collections::hash_map::Entry;
 use std::fs;
 use std::path::Path;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use peloton::ids::{OnDemandClassId, ScheduledClassId};
 use rand::Rng as _;
 use serde_json::{Map, Value, json};
+use time::OffsetDateTime;
+use time::format_description::BorrowedFormatItem;
+use time::format_description::well_known::Rfc3339;
 
 use crate::capture::{prepare_dir, save};
 
@@ -92,7 +109,26 @@ const EMPTY_KEYS: &[&str] = &[
     "social_connections",
     "member_groups",
     "ordered_q_and_as",
+    "scheduledUsers",
+    "getInvitedUsers",
 ];
+/// Per-member fields set to a fixed value wherever they appear, whatever
+/// their value.
+const RESET_KEYS: &[(&str, Fixed)] = &[
+    ("is_favorite", Fixed::Bool(false)),
+    ("total_user_workouts", Fixed::Int(0)),
+    ("total_following_workouts", Fixed::Int(0)),
+];
+/// RFC 3339 schedule times, moved with the schedule offset.
+const SCHEDULE_TIME_KEYS: &[&str] = &["scheduledStartTime", "scheduledEndTime"];
+/// The scheduled start inside a scheduled-class id.
+const ID_START_KEY: &str = "scheduled_start_time";
+/// Where the earliest scheduled start of a run lands: 2030-01-07T12:00:00Z.
+const SYNTHETIC_SCHEDULE_START: i64 = 1_894_017_600;
+/// Peloton's schedule time layout, e.g. `2030-01-07T12:00:00.000Z`.
+const SCHEDULE_TIME_FORMAT: &[BorrowedFormatItem<'static>] = time::macros::format_description!(
+    "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+);
 const TIMEZONE: &str = "Etc/UTC";
 /// Bounds of the random calorie factor's distance from 1.
 const CALORIE_DEVIATION: std::ops::RangeInclusive<f64> = 0.05..=0.2;
@@ -119,6 +155,19 @@ type ZoneDurations = [u64; 5];
 enum Fixed {
     Int(u32),
     Float(f64),
+    Bool(bool),
+}
+
+impl Fixed {
+    /// The replacement for `value`, when `value` is of the same JSON type.
+    fn replace(self, value: &Value) -> Option<Value> {
+        match self {
+            Self::Int(n) if value.is_number() => Some(json!(n)),
+            Self::Float(f) if value.is_number() => Some(json!(f)),
+            Self::Bool(b) if value.is_boolean() => Some(json!(b)),
+            _ => None,
+        }
+    }
 }
 
 /// Personal numbers replaced by fixed values (0, meaning "not set", is kept).
@@ -275,6 +324,10 @@ struct Scrubber {
     /// Whether the object being scrubbed is inside the `heart_rate` metric;
     /// only its `zones` are heart-rate zones.
     in_heart_rate: bool,
+    /// Earliest scheduled start seen while collecting, epoch seconds.
+    earliest_schedule: Option<i64>,
+    /// Seconds added to every schedule time.
+    schedule_shift_s: i64,
 }
 
 impl Scrubber {
@@ -290,6 +343,8 @@ impl Scrubber {
             zone_durations: HashMap::new(),
             zone_context: ZoneDurations::default(),
             in_heart_rate: false,
+            earliest_schedule: None,
+            schedule_shift_s: 0,
         }
     }
 
@@ -298,6 +353,13 @@ impl Scrubber {
             Value::Object(map) => {
                 if is_person(map) {
                     self.collect_person(map);
+                }
+                if let Some(start) = map
+                    .get(SCHEDULE_TIME_KEYS[0])
+                    .and_then(Value::as_str)
+                    .and_then(|text| OffsetDateTime::parse(text, &Rfc3339).ok())
+                {
+                    self.note_schedule(start.unix_timestamp());
                 }
                 for child in map.values() {
                     self.collect(child);
@@ -308,8 +370,17 @@ impl Scrubber {
                     self.collect(child);
                 }
             }
+            Value::String(text) => {
+                if let Ok(id) = text.parse::<ScheduledClassId>() {
+                    self.note_schedule(id.scheduled_start_time().unix_timestamp());
+                }
+            }
             _ => {}
         }
+    }
+
+    fn note_schedule(&mut self, start: i64) {
+        self.earliest_schedule = Some(self.earliest_schedule.map_or(start, |e| e.min(start)));
     }
 
     fn collect_person(&mut self, map: &Map<String, Value>) {
@@ -333,6 +404,9 @@ impl Scrubber {
         self.sensitive
             .sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
         self.sensitive.dedup();
+        self.schedule_shift_s = self
+            .earliest_schedule
+            .map_or(0, |earliest| SYNTHETIC_SCHEDULE_START - earliest);
     }
 
     fn value(&mut self, value: Value) -> Value {
@@ -408,14 +482,22 @@ impl Scrubber {
                 other => other,
             };
         }
+        if let Some(&(_, fixed)) = RESET_KEYS.iter().find(|(k, _)| *k == key)
+            && let Some(replaced) = fixed.replace(&child)
+        {
+            return replaced;
+        }
+        if SCHEDULE_TIME_KEYS.contains(&key)
+            && let Value::String(text) = &child
+        {
+            return Value::String(self.schedule_time(text));
+        }
         if let Some(&(_, fixed)) = FIXED_NUMBERS.iter().find(|(k, _)| *k == key)
             && child.is_number()
             && child.as_f64() != Some(0.0)
+            && let Some(replaced) = fixed.replace(&child)
         {
-            return match fixed {
-                Fixed::Int(n) => json!(n),
-                Fixed::Float(f) => json!(f),
-            };
+            return replaced;
         }
         if HEART_RATE_ZONE_LISTS.contains(&key)
             && let Value::Array(items) = &child
@@ -482,11 +564,62 @@ impl Scrubber {
         if text.contains("://") {
             return REDACTED_URL.to_owned();
         }
+        if let Some(id) = self.class_id(text) {
+            return id;
+        }
         if has_opaque_token(text) {
             return REDACTED.to_owned();
         }
         let mapped = self.ids_in(text);
         erase_words(&mapped, &self.sensitive)
+    }
+
+    /// Re-encodes a Peloton class id with its ids mapped and its scheduled
+    /// start moved; `None` when `text` is not a class id of a known shape.
+    fn class_id(&mut self, text: &str) -> Option<String> {
+        let scheduled = text.parse::<ScheduledClassId>().is_ok();
+        if !scheduled && text.parse::<OnDemandClassId>().is_err() {
+            return None;
+        }
+        let payload: Map<String, Value> =
+            serde_json::from_slice(&BASE64.decode(text).ok()?).ok()?;
+        let mut fields: Vec<(String, Value)> = payload
+            .into_iter()
+            .map(|(key, value)| {
+                let value = match value {
+                    Value::String(id) => Value::String(self.ids_in(&id)),
+                    Value::Number(start) if key == ID_START_KEY => {
+                        json!(start.as_i64()? + self.schedule_shift_s)
+                    }
+                    other => other,
+                };
+                Some((key, value))
+            })
+            .collect::<Option<_>>()?;
+        fields.sort_by(|a, b| a.0.cmp(&b.0));
+        let encoded = BASE64.encode(python_json(&fields));
+        let valid = if scheduled {
+            encoded.parse::<ScheduledClassId>().is_ok()
+        } else {
+            encoded.parse::<OnDemandClassId>().is_ok()
+        };
+        valid.then_some(encoded)
+    }
+
+    /// `text` moved by the schedule offset, or the synthetic start when it
+    /// does not parse.
+    fn schedule_time(&self, text: &str) -> String {
+        let synthetic = OffsetDateTime::from_unix_timestamp(SYNTHETIC_SCHEDULE_START);
+        OffsetDateTime::parse(text, &Rfc3339)
+            .ok()
+            .and_then(|t| t.checked_add(time::Duration::seconds(self.schedule_shift_s)))
+            .or_else(|| synthetic.ok())
+            .and_then(|t| {
+                t.to_offset(time::UtcOffset::UTC)
+                    .format(SCHEDULE_TIME_FORMAT)
+                    .ok()
+            })
+            .unwrap_or_else(|| REDACTED.to_owned())
     }
 
     /// Replaces UUIDs and long hex runs in `text` with consistent fakes.
@@ -555,6 +688,16 @@ impl Scrubber {
             .or_insert_with(|| format!("{:0>width$}", format!("f{next:x}")))
             .clone()
     }
+}
+
+/// `fields` as Python's `json.dumps` writes an object, the layout of
+/// Peloton's class ids: `{"key": value, "key": value}`.
+fn python_json(fields: &[(String, Value)]) -> String {
+    let entries: Vec<String> = fields
+        .iter()
+        .map(|(key, value)| format!("{}: {value}", Value::String(key.clone())))
+        .collect();
+    format!("{{{}}}", entries.join(", "))
 }
 
 /// Multiplies every number in `value` (or in the list `value`) by `factor`,

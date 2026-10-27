@@ -614,3 +614,268 @@ fn scrub_rewrites_zones_of_the_heart_rate_metric_only() {
     assert_eq!(hr[1]["range"], "120-137 bpm");
     assert_eq!(hr[1]["duration"], 2, "130 and 131 bpm fall in fixed zone 2");
 }
+
+/// Per-user event ids embedded in scheduled-class ids.
+const HOME: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeee05";
+const HOME_MOVED: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeee06";
+const GUEST: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa07";
+/// 2027-01-15T08:00:00Z, the original scheduled start.
+const START: i64 = 1_800_000_000;
+/// Where the earliest scheduled start of a run lands (2030-01-07T12:00:00Z).
+const SYNTHETIC_START: i64 = 1_894_017_600;
+
+fn event_id(home: &str, start: i64) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(format!(
+        r#"{{"home_peloton_id": "{home}", "ride_id": "{RIDE}", "scheduled_start_time": {start}, "studio_peloton_id": null, "type": "event"}}"#
+    ))
+}
+
+fn iso(epoch: i64) -> String {
+    let format = time::macros::format_description!(
+        "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+    );
+    time::OffsetDateTime::from_unix_timestamp(epoch)
+        .expect("timestamp")
+        .format(&format)
+        .expect("format")
+}
+
+fn scheduled_class(home: &str, start: i64) -> Value {
+    json!({
+        "__typename": "ScheduledClass",
+        "id": event_id(home, start),
+        "scheduledStartTime": iso(start),
+        "scheduledEndTime": iso(start + 1800),
+        "pelotonClass": {
+            "__typename": "LiveClass",
+            "classId": RIDE,
+            "joinToken": event_id(home, start),
+            "title": "30 min Synthetic Ride",
+            "airTime": "2026-10-26T17:00:00.000Z",
+            "instructor": {"name": "Synthetic Instructor"}
+        },
+        "scheduledUsers": {
+            "totalCount": 1,
+            "edges": [{"node": {"id": GUEST, "assets": {"image": {"location": "https://cdn.example.com/guest.png"}}}}]
+        },
+        "getInvitedUsers": {"totalCount": 1, "edges": [{"inviteUserItem": {"invitedUser": {"id": GUEST, "username": "guest_grimsby"}}}]},
+        "hostUser": {"id": USER, "username": "Zorblax"}
+    })
+}
+
+fn schedule_inputs() -> Vec<(String, Value)> {
+    let on_demand = peloton::ids::OnDemandClassId::from_ride(&RIDE.parse().expect("ride"));
+    vec![
+        (
+            "schedule_add.json".to_owned(),
+            json!({"data": {"addClassToSchedule": scheduled_class(HOME, START)}}),
+        ),
+        (
+            "schedule_during.json".to_owned(),
+            json!({"data": {"userScheduledItemsList": {
+                "__typename": "YourScheduleItemList",
+                "yourScheduleItems": [scheduled_class(HOME, START)]
+            }}}),
+        ),
+        (
+            "schedule_reschedule.json".to_owned(),
+            json!({"data": {"rescheduleClass": scheduled_class(HOME_MOVED, START + 3600)}}),
+        ),
+        (
+            "schedule_remove.json".to_owned(),
+            json!({"data": {"removeClassFromSchedule": {
+                "__typename": "ScheduledClass",
+                "id": event_id(HOME_MOVED, START + 3600)
+            }}}),
+        ),
+        (
+            "stack_add.json".to_owned(),
+            json!({"data": {"addClassToStack": {"userStack": {"stackedClassList": [
+                {"playOrder": 0, "pelotonClass": {"classId": RIDE, "joinToken": on_demand.as_str()}}
+            ]}}}}),
+        ),
+        (
+            "library_archived.json".to_owned(),
+            json!({"data": [{
+                "id": RIDE,
+                "home_peloton_id": HOME,
+                "join_tokens": {"on_demand": on_demand.as_str()},
+                "is_favorite": true,
+                "total_user_workouts": 3,
+                "total_following_workouts": 2,
+                "total_workouts": 1000
+            }]}),
+        ),
+    ]
+}
+
+/// Every string of `value` that decodes as standard base64 to JSON.
+fn decoded_tokens(value: &Value, out: &mut Vec<Value>) {
+    use base64::Engine as _;
+    match value {
+        Value::String(text) => {
+            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(text)
+                && let Ok(decoded) = serde_json::from_slice(&bytes)
+            {
+                out.push(decoded);
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|v| decoded_tokens(v, out)),
+        Value::Object(map) => map.values().for_each(|v| decoded_tokens(v, out)),
+        _ => {}
+    }
+}
+
+fn scheduled(id: &Value) -> peloton::ids::ScheduledClassId {
+    id.as_str()
+        .expect("id")
+        .parse()
+        .expect("valid scheduled id")
+}
+
+#[test]
+fn scrub_re_encodes_scheduled_ids_without_personal_values() {
+    let input = schedule_inputs();
+    let originals = [event_id(HOME, START), event_id(HOME_MOVED, START + 3600)];
+    let output = scrub_files(input, PARAMS);
+    let text = render(&output);
+    let mut decoded = Vec::new();
+    for (_, value) in &output {
+        decoded_tokens(value, &mut decoded);
+    }
+    let decoded_text = serde_json::to_string(&decoded).expect("render");
+    assert!(decoded.len() >= 8, "class ids are kept, re-encoded");
+
+    for leak in [HOME, HOME_MOVED, RIDE, GUEST, USER] {
+        assert!(!text.contains(leak), "{leak} survived");
+        assert!(!decoded_text.contains(leak), "{leak} survived inside an id");
+    }
+    for original in &originals {
+        assert!(!text.contains(original.as_str()), "original id survived");
+    }
+    for leak in [
+        START.to_string(),
+        (START + 3600).to_string(),
+        "2027-01-15".to_owned(),
+        "T08:00".to_owned(),
+        "guest_grimsby".to_owned(),
+        "Zorblax".to_owned(),
+        "cdn.example.com".to_owned(),
+    ] {
+        assert!(!text.contains(&leak), "{leak} survived");
+        assert!(
+            !decoded_text.contains(&leak),
+            "{leak} survived inside an id"
+        );
+    }
+}
+
+#[test]
+fn scrub_maps_scheduled_ids_consistently() {
+    let output = scrub_files(schedule_inputs(), PARAMS);
+    let added = &find(&output, "schedule_add.json")[0].1["data"]["addClassToSchedule"];
+    let listed = &find(&output, "schedule_during.json")[0].1["data"]["userScheduledItemsList"]["yourScheduleItems"]
+        [0];
+    let moved = &find(&output, "schedule_reschedule.json")[0].1["data"]["rescheduleClass"];
+    let removed = &find(&output, "schedule_remove.json")[0].1["data"]["removeClassFromSchedule"];
+
+    assert_eq!(added["id"], listed["id"], "same original, same fake");
+    assert_eq!(moved["id"], removed["id"]);
+    assert_ne!(added["id"], moved["id"]);
+    for class in [added, listed, moved] {
+        assert_eq!(class["id"], class["pelotonClass"]["joinToken"]);
+        let id = scheduled(&class["id"]);
+        assert_eq!(id.ride_id().to_string(), class["pelotonClass"]["classId"]);
+        assert_eq!(
+            class["scheduledStartTime"],
+            iso(id.scheduled_start_time().unix_timestamp())
+        );
+        assert_eq!(
+            class["scheduledEndTime"],
+            iso(id.scheduled_start_time().unix_timestamp() + 1800)
+        );
+        assert_eq!(
+            class["pelotonClass"]["airTime"], "2026-10-26T17:00:00.000Z",
+            "public class data is kept"
+        );
+    }
+    let first = scheduled(&added["id"]).scheduled_start_time();
+    assert_eq!(first.unix_timestamp(), SYNTHETIC_START);
+    assert_eq!(
+        scheduled(&moved["id"])
+            .scheduled_start_time()
+            .unix_timestamp(),
+        SYNTHETIC_START + 3600,
+        "relative times are kept"
+    );
+
+    let stacked = &find(&output, "stack_add.json")[0].1["data"]["addClassToStack"]["userStack"]["stackedClassList"]
+        [0]["pelotonClass"];
+    let ride: peloton::ids::PelotonId = stacked["classId"]
+        .as_str()
+        .expect("id")
+        .parse()
+        .expect("ride");
+    assert_eq!(ride.to_string(), added["pelotonClass"]["classId"]);
+    let on_demand = peloton::ids::OnDemandClassId::from_ride(&ride);
+    assert_eq!(
+        stacked["joinToken"],
+        on_demand.as_str(),
+        "Peloton's exact layout"
+    );
+    let library = &find(&output, "library_archived.json")[0].1["data"][0];
+    assert_eq!(library["join_tokens"]["on_demand"], on_demand.as_str());
+}
+
+#[test]
+fn scrub_empties_guest_lists_and_resets_personal_library_fields() {
+    let output = scrub_files(schedule_inputs(), PARAMS);
+    let added = &find(&output, "schedule_add.json")[0].1["data"]["addClassToSchedule"];
+    assert_eq!(added["scheduledUsers"], json!({}));
+    assert_eq!(added["getInvitedUsers"], json!({}));
+    assert_ne!(added["hostUser"]["username"], "Zorblax");
+
+    let library = &find(&output, "library_archived.json")[0].1["data"][0];
+    assert_eq!(library["is_favorite"], false);
+    assert_eq!(library["total_user_workouts"], 0);
+    assert_eq!(library["total_following_workouts"], 0);
+    assert_eq!(library["total_workouts"], 1000, "public counts are kept");
+}
+
+#[test]
+fn scrub_redacts_class_ids_of_unexpected_shape() {
+    use base64::Engine as _;
+    let encode = |json: &str| base64::engine::general_purpose::STANDARD.encode(json);
+    let odd = [
+        encode(&format!(
+            r#"{{"home_peloton_id": "{HOME}", "ride_id": "{RIDE}", "scheduled_start_time": {START}, "studio_peloton_id": null, "type": "event", "user_id": "{USER}"}}"#
+        )),
+        encode(&format!(
+            r#"{{"home_peloton_id": "{HOME}", "ride_id": "{RIDE}", "studio_peloton_id": null, "type": "live"}}"#
+        )),
+        encode(&format!(
+            r#"{{"home_peloton_id": "{HOME}", "ride_id": "{RIDE}", "scheduled_start_time": "{START}", "studio_peloton_id": null, "type": "event"}}"#
+        )),
+        encode(&format!(
+            r#"{{"home_peloton_id": "Zorblax's ride", "ride_id": "{RIDE}", "studio_peloton_id": null, "type": "on_demand"}}"#
+        )),
+    ];
+    let files = vec![("odd.json".to_owned(), json!({"ids": odd.clone()}))];
+    let output = scrub_files(files, PARAMS);
+    assert_eq!(
+        output[0].1["ids"],
+        json!(["redacted", "redacted", "redacted", "redacted"])
+    );
+}
+
+#[test]
+fn scrub_replaces_unparseable_schedule_times() {
+    let files = vec![(
+        "schedule.json".to_owned(),
+        json!({"scheduledStartTime": "next Monday 8pm", "scheduledEndTime": null}),
+    )];
+    let output = scrub_files(files, PARAMS);
+    assert_eq!(output[0].1["scheduledStartTime"], iso(SYNTHETIC_START));
+    assert_eq!(output[0].1["scheduledEndTime"], Value::Null);
+}

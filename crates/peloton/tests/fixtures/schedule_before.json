@@ -1,0 +1,8 @@
+{
+  "data": {
+    "userScheduledItemsList": {
+      "__typename": "YourScheduleItemList",
+      "yourScheduleItems": []
+    }
+  }
+}

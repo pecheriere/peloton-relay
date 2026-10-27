@@ -1,0 +1,8 @@
+{
+  "data": {
+    "removeClassFromSchedule": {
+      "__typename": "ScheduledClass",
+      "id": "eyJob21lX3BlbG90b25faWQiOiAiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBmM2MiLCAicmlkZV9pZCI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGYxZCIsICJzY2hlZHVsZWRfc3RhcnRfdGltZSI6IDE4OTQwMjEyMDAsICJzdHVkaW9fcGVsb3Rvbl9pZCI6IG51bGwsICJ0eXBlIjogImV2ZW50In0="
+    }
+  }
+}

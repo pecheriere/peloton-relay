@@ -1,0 +1,188 @@
+{
+  "browse_categories": [
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000f1",
+      "large_portal_image_url": null,
+      "list_order": 11,
+      "name": "Tread Bootcamp",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "bootcamp",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000f2",
+      "large_portal_image_url": null,
+      "list_order": 19,
+      "name": "Rowing",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "caesar",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000f3",
+      "large_portal_image_url": null,
+      "list_order": 12,
+      "name": "Bike Bootcamp",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "bike_bootcamp",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000f4",
+      "large_portal_image_url": null,
+      "list_order": 20,
+      "name": "Row Bootcamp",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "caesar_bootcamp",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000f5",
+      "large_portal_image_url": null,
+      "list_order": 9,
+      "name": "Walking",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "walking",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000f6",
+      "large_portal_image_url": null,
+      "list_order": 10,
+      "name": "Hiking",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "hiking",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000f7",
+      "large_portal_image_url": null,
+      "list_order": 6,
+      "name": "Cycling",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "cycling",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [
+        "is_mfbt"
+      ],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000f8",
+      "large_portal_image_url": null,
+      "list_order": 4,
+      "name": "Cardio",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "cardio",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [
+        "is_mfbt"
+      ],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000f9",
+      "large_portal_image_url": null,
+      "list_order": 0,
+      "name": "Strength",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "strength",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000fa",
+      "large_portal_image_url": null,
+      "list_order": 3,
+      "name": "Meditation",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "meditation",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000fb",
+      "large_portal_image_url": null,
+      "list_order": 7,
+      "name": "Outdoor",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "outdoor",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000fc",
+      "large_portal_image_url": null,
+      "list_order": 8,
+      "name": "Running",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "running",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000fd",
+      "large_portal_image_url": null,
+      "list_order": 1,
+      "name": "Pilates",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "pilates",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000fe",
+      "large_portal_image_url": null,
+      "list_order": 5,
+      "name": "Stretching",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "stretching",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "has_limited_rides": false,
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000ff",
+      "large_portal_image_url": null,
+      "list_order": 2,
+      "name": "Yoga",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "yoga",
+      "small_portal_image_url": null
+    }
+  ]
+}

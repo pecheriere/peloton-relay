@@ -4,14 +4,20 @@
 //! an `Option` or an empty `Vec` (missing and `null` lists both decode as
 //! empty). Only ids are required, so one odd list item never fails a whole
 //! response. Epoch-second timestamps decode to UTC [`OffsetDateTime`]s, so a
-//! timestamp out of range fails decoding instead of mapping.
+//! timestamp out of range fails decoding instead of mapping; GraphQL's
+//! RFC 3339 timestamps decode the same way.
+//!
+//! GraphQL unions are dispatched on `__typename`: a member the relay does not
+//! know fails decoding, except among schedule items, where Peloton's other
+//! kinds (invites) are kept as [`ScheduleItem::Other`]. Lists a write is built
+//! from (the Stack) are required, so a missing list never reads as empty.
 
 use serde::de::{DeserializeOwned, Error as _};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use time::OffsetDateTime;
 
-use crate::ids::PelotonId;
+use crate::ids::{PelotonId, ScheduledClassId};
 
 /// Decodes a list that may be missing or `null` as a possibly empty `Vec`.
 fn list<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
@@ -57,6 +63,18 @@ where
         Some(Value::String(id)) => id.parse().ok(),
         _ => None,
     })
+}
+
+/// Decodes a string with [`FromStr`](std::str::FromStr), for ids that are
+/// validated on parse.
+fn parsed<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: std::str::FromStr<Err: std::fmt::Display>,
+{
+    String::deserialize(deserializer)?
+        .parse()
+        .map_err(D::Error::custom)
 }
 
 /// `GET /me`: the signed-in member.
@@ -416,6 +434,354 @@ pub struct Album {
     /// Album name.
     #[serde(default)]
     pub name: Option<String>,
+}
+
+/// `GET /v2/ride/archived`: one page of the class library.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LibraryPage {
+    /// Classes on this page.
+    #[serde(deserialize_with = "list")]
+    pub data: Vec<LibraryClass>,
+    /// Zero-based page index.
+    pub page: u32,
+    /// Number of pages.
+    pub page_count: u32,
+    /// Number of classes across all pages.
+    pub total: u32,
+    /// The instructors of this page's classes, joined by
+    /// [`LibraryClass::instructor_id`].
+    #[serde(default, deserialize_with = "list")]
+    pub instructors: Vec<Instructor>,
+    /// Class types, joined by [`LibraryClass::class_type_ids`].
+    #[serde(default, deserialize_with = "list")]
+    pub class_types: Vec<LibraryClassType>,
+}
+
+/// One class of a [`LibraryPage`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct LibraryClass {
+    /// Class id.
+    pub id: PelotonId,
+    /// Class title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Class description.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Discipline slug, e.g. "cycling".
+    #[serde(default)]
+    pub fitness_discipline: Option<String>,
+    /// Discipline display name, e.g. "Cycling".
+    #[serde(default)]
+    pub fitness_discipline_display_name: Option<String>,
+    /// Planned length in seconds.
+    #[serde(default)]
+    pub duration: Option<u32>,
+    /// Estimated difficulty on Peloton's 0–10 scale.
+    #[serde(default)]
+    pub difficulty_estimate: Option<f64>,
+    /// Difficulty level label, when Peloton sets one.
+    #[serde(default)]
+    pub difficulty_level: Option<String>,
+    /// When the class first aired.
+    #[serde(default, with = "time::serde::timestamp::option")]
+    pub original_air_time: Option<OffsetDateTime>,
+    /// The instructor; `None` when missing or malformed (the class is still
+    /// listed, without an instructor name).
+    #[serde(default, deserialize_with = "lenient_id")]
+    pub instructor_id: Option<PelotonId>,
+    /// Class types.
+    #[serde(default, deserialize_with = "list")]
+    pub class_type_ids: Vec<PelotonId>,
+    /// How many times the member took the class.
+    #[serde(default)]
+    pub total_user_workouts: Option<u32>,
+}
+
+/// One of [`LibraryPage::class_types`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct LibraryClassType {
+    /// Class type id.
+    pub id: PelotonId,
+    /// Class type name, e.g. "Low Impact".
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Display name.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// Discipline slug.
+    #[serde(default)]
+    pub fitness_discipline: Option<String>,
+}
+
+/// `GET /ride/filters`: the library filters and sorts of a category.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RideFilters {
+    /// Filters, each with its current values.
+    #[serde(default, deserialize_with = "list")]
+    pub filters: Vec<RideFilter>,
+    /// Sort orders.
+    #[serde(default, deserialize_with = "list")]
+    pub sorts: Vec<RideSort>,
+}
+
+/// One of [`RideFilters::filters`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct RideFilter {
+    /// Query parameter name, e.g. "`instructor_id`".
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Display name, e.g. "Instructor".
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// "collection" (pick a value) or "toggle".
+    #[serde(default, rename = "type")]
+    pub kind: Option<String>,
+    /// Current values.
+    #[serde(default, deserialize_with = "list")]
+    pub values: Vec<FilterValue>,
+}
+
+/// One of [`RideFilter::values`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct FilterValue {
+    /// The query parameter value, e.g. an id or "300" (seconds).
+    #[serde(default)]
+    pub value: Option<String>,
+    /// Display name, e.g. "5 min".
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// Position in Peloton's own listing.
+    #[serde(default)]
+    pub list_order: Option<u32>,
+}
+
+/// One of [`RideFilters::sorts`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct RideSort {
+    /// Sort slug, e.g. "popular".
+    #[serde(default)]
+    pub slug: Option<String>,
+    /// Display name, e.g. "Popular".
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// The query parameters it stands for.
+    #[serde(default)]
+    pub value: Option<SortValue>,
+}
+
+/// [`RideSort::value`]: `sort_by` and `desc` as sent to the library.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SortValue {
+    /// `sort_by` value, e.g. "`original_air_time`".
+    #[serde(default)]
+    pub sort: Option<String>,
+    /// Whether the order is descending.
+    #[serde(default)]
+    pub desc: Option<bool>,
+}
+
+/// `GET /browse_categories`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BrowseCategories {
+    /// Library categories.
+    #[serde(default, deserialize_with = "list")]
+    pub browse_categories: Vec<BrowseCategory>,
+}
+
+/// One library category, e.g. cycling or yoga.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BrowseCategory {
+    /// Category slug, the `browse_category` library parameter.
+    #[serde(default)]
+    pub slug: Option<String>,
+    /// Display name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Position in Peloton's own listing.
+    #[serde(default)]
+    pub list_order: Option<u32>,
+    /// Whether some of its classes are limited.
+    #[serde(default)]
+    pub has_limited_rides: Option<bool>,
+}
+
+/// GraphQL `userScheduledItemsList`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "__typename")]
+pub enum ScheduleList {
+    /// The member's scheduled items.
+    YourScheduleItemList(ScheduleItems),
+}
+
+/// [`ScheduleList::YourScheduleItemList`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleItems {
+    /// Items in Peloton's order.
+    pub your_schedule_items: Vec<ScheduleItem>,
+}
+
+/// One of [`ScheduleItems::your_schedule_items`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "__typename")]
+pub enum ScheduleItem {
+    /// A class the member scheduled.
+    ScheduledClass(Box<ScheduledClass>),
+    /// Any other kind of item, such as an invite.
+    #[serde(other)]
+    Other,
+}
+
+/// GraphQL `scheduledClass` and the schedule mutations.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "__typename")]
+pub enum ScheduleResult {
+    /// The scheduled class.
+    ScheduledClass(Box<ScheduledClass>),
+    /// No such scheduled class.
+    ScheduledClassDoesNotExistError(ScheduleError),
+    /// Peloton refused to schedule the class.
+    CannotScheduleClassError(ScheduleError),
+}
+
+/// An error member of [`ScheduleResult`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScheduleError {
+    /// Peloton's error code.
+    #[serde(default)]
+    pub code: Option<String>,
+    /// Peloton's message.
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+/// A class on the member's schedule.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledClass {
+    /// Scheduled-class id; Peloton issues a new one on reschedule.
+    #[serde(deserialize_with = "parsed")]
+    pub id: ScheduledClassId,
+    /// When the class is scheduled to start.
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub scheduled_start_time: Option<OffsetDateTime>,
+    /// When it is scheduled to end.
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub scheduled_end_time: Option<OffsetDateTime>,
+    /// The class; `None` where it is not selected (removal).
+    #[serde(default)]
+    pub peloton_class: Option<PelotonClass>,
+}
+
+/// A class as the GraphQL API describes it. A scheduled on-demand class is a
+/// "`LiveClass`", a stacked one an "`OnDemandInstructorClass`".
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PelotonClass {
+    /// GraphQL type name.
+    #[serde(default, rename = "__typename")]
+    pub typename: Option<String>,
+    /// Ride id; `None` when missing or malformed, so one odd Stack item
+    /// never hides the others.
+    #[serde(default, deserialize_with = "lenient_id")]
+    pub class_id: Option<PelotonId>,
+    /// Peloton's base64 class id: an on-demand class id in the Stack, the
+    /// scheduled-class id on the schedule.
+    #[serde(default)]
+    pub join_token: Option<String>,
+    /// Class title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Planned length in seconds.
+    #[serde(default)]
+    pub duration: Option<u32>,
+    /// The discipline.
+    #[serde(default)]
+    pub fitness_discipline: Option<FitnessDiscipline>,
+    /// When the class first aired.
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub air_time: Option<OffsetDateTime>,
+    /// Difficulty level, when Peloton sets one.
+    #[serde(default)]
+    pub difficulty_level: Option<DifficultyLevel>,
+    /// The instructor.
+    #[serde(default)]
+    pub instructor: Option<ClassInstructor>,
+}
+
+/// [`PelotonClass::fitness_discipline`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FitnessDiscipline {
+    /// Discipline slug, e.g. "CYCLING".
+    #[serde(default)]
+    pub slug: Option<String>,
+    /// Display name, e.g. "Cycling".
+    #[serde(default)]
+    pub display_name: Option<String>,
+}
+
+/// [`PelotonClass::difficulty_level`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DifficultyLevel {
+    /// Level slug.
+    #[serde(default)]
+    pub slug: Option<String>,
+    /// Display name.
+    #[serde(default)]
+    pub display_name: Option<String>,
+}
+
+/// [`PelotonClass::instructor`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClassInstructor {
+    /// Display name.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// GraphQL `viewUserStack` and the Stack mutations.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "__typename")]
+pub enum StackResponse {
+    /// The Stack.
+    StackResponseSuccess(UserStack),
+}
+
+/// [`StackResponse::StackResponseSuccess`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserStack {
+    /// Number of classes in the Stack.
+    #[serde(default)]
+    pub num_classes: Option<u32>,
+    /// Their total length in seconds.
+    #[serde(default)]
+    pub total_time: Option<u32>,
+    /// The classes; required, since the Stack is rewritten from it.
+    pub user_stack: StackedClasses,
+}
+
+/// [`UserStack::user_stack`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StackedClasses {
+    /// Classes in play order; required, never read as empty.
+    pub stacked_class_list: Vec<StackedClass>,
+}
+
+/// One class of the Stack.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StackedClass {
+    /// Position in the Stack, from 0.
+    #[serde(default)]
+    pub play_order: Option<u32>,
+    /// The class; kept even when its fields are odd.
+    #[serde(default)]
+    pub peloton_class: Option<PelotonClass>,
 }
 
 #[cfg(test)]

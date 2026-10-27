@@ -1,0 +1,473 @@
+{
+  "filters": [
+    {
+      "display_name": "Bookmarked",
+      "name": "is_favorite_ride",
+      "type": "toggle",
+      "user_specific": true,
+      "values": [
+        {
+          "display_name": "Bookmarked",
+          "list_order": null,
+          "value": "true"
+        },
+        {
+          "display_name": "Not Bookmarked",
+          "list_order": null,
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "display_name": "Class Type",
+      "name": "class_type_id",
+      "type": "collection",
+      "user_specific": false,
+      "values": [
+        {
+          "display_name": "Warm Up",
+          "list_order": 30,
+          "value": "00000000000000000000000000000f2c"
+        },
+        {
+          "display_name": "Cool Down",
+          "list_order": 31,
+          "value": "00000000000000000000000000000f2d"
+        },
+        {
+          "display_name": "Beginner",
+          "list_order": 32,
+          "value": "00000000000000000000000000000f2e"
+        },
+        {
+          "display_name": "Low Impact",
+          "list_order": 33,
+          "value": "00000000000000000000000000000f10"
+        },
+        {
+          "display_name": "Music",
+          "list_order": 34,
+          "value": "00000000000000000000000000000f11"
+        },
+        {
+          "display_name": "Intervals",
+          "list_order": 35,
+          "value": "00000000000000000000000000000f2f"
+        },
+        {
+          "display_name": "Progression",
+          "list_order": 36,
+          "value": "00000000000000000000000000000f30"
+        },
+        {
+          "display_name": "Climb",
+          "list_order": 37,
+          "value": "00000000000000000000000000000f31"
+        },
+        {
+          "display_name": "Power Zone",
+          "list_order": 38,
+          "value": "00000000000000000000000000000f32"
+        },
+        {
+          "display_name": "Groove",
+          "list_order": 39,
+          "value": "00000000000000000000000000000f12"
+        },
+        {
+          "display_name": "Theme",
+          "list_order": 40,
+          "value": "00000000000000000000000000000f33"
+        },
+        {
+          "display_name": "Live DJ",
+          "list_order": 42,
+          "value": "00000000000000000000000000000f34"
+        },
+        {
+          "display_name": "Peloton Studio Original",
+          "list_order": 44,
+          "value": "00000000000000000000000000000f35"
+        }
+      ]
+    },
+    {
+      "display_name": "Content Group",
+      "name": "content_group",
+      "type": "collection",
+      "user_specific": false,
+      "values": [
+        {
+          "display_name": "Peloton Classes",
+          "list_order": 0,
+          "value": "classes"
+        },
+        {
+          "display_name": "Lanebreak",
+          "list_order": 1,
+          "value": "lanebreak"
+        }
+      ]
+    },
+    {
+      "display_name": "Content Provider",
+      "name": "content_provider",
+      "type": "collection",
+      "user_specific": false,
+      "values": [
+        {
+          "display_name": "Peloton",
+          "list_order": 0,
+          "value": "peloton"
+        }
+      ]
+    },
+    {
+      "display_name": "Length",
+      "name": "duration",
+      "type": "collection",
+      "user_specific": false,
+      "values": [
+        {
+          "display_name": "5 min",
+          "list_order": 0,
+          "value": "300"
+        },
+        {
+          "display_name": "10 min",
+          "list_order": 1,
+          "value": "600"
+        },
+        {
+          "display_name": "15 min",
+          "list_order": 2,
+          "value": "900"
+        },
+        {
+          "display_name": "20 min",
+          "list_order": 3,
+          "value": "1200"
+        },
+        {
+          "display_name": "30 min",
+          "list_order": 4,
+          "value": "1800"
+        },
+        {
+          "display_name": "45 min",
+          "list_order": 5,
+          "value": "2700"
+        },
+        {
+          "display_name": "60 min",
+          "list_order": 6,
+          "value": "3600"
+        },
+        {
+          "display_name": "75 min",
+          "list_order": 7,
+          "value": "4500"
+        },
+        {
+          "display_name": "90 min",
+          "list_order": 8,
+          "value": "5400"
+        },
+        {
+          "display_name": "120 min",
+          "list_order": 9,
+          "value": "7200"
+        }
+      ]
+    },
+    {
+      "display_name": "Instructor",
+      "name": "instructor_id",
+      "type": "collection",
+      "user_specific": false,
+      "values": [
+        {
+          "display_image_url": "https://example.invalid/redacted",
+          "display_name": "redacted",
+          "list_order": 36,
+          "value": "00000000000000000000000000000f15"
+        },
+        {
+          "display_image_url": "https://example.invalid/redacted",
+          "display_name": "Ally Love",
+          "list_order": 37,
+          "value": "00000000000000000000000000000f36"
+        },
+        {
+          "display_image_url": "https://example.invalid/redacted",
+          "display_name": "Assal Arian",
+          "list_order": 41,
+          "value": "00000000000000000000000000000f37"
+        }
+      ]
+    },
+    {
+      "display_name": "Language",
+      "name": "language",
+      "type": "collection",
+      "user_specific": false,
+      "values": [
+        {
+          "display_name": "English",
+          "list_order": 0,
+          "value": "english"
+        }
+      ]
+    },
+    {
+      "display_name": "Location",
+      "name": "location",
+      "type": "collection",
+      "user_specific": false,
+      "values": [
+        {
+          "display_name": "Special Event ",
+          "list_order": 0,
+          "value": "event-01"
+        },
+        {
+          "display_name": "New York City",
+          "list_order": 1,
+          "value": "nyc"
+        },
+        {
+          "display_name": "PSL Studio 1 ",
+          "list_order": 2,
+          "value": "psl-studio-1"
+        }
+      ]
+    },
+    {
+      "display_name": "Taken by Friends",
+      "name": "is_following_user_ride",
+      "type": "toggle",
+      "user_specific": true,
+      "values": [
+        {
+          "display_name": "Taken by Friends",
+          "list_order": null,
+          "value": "true"
+        },
+        {
+          "display_name": "Not Taken by Friends",
+          "list_order": null,
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "display_hint": "tri-state",
+      "display_name": "Taken",
+      "name": "has_workout",
+      "type": "toggle",
+      "user_specific": true,
+      "values": [
+        {
+          "display_name": "Taken",
+          "list_order": null,
+          "value": "true"
+        },
+        {
+          "display_name": "Not Taken",
+          "list_order": null,
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "display_name": "Subtitles",
+      "name": "caption_locales",
+      "type": "collection",
+      "user_specific": false,
+      "values": [
+        {
+          "display_name": "English",
+          "list_order": 0,
+          "value": "en-US"
+        },
+        {
+          "display_name": "German",
+          "list_order": 1,
+          "value": "de-DE"
+        },
+        {
+          "display_name": "Spanish",
+          "list_order": 2,
+          "value": "es-ES"
+        }
+      ]
+    },
+    {
+      "display_name": "Music",
+      "name": "super_genre_id",
+      "type": "collection",
+      "user_specific": false,
+      "values": [
+        {
+          "display_name": "Alternative",
+          "list_order": 0,
+          "value": "00000000000000000000000000000f38"
+        },
+        {
+          "display_name": "Classic Rock",
+          "list_order": 1,
+          "value": "00000000000000000000000000000f39"
+        },
+        {
+          "display_name": "Country",
+          "list_order": 2,
+          "value": "00000000000000000000000000000f3a"
+        }
+      ]
+    },
+    {
+      "display_hint": "tri-state",
+      "display_name": "Weights",
+      "name": "has_cycling_arms",
+      "type": "toggle",
+      "user_specific": false,
+      "values": [
+        {
+          "display_image_url": "https://example.invalid/redacted",
+          "display_name": "Weights",
+          "list_order": null,
+          "value": "true"
+        },
+        {
+          "display_image_url": "https://example.invalid/redacted",
+          "display_name": "No Weights",
+          "list_order": null,
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "display_name": "Class Type",
+      "name": "ride_type_id",
+      "type": "collection",
+      "user_specific": false,
+      "values": [
+        {
+          "display_name": "Warm Up",
+          "list_order": 30,
+          "value": "00000000000000000000000000000f2c"
+        },
+        {
+          "display_name": "Cool Down",
+          "list_order": 31,
+          "value": "00000000000000000000000000000f2d"
+        },
+        {
+          "display_name": "Beginner",
+          "list_order": 32,
+          "value": "00000000000000000000000000000f2e"
+        },
+        {
+          "display_name": "Low Impact",
+          "list_order": 33,
+          "value": "00000000000000000000000000000f10"
+        },
+        {
+          "display_name": "Music",
+          "list_order": 34,
+          "value": "00000000000000000000000000000f11"
+        },
+        {
+          "display_name": "Intervals",
+          "list_order": 35,
+          "value": "00000000000000000000000000000f2f"
+        },
+        {
+          "display_name": "Progression",
+          "list_order": 36,
+          "value": "00000000000000000000000000000f30"
+        },
+        {
+          "display_name": "Climb",
+          "list_order": 37,
+          "value": "00000000000000000000000000000f31"
+        },
+        {
+          "display_name": "Power Zone",
+          "list_order": 38,
+          "value": "00000000000000000000000000000f32"
+        },
+        {
+          "display_name": "Groove",
+          "list_order": 39,
+          "value": "00000000000000000000000000000f12"
+        },
+        {
+          "display_name": "Theme",
+          "list_order": 40,
+          "value": "00000000000000000000000000000f33"
+        },
+        {
+          "display_name": "Live DJ",
+          "list_order": 42,
+          "value": "00000000000000000000000000000f34"
+        },
+        {
+          "display_name": "Peloton Studio Original",
+          "list_order": 44,
+          "value": "00000000000000000000000000000f35"
+        }
+      ]
+    }
+  ],
+  "sorts": [
+    {
+      "display_name": "New",
+      "slug": "new",
+      "value": {
+        "desc": true,
+        "sort": "original_air_time"
+      }
+    },
+    {
+      "display_name": "Trending",
+      "slug": "trending",
+      "value": {
+        "desc": true,
+        "sort": "trending"
+      }
+    },
+    {
+      "display_name": "Popular",
+      "slug": "popular",
+      "value": {
+        "desc": true,
+        "sort": "popularity"
+      }
+    },
+    {
+      "display_name": "Top Rated",
+      "slug": "top_rated",
+      "value": {
+        "desc": true,
+        "sort": "top_rated"
+      }
+    },
+    {
+      "display_name": "Easiest",
+      "slug": "easiest",
+      "value": {
+        "desc": false,
+        "sort": "difficulty"
+      }
+    },
+    {
+      "display_name": "Hardest",
+      "slug": "hardest",
+      "value": {
+        "desc": true,
+        "sort": "difficulty"
+      }
+    }
+  ]
+}

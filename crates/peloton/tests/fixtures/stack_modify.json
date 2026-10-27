@@ -1,0 +1,12 @@
+{
+  "data": {
+    "modifyStack": {
+      "__typename": "StackResponseSuccess",
+      "numClasses": 0,
+      "totalTime": 0,
+      "userStack": {
+        "stackedClassList": []
+      }
+    }
+  }
+}

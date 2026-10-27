@@ -1,0 +1,1131 @@
+{
+  "browse_categories": [
+    {
+      "flags": [],
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000f1",
+      "large_portal_image_url": null,
+      "list_order": 9,
+      "name": "Tread Bootcamp",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "bootcamp",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000f2",
+      "large_portal_image_url": null,
+      "list_order": 20,
+      "name": "Rowing",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "caesar",
+      "small_portal_image_url": null
+    },
+    {
+      "flags": [],
+      "icon_url": "https://example.invalid/redacted",
+      "id": "000000000000000000000000000000f3",
+      "large_portal_image_url": null,
+      "list_order": 10,
+      "name": "Bike Bootcamp",
+      "portal_image_url": "https://example.invalid/redacted",
+      "slug": "bike_bootcamp",
+      "small_portal_image_url": null
+    }
+  ],
+  "class_types": [
+    {
+      "display_name": "Low Impact",
+      "fitness_discipline": "cycling",
+      "id": "00000000000000000000000000000f10",
+      "is_active": true,
+      "list_order": 33,
+      "name": "Low Impact",
+      "standalone_display_name": "Low Impact Cycling"
+    },
+    {
+      "display_name": "Music",
+      "fitness_discipline": "cycling",
+      "id": "00000000000000000000000000000f11",
+      "is_active": true,
+      "list_order": 34,
+      "name": "Music (Cycling)",
+      "standalone_display_name": "Music Cycling"
+    },
+    {
+      "display_name": "Groove",
+      "fitness_discipline": "cycling",
+      "id": "00000000000000000000000000000f12",
+      "is_active": true,
+      "list_order": 39,
+      "name": "Groove",
+      "standalone_display_name": "Groove Cycling"
+    }
+  ],
+  "count": 5,
+  "data": [
+    {
+      "availability": {
+        "is_available": true,
+        "reason": null
+      },
+      "captions": [
+        "de-DE",
+        "en-US",
+        "es-ES"
+      ],
+      "class_type_ids": [
+        "00000000000000000000000000000f11"
+      ],
+      "conflicted_movement_preferences": {
+        "preference_count": 0,
+        "preferences": []
+      },
+      "content_availability": "available",
+      "content_availability_level": "digital_and_above",
+      "content_format": "video",
+      "content_provider": "peloton",
+      "description": "Old school, new school, East Coast and West Coast. Sweat to the beats of the hottest hip hop throughout history.",
+      "difficulty_estimate": 7.93050193050193,
+      "difficulty_level": null,
+      "difficulty_rating_avg": 7.93050193050193,
+      "difficulty_rating_count": 259,
+      "distance": null,
+      "distance_display_value": null,
+      "distance_unit": null,
+      "duration": 1800,
+      "dynamic_video_recorded_speed_in_mph": null,
+      "equipment_ids": [],
+      "equipment_tags": [],
+      "explicit_rating": 1,
+      "extra_images": null,
+      "fitness_discipline": "cycling",
+      "fitness_discipline_display_name": "Cycling",
+      "flags": [],
+      "free_for_limited_time": false,
+      "has_closed_captions": true,
+      "has_free_mode": false,
+      "has_pedaling_metrics": true,
+      "has_tread_pace_target": false,
+      "home_peloton_id": "00000000000000000000000000000f13",
+      "id": "00000000000000000000000000000f14",
+      "image_url": "https://example.invalid/redacted",
+      "individual_instructor_ids": [],
+      "instructor_id": "00000000000000000000000000000f15",
+      "is_archived": true,
+      "is_closed_caption_shown": true,
+      "is_dynamic_video_eligible": false,
+      "is_explicit": true,
+      "is_favorite": false,
+      "is_fixed_distance": false,
+      "is_limited_ride": false,
+      "is_live_in_studio_only": false,
+      "is_made_for_radio": false,
+      "is_outdoor": false,
+      "is_sessions_eligible": false,
+      "join_tokens": {
+        "on_demand": "eyJob21lX3BlbG90b25faWQiOiBudWxsLCAicmlkZV9pZCI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGYxNCIsICJzdHVkaW9fcGVsb3Rvbl9pZCI6IG51bGwsICJ0eXBlIjogIm9uX2RlbWFuZCJ9"
+      },
+      "language": "english",
+      "length": 1999,
+      "live_stream_id": "00000000000000000000000000000f14-live",
+      "live_stream_url": null,
+      "location": "redacted",
+      "metrics": [
+        "heart_rate",
+        "cadence",
+        "calories"
+      ],
+      "muscle_group_score": [],
+      "origin_locale": "en-US",
+      "original_air_time": 1706293662,
+      "overall_estimate": 0.9919354838709676,
+      "overall_rating_avg": 0.9919354838709676,
+      "overall_rating_count": 248,
+      "pedaling_duration": 1800,
+      "pedaling_end_offset": 1860,
+      "pedaling_start_offset": 60,
+      "rating": 0,
+      "ride_type_id": "00000000000000000000000000000f11",
+      "ride_type_ids": [
+        "00000000000000000000000000000f11"
+      ],
+      "sample_preview_stream_url": null,
+      "sample_vod_stream_url": null,
+      "scheduled_start_time": 1706293878,
+      "series_id": "00000000000000000000000000000f16",
+      "sold_out": false,
+      "studio_peloton_id": "00000000000000000000000000000f17",
+      "thumbnail_location": null,
+      "thumbnail_title": null,
+      "title": "30 min Hip Hop Ride",
+      "total_following_workouts": 0,
+      "total_in_progress_workouts": 50,
+      "total_ratings": 1556,
+      "total_user_workouts": 0,
+      "total_workouts": 1000,
+      "user_caption_locales": [
+        {
+          "locale": "de-DE",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Deutsch",
+                "en-US": "German",
+                "es-ES": "Alemán",
+                "fr-FR": "Allemand"
+              },
+              "type": "Deutsch"
+            }
+          ]
+        },
+        {
+          "locale": "en-US",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Englisch",
+                "en-US": "English",
+                "es-ES": "Inglés",
+                "fr-FR": "Anglais"
+              },
+              "type": "English"
+            }
+          ]
+        },
+        {
+          "locale": "es-ES",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Spanisch",
+                "en-US": "Spanish",
+                "es-ES": "Español",
+                "fr-FR": "Espagnol"
+              },
+              "type": "Español"
+            }
+          ]
+        }
+      ],
+      "vod_stream_id": "00000000000000000000000000000f14-vod",
+      "vod_stream_url": "https://example.invalid/redacted"
+    },
+    {
+      "availability": {
+        "is_available": true,
+        "reason": null
+      },
+      "captions": [
+        "de-DE",
+        "en-US",
+        "es-ES"
+      ],
+      "class_type_ids": [
+        "00000000000000000000000000000f11"
+      ],
+      "conflicted_movement_preferences": {
+        "preference_count": 0,
+        "preferences": []
+      },
+      "content_availability": "available",
+      "content_availability_level": "digital_and_above",
+      "content_format": "video",
+      "content_provider": "peloton",
+      "description": "Old school, new school, East Coast and West Coast. Sweat to the beats of the hottest hip hop throughout history.",
+      "difficulty_estimate": 7.356020942408377,
+      "difficulty_level": null,
+      "difficulty_rating_avg": 7.356020942408377,
+      "difficulty_rating_count": 191,
+      "distance": null,
+      "distance_display_value": null,
+      "distance_unit": null,
+      "duration": 1200,
+      "dynamic_video_recorded_speed_in_mph": null,
+      "equipment_ids": [],
+      "equipment_tags": [],
+      "explicit_rating": 1,
+      "extra_images": null,
+      "fitness_discipline": "cycling",
+      "fitness_discipline_display_name": "Cycling",
+      "flags": [],
+      "free_for_limited_time": false,
+      "has_closed_captions": true,
+      "has_free_mode": false,
+      "has_pedaling_metrics": true,
+      "has_tread_pace_target": false,
+      "home_peloton_id": "00000000000000000000000000000f18",
+      "id": "00000000000000000000000000000f19",
+      "image_url": "https://example.invalid/redacted",
+      "individual_instructor_ids": [],
+      "instructor_id": "00000000000000000000000000000f1a",
+      "is_archived": true,
+      "is_closed_caption_shown": true,
+      "is_dynamic_video_eligible": false,
+      "is_explicit": true,
+      "is_favorite": false,
+      "is_fixed_distance": false,
+      "is_limited_ride": false,
+      "is_live_in_studio_only": false,
+      "is_made_for_radio": false,
+      "is_outdoor": false,
+      "is_sessions_eligible": true,
+      "join_tokens": {
+        "on_demand": "eyJob21lX3BlbG90b25faWQiOiBudWxsLCAicmlkZV9pZCI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGYxOSIsICJzdHVkaW9fcGVsb3Rvbl9pZCI6IG51bGwsICJ0eXBlIjogIm9uX2RlbWFuZCJ9"
+      },
+      "language": "english",
+      "length": 1337,
+      "live_stream_id": "00000000000000000000000000000f19-live",
+      "live_stream_url": null,
+      "location": "redacted",
+      "metrics": [
+        "heart_rate",
+        "cadence",
+        "calories"
+      ],
+      "muscle_group_score": [],
+      "origin_locale": "en-US",
+      "original_air_time": 1706279007,
+      "overall_estimate": 1.0,
+      "overall_rating_avg": 1.0,
+      "overall_rating_count": 213,
+      "pedaling_duration": 1200,
+      "pedaling_end_offset": 1260,
+      "pedaling_start_offset": 60,
+      "rating": 0,
+      "ride_type_id": "00000000000000000000000000000f11",
+      "ride_type_ids": [
+        "00000000000000000000000000000f11"
+      ],
+      "sample_preview_stream_url": null,
+      "sample_vod_stream_url": null,
+      "scheduled_start_time": 1706279178,
+      "series_id": "00000000000000000000000000000f16",
+      "sold_out": false,
+      "studio_peloton_id": "00000000000000000000000000000f1b",
+      "thumbnail_location": null,
+      "thumbnail_title": null,
+      "title": "20 min Hip Hop Ride",
+      "total_following_workouts": 0,
+      "total_in_progress_workouts": 71,
+      "total_ratings": 1247,
+      "total_user_workouts": 0,
+      "total_workouts": 1000,
+      "user_caption_locales": [
+        {
+          "locale": "de-DE",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Deutsch",
+                "en-US": "German",
+                "es-ES": "Alemán",
+                "fr-FR": "Allemand"
+              },
+              "type": "Deutsch"
+            }
+          ]
+        },
+        {
+          "locale": "en-US",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Englisch",
+                "en-US": "English",
+                "es-ES": "Inglés",
+                "fr-FR": "Anglais"
+              },
+              "type": "English"
+            }
+          ]
+        },
+        {
+          "locale": "es-ES",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Spanisch",
+                "en-US": "Spanish",
+                "es-ES": "Español",
+                "fr-FR": "Espagnol"
+              },
+              "type": "Español"
+            }
+          ]
+        }
+      ],
+      "vod_stream_id": "00000000000000000000000000000f19-vod",
+      "vod_stream_url": "https://example.invalid/redacted"
+    },
+    {
+      "availability": {
+        "is_available": true,
+        "reason": null
+      },
+      "captions": [
+        "de-DE",
+        "en-US",
+        "es-ES"
+      ],
+      "class_type_ids": [
+        "00000000000000000000000000000f12"
+      ],
+      "conflicted_movement_preferences": {
+        "preference_count": 0,
+        "preferences": []
+      },
+      "content_availability": "available",
+      "content_availability_level": "digital_and_above",
+      "content_format": "video",
+      "content_provider": "peloton",
+      "description": "Let the power of the playlist move you. In this choreography-based class, you’ll be dancing along to the hottest beats on the Bike. No experience needed!",
+      "difficulty_estimate": 7.39572192513369,
+      "difficulty_level": null,
+      "difficulty_rating_avg": 7.39572192513369,
+      "difficulty_rating_count": 187,
+      "distance": null,
+      "distance_display_value": null,
+      "distance_unit": null,
+      "duration": 1800,
+      "dynamic_video_recorded_speed_in_mph": null,
+      "equipment_ids": [],
+      "equipment_tags": [],
+      "explicit_rating": 1,
+      "extra_images": null,
+      "fitness_discipline": "cycling",
+      "fitness_discipline_display_name": "Cycling",
+      "flags": [],
+      "free_for_limited_time": false,
+      "has_closed_captions": true,
+      "has_free_mode": false,
+      "has_pedaling_metrics": true,
+      "has_tread_pace_target": false,
+      "home_peloton_id": "00000000000000000000000000000f1c",
+      "id": "00000000000000000000000000000f1d",
+      "image_url": "https://example.invalid/redacted",
+      "individual_instructor_ids": [],
+      "instructor_id": "00000000000000000000000000000f1a",
+      "is_archived": true,
+      "is_closed_caption_shown": true,
+      "is_dynamic_video_eligible": false,
+      "is_explicit": true,
+      "is_favorite": false,
+      "is_fixed_distance": false,
+      "is_limited_ride": false,
+      "is_live_in_studio_only": false,
+      "is_made_for_radio": false,
+      "is_outdoor": false,
+      "is_sessions_eligible": true,
+      "join_tokens": {
+        "on_demand": "eyJob21lX3BlbG90b25faWQiOiBudWxsLCAicmlkZV9pZCI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGYxZCIsICJzdHVkaW9fcGVsb3Rvbl9pZCI6IG51bGwsICJ0eXBlIjogIm9uX2RlbWFuZCJ9"
+      },
+      "language": "english",
+      "length": 1946,
+      "live_stream_id": "00000000000000000000000000000f1d-live",
+      "live_stream_url": null,
+      "location": "redacted",
+      "metrics": [
+        "heart_rate",
+        "cadence",
+        "calories"
+      ],
+      "muscle_group_score": [],
+      "origin_locale": "en-US",
+      "original_air_time": 1706276552,
+      "overall_estimate": 0.9852216748768472,
+      "overall_rating_avg": 0.9852216748768472,
+      "overall_rating_count": 203,
+      "pedaling_duration": 1800,
+      "pedaling_end_offset": 1860,
+      "pedaling_start_offset": 60,
+      "rating": 0,
+      "ride_type_id": "00000000000000000000000000000f12",
+      "ride_type_ids": [
+        "00000000000000000000000000000f12"
+      ],
+      "sample_preview_stream_url": null,
+      "sample_vod_stream_url": null,
+      "scheduled_start_time": 1706276778,
+      "series_id": "00000000000000000000000000000f1e",
+      "sold_out": false,
+      "studio_peloton_id": "00000000000000000000000000000f1f",
+      "thumbnail_location": null,
+      "thumbnail_title": null,
+      "title": "30 min Groove Ride",
+      "total_following_workouts": 0,
+      "total_in_progress_workouts": 39,
+      "total_ratings": 1221,
+      "total_user_workouts": 0,
+      "total_workouts": 1000,
+      "user_caption_locales": [
+        {
+          "locale": "de-DE",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Deutsch",
+                "en-US": "German",
+                "es-ES": "Alemán",
+                "fr-FR": "Allemand"
+              },
+              "type": "Deutsch"
+            }
+          ]
+        },
+        {
+          "locale": "en-US",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Englisch",
+                "en-US": "English",
+                "es-ES": "Inglés",
+                "fr-FR": "Anglais"
+              },
+              "type": "English"
+            }
+          ]
+        },
+        {
+          "locale": "es-ES",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Spanisch",
+                "en-US": "Spanish",
+                "es-ES": "Español",
+                "fr-FR": "Espagnol"
+              },
+              "type": "Español"
+            }
+          ]
+        }
+      ],
+      "vod_stream_id": "00000000000000000000000000000f1d-vod",
+      "vod_stream_url": "https://example.invalid/redacted"
+    },
+    {
+      "availability": {
+        "is_available": true,
+        "reason": null
+      },
+      "captions": [
+        "de-DE",
+        "en-US",
+        "es-ES"
+      ],
+      "class_type_ids": [
+        "00000000000000000000000000000f11"
+      ],
+      "conflicted_movement_preferences": {
+        "preference_count": 0,
+        "preferences": []
+      },
+      "content_availability": "available",
+      "content_availability_level": "digital_and_above",
+      "content_format": "video",
+      "content_provider": "peloton",
+      "description": "Take a ride through the classic tracks of the 80s while you sweat it out on the Bike.",
+      "difficulty_estimate": 7.1016260162601625,
+      "difficulty_level": null,
+      "difficulty_rating_avg": 7.1016260162601625,
+      "difficulty_rating_count": 246,
+      "distance": null,
+      "distance_display_value": null,
+      "distance_unit": null,
+      "duration": 1800,
+      "dynamic_video_recorded_speed_in_mph": null,
+      "equipment_ids": [],
+      "equipment_tags": [],
+      "explicit_rating": 0,
+      "extra_images": null,
+      "fitness_discipline": "cycling",
+      "fitness_discipline_display_name": "Cycling",
+      "flags": [],
+      "free_for_limited_time": false,
+      "has_closed_captions": true,
+      "has_free_mode": false,
+      "has_pedaling_metrics": true,
+      "has_tread_pace_target": false,
+      "home_peloton_id": "00000000000000000000000000000f20",
+      "id": "00000000000000000000000000000f21",
+      "image_url": "https://example.invalid/redacted",
+      "individual_instructor_ids": [],
+      "instructor_id": "00000000000000000000000000000f22",
+      "is_archived": true,
+      "is_closed_caption_shown": true,
+      "is_dynamic_video_eligible": false,
+      "is_explicit": false,
+      "is_favorite": false,
+      "is_fixed_distance": false,
+      "is_limited_ride": false,
+      "is_live_in_studio_only": false,
+      "is_made_for_radio": false,
+      "is_outdoor": false,
+      "is_sessions_eligible": false,
+      "join_tokens": {
+        "on_demand": "eyJob21lX3BlbG90b25faWQiOiBudWxsLCAicmlkZV9pZCI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGYyMSIsICJzdHVkaW9fcGVsb3Rvbl9pZCI6IG51bGwsICJ0eXBlIjogIm9uX2RlbWFuZCJ9"
+      },
+      "language": "english",
+      "length": 2005,
+      "live_stream_id": "00000000000000000000000000000f21-live",
+      "live_stream_url": null,
+      "location": "redacted",
+      "metrics": [
+        "heart_rate",
+        "cadence",
+        "calories"
+      ],
+      "muscle_group_score": [],
+      "origin_locale": "en-US",
+      "original_air_time": 1706263057,
+      "overall_estimate": 1.0,
+      "overall_rating_avg": 1.0,
+      "overall_rating_count": 245,
+      "pedaling_duration": 1800,
+      "pedaling_end_offset": 1860,
+      "pedaling_start_offset": 60,
+      "rating": 0,
+      "ride_type_id": "00000000000000000000000000000f11",
+      "ride_type_ids": [
+        "00000000000000000000000000000f11"
+      ],
+      "sample_preview_stream_url": null,
+      "sample_vod_stream_url": null,
+      "scheduled_start_time": 1706263278,
+      "series_id": "00000000000000000000000000000f23",
+      "sold_out": false,
+      "studio_peloton_id": "00000000000000000000000000000f24",
+      "thumbnail_location": null,
+      "thumbnail_title": null,
+      "title": "30 min 80s Ride",
+      "total_following_workouts": 0,
+      "total_in_progress_workouts": 16,
+      "total_ratings": 1529,
+      "total_user_workouts": 0,
+      "total_workouts": 1000,
+      "user_caption_locales": [
+        {
+          "locale": "de-DE",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Deutsch",
+                "en-US": "German",
+                "es-ES": "Alemán",
+                "fr-FR": "Allemand"
+              },
+              "type": "Deutsch"
+            }
+          ]
+        },
+        {
+          "locale": "en-US",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Englisch",
+                "en-US": "English",
+                "es-ES": "Inglés",
+                "fr-FR": "Anglais"
+              },
+              "type": "English"
+            }
+          ]
+        },
+        {
+          "locale": "es-ES",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Spanisch",
+                "en-US": "Spanish",
+                "es-ES": "Español",
+                "fr-FR": "Espagnol"
+              },
+              "type": "Español"
+            }
+          ]
+        }
+      ],
+      "vod_stream_id": "00000000000000000000000000000f21-vod",
+      "vod_stream_url": "https://example.invalid/redacted"
+    },
+    {
+      "availability": {
+        "is_available": true,
+        "reason": null
+      },
+      "captions": [
+        "de-DE",
+        "en-US"
+      ],
+      "class_type_ids": [
+        "00000000000000000000000000000f10"
+      ],
+      "conflicted_movement_preferences": {
+        "preference_count": 0,
+        "preferences": []
+      },
+      "content_availability": "available",
+      "content_availability_level": "digital_and_above",
+      "content_format": "video",
+      "content_provider": "peloton",
+      "description": "This class is spent primarily in the saddle to give your joints a smooth ride while still giving you a good sweat. Perfect for all levels, especially those recovering from an injury.",
+      "difficulty_estimate": 5.9523809523809526,
+      "difficulty_level": null,
+      "difficulty_rating_avg": 5.9523809523809526,
+      "difficulty_rating_count": 189,
+      "distance": null,
+      "distance_display_value": null,
+      "distance_unit": null,
+      "duration": 1800,
+      "dynamic_video_recorded_speed_in_mph": null,
+      "equipment_ids": [],
+      "equipment_tags": [],
+      "explicit_rating": 0,
+      "extra_images": null,
+      "fitness_discipline": "cycling",
+      "fitness_discipline_display_name": "Cycling",
+      "flags": [],
+      "free_for_limited_time": false,
+      "has_closed_captions": true,
+      "has_free_mode": false,
+      "has_pedaling_metrics": true,
+      "has_tread_pace_target": false,
+      "home_peloton_id": "00000000000000000000000000000f25",
+      "id": "00000000000000000000000000000f26",
+      "image_url": "https://example.invalid/redacted",
+      "individual_instructor_ids": [],
+      "instructor_id": "00000000000000000000000000000f22",
+      "is_archived": true,
+      "is_closed_caption_shown": true,
+      "is_dynamic_video_eligible": false,
+      "is_explicit": false,
+      "is_favorite": false,
+      "is_fixed_distance": false,
+      "is_limited_ride": false,
+      "is_live_in_studio_only": false,
+      "is_made_for_radio": false,
+      "is_outdoor": false,
+      "is_sessions_eligible": false,
+      "join_tokens": {
+        "on_demand": "eyJob21lX3BlbG90b25faWQiOiBudWxsLCAicmlkZV9pZCI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGYyNiIsICJzdHVkaW9fcGVsb3Rvbl9pZCI6IG51bGwsICJ0eXBlIjogIm9uX2RlbWFuZCJ9"
+      },
+      "language": "english",
+      "length": 2013,
+      "live_stream_id": "00000000000000000000000000000f26-live",
+      "live_stream_url": null,
+      "location": "redacted",
+      "metrics": [
+        "heart_rate",
+        "cadence",
+        "calories"
+      ],
+      "muscle_group_score": [],
+      "origin_locale": "en-US",
+      "original_air_time": 1706258502,
+      "overall_estimate": 0.9863636363636364,
+      "overall_rating_avg": 0.9863636363636364,
+      "overall_rating_count": 220,
+      "pedaling_duration": 1800,
+      "pedaling_end_offset": 1860,
+      "pedaling_start_offset": 60,
+      "rating": 0,
+      "ride_type_id": "00000000000000000000000000000f10",
+      "ride_type_ids": [
+        "00000000000000000000000000000f10"
+      ],
+      "sample_preview_stream_url": null,
+      "sample_vod_stream_url": null,
+      "scheduled_start_time": 1706258778,
+      "series_id": "00000000000000000000000000000f27",
+      "sold_out": false,
+      "studio_peloton_id": "00000000000000000000000000000f28",
+      "thumbnail_location": null,
+      "thumbnail_title": null,
+      "title": "30 min Low Impact Ride",
+      "total_following_workouts": 0,
+      "total_in_progress_workouts": 9,
+      "total_ratings": 1243,
+      "total_user_workouts": 0,
+      "total_workouts": 1000,
+      "user_caption_locales": [
+        {
+          "locale": "de-DE",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Deutsch",
+                "en-US": "German",
+                "es-ES": "Alemán",
+                "fr-FR": "Allemand"
+              },
+              "type": "Deutsch"
+            }
+          ]
+        },
+        {
+          "locale": "en-US",
+          "slugs": [
+            {
+              "display_names": {
+                "de-DE": "Englisch",
+                "en-US": "English",
+                "es-ES": "Inglés",
+                "fr-FR": "Anglais"
+              },
+              "type": "English"
+            }
+          ]
+        }
+      ],
+      "vod_stream_id": "00000000000000000000000000000f26-vod",
+      "vod_stream_url": "https://example.invalid/redacted"
+    }
+  ],
+  "fitness_disciplines": [
+    {
+      "id": "bike_bootcamp",
+      "name": "Bike Bootcamp"
+    },
+    {
+      "id": "caesar",
+      "name": "Rowing"
+    },
+    {
+      "id": "caesar_bootcamp",
+      "name": "Row Bootcamp"
+    }
+  ],
+  "hide_explicit_rides": false,
+  "hide_prenatal_rides": true,
+  "instructors": [
+    {
+      "about_image_url": "about_image_url-1",
+      "background": "background-1",
+      "bike_instructor_list_display_image_url": null,
+      "bio": "redacted",
+      "coach_type": "peloton_coach",
+      "default_cross_fade": 1,
+      "default_cue_delay": 5,
+      "facebook_fan_page": "facebook_fan_page-1",
+      "featured_profile": true,
+      "film_link": "",
+      "first_name": "first_name-1",
+      "fitness_disciplines": [
+        "cycling",
+        "running"
+      ],
+      "id": "00000000000000000000000000000f15",
+      "image_url": "image_url-1",
+      "individual_instructor_ids": [],
+      "instagram_profile": "",
+      "instructor_hero_image_url": "instructor_hero_image_url-1",
+      "ios_instructor_list_display_image_url": "ios_instructor_list_display_image_url-1",
+      "is_active": true,
+      "is_announced": true,
+      "is_filterable": true,
+      "is_instructor_group": false,
+      "is_visible": true,
+      "jumbotron_url": null,
+      "jumbotron_url_dark": "jumbotron_url_dark-1",
+      "jumbotron_url_ios": "jumbotron_url_ios-1",
+      "last_name": "last_name-1",
+      "life_style_image_url": "life_style_image_url-1",
+      "list_order": 36,
+      "music_bio": "music_bio-1",
+      "name": "name-1",
+      "ordered_q_and_as": [],
+      "quote": "quote-1",
+      "short_bio": "short_bio-1",
+      "spotify_playlist_uri": "",
+      "strava_profile": "",
+      "twitter_profile": "",
+      "user_id": "00000000000000000000000000000f29",
+      "username": "username-1",
+      "web_instructor_list_display_image_url": "web_instructor_list_display_image_url-1",
+      "web_instructor_list_gif_image_url": null,
+      "workout_share_images": [
+        {
+          "fitness_discipline": "bike_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cardio",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "circuit",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cycling",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "meditation",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "running",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "strength",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "stretching",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "walking",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "yoga",
+          "image_url": "https://example.invalid/redacted"
+        }
+      ]
+    },
+    {
+      "about_image_url": "about_image_url-2",
+      "background": "background-2",
+      "bike_instructor_list_display_image_url": null,
+      "bio": "redacted",
+      "coach_type": "peloton_coach",
+      "default_cross_fade": 0,
+      "default_cue_delay": 5,
+      "facebook_fan_page": "facebook_fan_page-2",
+      "featured_profile": true,
+      "film_link": "",
+      "first_name": "first_name-2",
+      "fitness_disciplines": [
+        "cycling"
+      ],
+      "id": "00000000000000000000000000000f22",
+      "image_url": "image_url-2",
+      "individual_instructor_ids": [],
+      "instagram_profile": "",
+      "instructor_hero_image_url": "instructor_hero_image_url-2",
+      "ios_instructor_list_display_image_url": "ios_instructor_list_display_image_url-2",
+      "is_active": true,
+      "is_announced": true,
+      "is_filterable": true,
+      "is_instructor_group": false,
+      "is_visible": true,
+      "jumbotron_url": null,
+      "jumbotron_url_dark": "jumbotron_url_dark-2",
+      "jumbotron_url_ios": "jumbotron_url_ios-2",
+      "last_name": "last_name-2",
+      "life_style_image_url": "life_style_image_url-2",
+      "list_order": 62,
+      "music_bio": "music_bio-2",
+      "name": "name-2",
+      "ordered_q_and_as": [],
+      "quote": "quote-2",
+      "short_bio": "short_bio-2",
+      "spotify_playlist_uri": "",
+      "strava_profile": "",
+      "twitter_profile": "",
+      "user_id": "00000000000000000000000000000f2a",
+      "username": "username-2",
+      "web_instructor_list_display_image_url": "web_instructor_list_display_image_url-2",
+      "web_instructor_list_gif_image_url": null,
+      "workout_share_images": [
+        {
+          "fitness_discipline": "bike_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cardio",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "circuit",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cycling",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "meditation",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "running",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "strength",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "stretching",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "walking",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "yoga",
+          "image_url": "https://example.invalid/redacted"
+        }
+      ]
+    },
+    {
+      "about_image_url": "about_image_url-3",
+      "background": "background-3",
+      "bike_instructor_list_display_image_url": null,
+      "bio": "redacted",
+      "coach_type": "peloton_coach",
+      "default_cross_fade": 10,
+      "default_cue_delay": 5,
+      "facebook_fan_page": "",
+      "featured_profile": true,
+      "film_link": "",
+      "first_name": "first_name-3",
+      "fitness_disciplines": [
+        "cycling",
+        "strength"
+      ],
+      "id": "00000000000000000000000000000f1a",
+      "image_url": "image_url-3",
+      "individual_instructor_ids": [],
+      "instagram_profile": "",
+      "instructor_hero_image_url": "instructor_hero_image_url-3",
+      "ios_instructor_list_display_image_url": "ios_instructor_list_display_image_url-3",
+      "is_active": true,
+      "is_announced": true,
+      "is_filterable": true,
+      "is_instructor_group": false,
+      "is_visible": true,
+      "jumbotron_url": null,
+      "jumbotron_url_dark": "jumbotron_url_dark-3",
+      "jumbotron_url_ios": "jumbotron_url_ios-3",
+      "last_name": "last_name-3",
+      "life_style_image_url": "life_style_image_url-3",
+      "list_order": 55,
+      "music_bio": "music_bio-3",
+      "name": "name-3",
+      "ordered_q_and_as": [],
+      "quote": "quote-3",
+      "short_bio": "short_bio-3",
+      "spotify_playlist_uri": "",
+      "strava_profile": "",
+      "twitter_profile": "",
+      "user_id": "00000000000000000000000000000f2b",
+      "username": "username-3",
+      "web_instructor_list_display_image_url": "web_instructor_list_display_image_url-3",
+      "web_instructor_list_gif_image_url": null,
+      "workout_share_images": [
+        {
+          "fitness_discipline": "bike_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "caesar_bootcamp",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cardio",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "circuit",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "cycling",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "meditation",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "running",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "strength",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "stretching",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "walking",
+          "image_url": "https://example.invalid/redacted"
+        },
+        {
+          "fitness_discipline": "yoga",
+          "image_url": "https://example.invalid/redacted"
+        }
+      ]
+    }
+  ],
+  "page": 0,
+  "page_count": 3131,
+  "ride_types": [
+    {
+      "display_name": "Low Impact",
+      "fitness_discipline": "cycling",
+      "id": "00000000000000000000000000000f10",
+      "is_active": true,
+      "list_order": 33,
+      "name": "Low Impact",
+      "standalone_display_name": "Low Impact Cycling"
+    },
+    {
+      "display_name": "Music",
+      "fitness_discipline": "cycling",
+      "id": "00000000000000000000000000000f11",
+      "is_active": true,
+      "list_order": 34,
+      "name": "Music (Cycling)",
+      "standalone_display_name": "Music Cycling"
+    },
+    {
+      "display_name": "Groove",
+      "fitness_discipline": "cycling",
+      "id": "00000000000000000000000000000f12",
+      "is_active": true,
+      "list_order": 39,
+      "name": "Groove",
+      "standalone_display_name": "Groove Cycling"
+    }
+  ],
+  "show_next": true,
+  "show_previous": false,
+  "sort_by": [
+    "-scheduled_start_time"
+  ],
+  "total": 15655
+}

@@ -10,6 +10,17 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+/// Name prefixes of the library, schedule and Stack fixtures, which these
+/// models do not map.
+const LIBRARY_AND_SCHEDULING_FIXTURES: &[&str] = &[
+    "library_archived",
+    "ride_filters",
+    "browse_categories",
+    "schedule",
+    "stack_",
+    "check_class_in_stack",
+];
+
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../peloton/tests/fixtures")
 }
@@ -87,6 +98,11 @@ fn maps_every_fixture_workout() {
         } else if name == "me.json" {
             let profile = Profile::from_upstream(&load(&name));
             assert!(profile.username.is_some());
+        } else if LIBRARY_AND_SCHEDULING_FIXTURES
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+        {
+            // Decoded by the peloton crate's `upstream_new` tests.
         } else {
             panic!("unexpected fixture {name}");
         }

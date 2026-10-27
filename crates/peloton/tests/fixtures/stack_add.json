@@ -1,0 +1,32 @@
+{
+  "data": {
+    "addClassToStack": {
+      "__typename": "StackResponseSuccess",
+      "numClasses": 1,
+      "totalTime": 1800,
+      "userStack": {
+        "stackedClassList": [
+          {
+            "pelotonClass": {
+              "__typename": "OnDemandInstructorClass",
+              "airTime": "2026-10-26T17:00:00.000Z",
+              "classId": "00000000000000000000000000000f1d",
+              "difficultyLevel": null,
+              "duration": 1800,
+              "fitnessDiscipline": {
+                "displayName": "Cycling",
+                "slug": "CYCLING"
+              },
+              "instructor": {
+                "name": "redacted"
+              },
+              "joinToken": "eyJob21lX3BlbG90b25faWQiOiBudWxsLCAicmlkZV9pZCI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGYxZCIsICJzdHVkaW9fcGVsb3Rvbl9pZCI6IG51bGwsICJ0eXBlIjogIm9uX2RlbWFuZCJ9",
+              "title": "30 min Groove Ride"
+            },
+            "playOrder": 0
+          }
+        ]
+      }
+    }
+  }
+}
