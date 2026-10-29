@@ -8,13 +8,16 @@
 //! - objects describing a person (they carry `username`, `first_name` or
 //!   `last_name`: the member and instructors) have every free-text field
 //!   that is not a bare id replaced by a `<key>-<n>` placeholder, and their
-//!   names (and each word of them), usernames, e-mails and locations are
-//!   additionally erased from every other string of the run:
+//!   names (and each word of them; accents and vowel signs belong to their
+//!   word), usernames, e-mails and locations are additionally erased from
+//!   every other string of the run:
 //!   - matching ignores case, accents and normalization form: both sides are
-//!     decomposed (NFD), stripped of combining marks and case-folded, and the
-//!     letters NFD does not split are spelled out ("ł", "ø", "đ", "ð", "ħ",
-//!     "ŧ" as "l", "o", "d", "d", "h", "t"; "þ", "œ", "æ" as "th", "oe",
-//!     "ae"), so "Élodie" also erases "ELODIE" and "Łukasz" erases "Lukasz";
+//!     decomposed with compatibility (NFKD, so full-width, circled and
+//!     ligature letters count as their plain letters), stripped of combining
+//!     marks and case-folded, and the letters NFKD does not split are spelled
+//!     out ("ł", "ø", "đ", "ð", "ħ", "ŧ" as "l", "o", "d", "d", "h", "t";
+//!     "þ", "œ", "æ" as "th", "oe", "ae"), so "Élodie" also erases "ELODIE"
+//!     and "ｅｌｏｄｉｅ", and "Łukasz" erases "Lukasz";
 //!   - a string of fewer than 3 characters is never erased; one of 3 only as
 //!     a whole word (so "ben" leaves "benefits" alone); one of 4 or more also
 //!     inside a longer word when both its ends are boundaries: the edge of
@@ -32,6 +35,8 @@
 //!     "XKINGX" for "King" or "Love"); "iPhone" for a name "Phone" is erased;
 //!   - an object key is erased only when it is the whole string, as keys are
 //!     schema: `max_value` and `power_zone` stay for names "Max" and "Zone";
+//!     keys of one object that would end up equal ("Max" and "MAX") get
+//!     distinct suffixes ("redacted", "redacted-2"), so no value is lost;
 //!   - text outside the erased spans is left byte for byte as it was;
 //! - URLs, opaque tokens, locations, e-mails, device serials, time zones,
 //!   birthdays, heights and weights are replaced with fixed values; lists of
@@ -438,7 +443,7 @@ impl Scrubber {
             if PERSON_WORDS.contains(&key.as_str()) {
                 self.sensitive.push(fold_case(text));
                 self.sensitive
-                    .extend(text.split(|c: char| !c.is_alphanumeric()).map(fold_case));
+                    .extend(text.split(|c: char| !is_word_char(c)).map(fold_case));
             } else if PERSON_WHOLE.contains(&key.as_str()) {
                 self.sensitive.push(fold_case(text));
             }
@@ -494,12 +499,23 @@ impl Scrubber {
         self.in_class |= map.contains_key(CLASS_MARKER);
         let person = is_person(&map);
         let mut out = Map::new();
+        let mut renamed = Vec::new();
         for (key, child) in map {
             let outer = self.in_class;
             self.in_class |= key == CLASS_KEY;
             let scrubbed = self.key_rule(&key, child, person);
             self.in_class = outer;
-            out.insert(self.key(&key), scrubbed);
+            let new_key = self.key(&key);
+            if new_key == key {
+                out.insert(key, scrubbed);
+            } else {
+                renamed.push((new_key, scrubbed));
+            }
+        }
+        // Renamed keys go in last, each under a name still free, so that two
+        // keys scrubbed to the same name ("Max" and "MAX") keep both values.
+        for (key, scrubbed) in renamed {
+            out.insert(free_key(&out, key), scrubbed);
         }
         let slug = out.get("slug").and_then(Value::as_str).map(str::to_owned);
         if let Some(slug) = slug {
@@ -903,6 +919,28 @@ fn align_device_times(map: &mut Map<String, Value>) {
     }
 }
 
+/// `key`, or `key` with the first suffix `-2`, `-3`, … that `map` does not
+/// use yet.
+fn free_key(map: &Map<String, Value>, key: String) -> String {
+    if !map.contains_key(&key) {
+        return key;
+    }
+    let mut n = 2_u32;
+    loop {
+        let candidate = format!("{key}-{n}");
+        if !map.contains_key(&candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+/// Whether `c` belongs to a word of a name: a letter, a digit, or a
+/// combining mark (an accent of a decomposed letter, a vowel sign).
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || is_combining_mark(c)
+}
+
 fn is_person(map: &Map<String, Value>) -> bool {
     PERSON_MARKERS.iter().any(|k| map.contains_key(*k))
 }
@@ -934,11 +972,12 @@ fn has_opaque_token(text: &str) -> bool {
 }
 
 /// Folds `text` for comparison: combining marks are dropped, and every other
-/// character is decomposed (NFD) and stripped of its combining marks (accents,
-/// so "É", "é", "E" and "e" plus an accent all agree, and Turkish "İ" becomes
+/// character is decomposed with compatibility (NFKD, so "ｅ", "ⓔ" and "e"
+/// agree, and "ǅ" is "Dž") and stripped of its combining marks (accents, so
+/// "É", "é", "E" and "e" plus an accent all agree, and Turkish "İ" becomes
 /// "i"), then lower-cased, upper-cased and lower-cased again, so "ß", "ẞ" and
-/// "SS", "ς" and "σ", "ı" and "i" agree, and finally the letters NFD does not
-/// split are spelled out (see [`spell_out`]).
+/// "SS", "ς" and "σ", "ı" and "i" agree, and finally the letters NFKD does
+/// not split are spelled out (see [`spell_out`]).
 ///
 /// The case part matches Unicode full case folding (`CaseFolding.txt`,
 /// statuses C and F) for the scripts that have case. Dropping every
@@ -952,7 +991,7 @@ fn fold_case(text: &str) -> String {
 }
 
 fn fold_char(c: char) -> impl Iterator<Item = char> {
-    c.nfd()
+    c.nfkd()
         .filter(|d| !is_combining_mark(*d))
         .flat_map(char::to_lowercase)
         .flat_map(char::to_uppercase)
@@ -960,7 +999,7 @@ fn fold_char(c: char) -> impl Iterator<Item = char> {
         .flat_map(|f| spell_out(f).into_iter().flatten())
 }
 
-/// The plain spelling of a lower-case letter that NFD does not split into a
+/// The plain spelling of a lower-case letter that NFKD does not split into a
 /// base letter and a mark ("ł" is "l", "þ" is "th", "œ" is "oe"), or the
 /// letter itself.
 fn spell_out(c: char) -> [Option<char>; 2] {
@@ -1020,10 +1059,12 @@ fn erase_words(text: &str, needles: &[String]) -> String {
 }
 
 /// A text folded once for matching (see [`fold_case`]), with the way back
-/// from the folded form to the original.
+/// from the folded form to the original and everything [`Self::counts`]
+/// needs, computed once so that judging a match takes constant time.
 ///
 /// Positions are counted in base characters: every character of the text
-/// but combining marks, which belong to the base character before them.
+/// but combining marks, which belong to the base character before them. A
+/// cut `at` lies between base characters `at - 1` and `at`.
 #[derive(Debug)]
 struct FoldedText<'a> {
     text: &'a str,
@@ -1032,6 +1073,19 @@ struct FoldedText<'a> {
     bases: Vec<(usize, char)>,
     /// For every byte of `folded`, the base character it came from.
     origins: Vec<usize>,
+    /// For every cut, whether it is a word boundary (see [`is_boundary`]).
+    cuts: Vec<bool>,
+    /// Runs of letters and digits.
+    words: Stretches,
+    /// Stretches between word boundaries.
+    segments: Stretches,
+    /// For every cut, how many base characters before it are lowercase.
+    lowercase_before: Vec<usize>,
+    /// For every cut, how many base characters before it are not a bare
+    /// ASCII hex digit (a hex digit carrying a combining mark is not).
+    non_hex_before: Vec<usize>,
+    /// For every cut, how many base characters before it are ASCII digits.
+    digits_before: Vec<usize>,
 }
 
 impl<'a> FoldedText<'a> {
@@ -1047,11 +1101,36 @@ impl<'a> FoldedText<'a> {
                 origins.extend(std::iter::repeat_n(base, f.len_utf8()));
             }
         }
+        let char_at = |at: usize| bases.get(at).map(|(_, c)| *c);
+        let cut_count = bases.len() + 1;
+        let cuts: Vec<bool> = (0..cut_count)
+            .map(|at| is_boundary(at.checked_sub(1).and_then(char_at), char_at(at)))
+            .collect();
+        let alphanumeric = |at: usize| char_at(at).is_some_and(char::is_alphanumeric);
+        let in_word: Vec<bool> = (0..cut_count)
+            .map(|at| at > 0 && alphanumeric(at - 1) && alphanumeric(at))
+            .collect();
+        let in_segment: Vec<bool> = cuts.iter().map(|cut| !cut).collect();
+        let byte_end = |at: usize| bases.get(at + 1).map_or(text.len(), |(offset, _)| *offset);
+        let bare_hex: Vec<bool> = bases
+            .iter()
+            .enumerate()
+            .map(|(at, (offset, c))| c.is_ascii_hexdigit() && byte_end(at) == offset + 1)
+            .collect();
+        let lowercase_before = counts_before(bases.iter().map(|(_, c)| c.is_lowercase()));
+        let non_hex_before = counts_before(bare_hex.iter().map(|hex| !hex));
+        let digits_before = counts_before(bases.iter().map(|(_, c)| c.is_ascii_digit()));
         Self {
             text,
             folded,
             bases,
             origins,
+            cuts,
+            words: Stretches::new(&in_word),
+            segments: Stretches::new(&in_segment),
+            lowercase_before,
+            non_hex_before,
+            digits_before,
         }
     }
 
@@ -1069,25 +1148,21 @@ impl<'a> FoldedText<'a> {
     ///
     /// A `short` needle must be a whole word: a maximal run of letters and
     /// digits. A longer one must not lie inside a word that looks like a hex
-    /// id (see [`looks_like_hex_id`]), and must start and end at a boundary
+    /// id (see [`Self::is_hex_id`]), and must start and end at a boundary
     /// (see [`is_boundary`]; after the match an upper to lower case change
     /// also counts, as in "`ELODIEmartin`"). Inside a stretch between
     /// boundaries that has no lowercase letter (`JEANLUC`, `KINGDOM`), case
     /// marks no boundary, so a boundary at either end is enough.
     fn counts(&self, start: usize, end: usize, short: bool) -> bool {
-        let word = self.widen(start, end, |at| {
-            self.is_alphanumeric(at - 1) && self.is_alphanumeric(at)
-        });
+        let word = self.words.around(start, end);
         if short {
             return word == (start, end);
         }
-        if word != (start, end)
-            && looks_like_hex_id(&self.text[self.offset(word.0)..self.offset(word.1)])
-        {
+        if word != (start, end) && self.is_hex_id(word) {
             return false;
         }
-        let opens = self.cut(start);
-        let closes = self.cut(end)
+        let opens = self.cuts[start];
+        let closes = self.cuts[end]
             || matches!(
                 (self.kind(end - 1), self.kind(end)),
                 (Some(CharKind::Upper), Some(CharKind::Lower))
@@ -1095,43 +1170,21 @@ impl<'a> FoldedText<'a> {
         if opens && closes {
             return true;
         }
-        let (from, to) = self.widen(start, end, |at| !self.cut(at));
-        (opens || closes) && !self.bases[from..to].iter().any(|(_, c)| c.is_lowercase())
+        let (from, to) = self.segments.around(start, end);
+        (opens || closes) && self.lowercase_before[to] == self.lowercase_before[from]
     }
 
-    /// `start..end` widened while `joined(at)` holds for the cut between
-    /// base characters `at - 1` and `at`.
-    fn widen(&self, start: usize, end: usize, joined: impl Fn(usize) -> bool) -> (usize, usize) {
-        let mut from = start;
-        while from > 0 && joined(from) {
-            from -= 1;
-        }
-        let mut to = end;
-        while to < self.bases.len() && joined(to) {
-            to += 1;
-        }
-        (from, to)
-    }
-
-    /// Whether there is a word boundary between base characters `at - 1`
-    /// and `at`.
-    fn cut(&self, at: usize) -> bool {
-        is_boundary(
-            at.checked_sub(1).and_then(|before| self.char_at(before)),
-            self.char_at(at),
-        )
-    }
-
-    fn char_at(&self, at: usize) -> Option<char> {
-        self.bases.get(at).map(|(_, c)| *c)
+    /// Whether the base characters `from..to` look like a hex id: only bare
+    /// hex digits, at least one of them a decimal digit, and at least
+    /// [`MIN_HEX_WORD`] bytes long. Names are never erased from inside one.
+    fn is_hex_id(&self, (from, to): (usize, usize)) -> bool {
+        self.offset(to) - self.offset(from) >= MIN_HEX_WORD
+            && self.non_hex_before[to] == self.non_hex_before[from]
+            && self.digits_before[to] > self.digits_before[from]
     }
 
     fn kind(&self, at: usize) -> Option<CharKind> {
-        self.char_at(at).map(CharKind::of)
-    }
-
-    fn is_alphanumeric(&self, at: usize) -> bool {
-        self.char_at(at).is_some_and(char::is_alphanumeric)
+        self.bases.get(at).map(|(_, c)| CharKind::of(*c))
     }
 
     /// Byte offset of base character `at`, or the end of the text.
@@ -1139,6 +1192,54 @@ impl<'a> FoldedText<'a> {
         self.bases
             .get(at)
             .map_or(self.text.len(), |(offset, _)| *offset)
+    }
+}
+
+/// For every cut, how many of the flags before it are set.
+fn counts_before(flags: impl Iterator<Item = bool>) -> Vec<usize> {
+    std::iter::once(0)
+        .chain(flags.scan(0, |count, flag| {
+            *count += usize::from(flag);
+            Some(*count)
+        }))
+        .collect()
+}
+
+/// Maximal stretches of base characters whose inner cuts are all joined,
+/// stored as the furthest cut reachable to the left and to the right of
+/// every cut.
+#[derive(Debug)]
+struct Stretches {
+    left: Vec<usize>,
+    right: Vec<usize>,
+}
+
+impl Stretches {
+    /// `joined[at]` tells whether cut `at` lies inside a stretch; the first
+    /// and last cuts (the text's edges) never do.
+    fn new(joined: &[bool]) -> Self {
+        let mut left = Vec::with_capacity(joined.len());
+        for (at, inside) in joined.iter().enumerate() {
+            let reach = match left.last() {
+                Some(&before) if *inside => before,
+                _ => at,
+            };
+            left.push(reach);
+        }
+        let mut right = vec![0; joined.len()];
+        let mut reach = joined.len().saturating_sub(1);
+        for (at, inside) in joined.iter().enumerate().rev() {
+            if !inside {
+                reach = at;
+            }
+            right[at] = reach;
+        }
+        Self { left, right }
+    }
+
+    /// `start..end` widened to the stretch around it.
+    fn around(&self, start: usize, end: usize) -> (usize, usize) {
+        (self.left[start], self.right[end])
     }
 }
 
@@ -1189,20 +1290,11 @@ fn is_boundary(before: Option<char>, after: Option<char>) -> bool {
     }
 }
 
-/// Whether `word` looks like a hex id: only hex digits, at least one of them
-/// a decimal digit, and at least [`MIN_HEX_WORD`] long. Names are never
-/// erased from inside such a word.
-fn looks_like_hex_id(word: &str) -> bool {
-    word.len() >= MIN_HEX_WORD
-        && word.bytes().all(|b| b.is_ascii_hexdigit())
-        && word.bytes().any(|b| b.is_ascii_digit())
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        ScrubParams, erase_words, fold_case, has_opaque_token, is_boundary, is_month_buckets,
-        is_uuid, looks_like_hex_id, scrub_files,
+        FoldedText, ScrubParams, erase_words, fold_case, has_opaque_token, is_boundary,
+        is_month_buckets, is_uuid, scrub_files,
     };
     use proptest::prelude::*;
     use serde_json::json;
@@ -1381,11 +1473,16 @@ mod tests {
 
     #[test]
     fn hex_id_words_need_a_digit_and_eight_hex_characters() {
-        assert!(looks_like_hex_id("0123facedade89"));
-        assert!(looks_like_hex_id("0123FACE"));
-        assert!(!looks_like_hex_id("face89"));
-        assert!(!looks_like_hex_id("facedade"));
-        assert!(!looks_like_hex_id("0123facx"));
+        let is_hex_id = |word: &str| {
+            let folded = FoldedText::new(word);
+            folded.is_hex_id((0, folded.bases.len()))
+        };
+        assert!(is_hex_id("0123facedade89"));
+        assert!(is_hex_id("0123FACE"));
+        assert!(!is_hex_id("face89"));
+        assert!(!is_hex_id("facedade"));
+        assert!(!is_hex_id("0123facx"));
+        assert!(!is_hex_id("0123fa\u{301}ce"));
     }
 
     #[test]
@@ -1509,6 +1606,215 @@ mod tests {
             erase_words("\u{301}Elodie\u{301}\u{302}", &needles),
             "\u{301}redacted"
         );
+    }
+
+    #[test]
+    fn decomposed_names_are_split_into_whole_words() {
+        let files = vec![(
+            "me.json".to_owned(),
+            json!({
+                "user": {
+                    "username": "u_x1",
+                    "name": "E\u{301}lodie Martel",
+                    "location": "Saint-E\u{301}tienne, France"
+                },
+                "feed": ["\u{c9}lodie rode", "Ride in \u{c9}tienne", "Martel"]
+            }),
+        )];
+        let output = scrub_files(files, PARAMS);
+        assert_eq!(
+            output[0].1["feed"],
+            json!(["redacted rode", "Ride in redacted", "redacted"])
+        );
+    }
+
+    #[test]
+    fn devanagari_names_keep_their_vowel_signs_when_split() {
+        let files = vec![(
+            "me.json".to_owned(),
+            json!({
+                "user": {"username": "u_x1", "name": "\u{936}\u{94d}\u{930}\u{947}\u{935}\u{928}\u{940} \u{935}\u{930}\u{93e}\u{932}"},
+                "feed": [
+                    "\u{936}\u{94d}\u{930}\u{947}\u{935}\u{928}\u{940} \u{91c}\u{940}",
+                    "\u{935}\u{930}\u{93e}\u{932} \u{91c}\u{940}"
+                ]
+            }),
+        )];
+        let output = scrub_files(files, PARAMS);
+        assert_eq!(
+            output[0].1["feed"],
+            json!(["redacted \u{91c}\u{940}", "redacted \u{91c}\u{940}"])
+        );
+    }
+
+    #[test]
+    fn compatibility_forms_match_their_plain_letters() {
+        let needles = vec![
+            fold_case("\u{c9}lodie"),
+            fold_case("D\u{17e}or\u{111}e"),
+            fold_case("Fiorel"),
+        ];
+        assert_eq!(
+            erase_words(
+                "\u{ff45}\u{ff4c}\u{ff4f}\u{ff44}\u{ff49}\u{ff45}, \u{ff25}\u{ff2c}\u{ff2f}\u{ff24}\u{ff29}\u{ff25}, \
+                 \u{24ba}lodie, \u{1c5}or\u{111}e, \u{1c4}OR\u{110}E, \u{fb01}orel",
+                &needles
+            ),
+            "redacted, redacted, redacted, redacted, redacted, redacted"
+        );
+    }
+
+    #[test]
+    fn long_glued_text_is_scrubbed_in_linear_time() {
+        let mut needles: Vec<String> = (0..48).map(|i| fold_case(&format!("Zorvane{i}"))).collect();
+        needles.push(fold_case("\u{c9}lodie"));
+        needles.push(fold_case("\u{65e5}\u{672c}\u{65e5}\u{672c}"));
+        let latin = "\u{c9}lodie".repeat(400_000 / "\u{c9}lodie".len());
+        let caps = "\u{c9}LODIE".repeat(400_000 / "\u{c9}LODIE".len());
+        let cjk = "\u{65e5}\u{672c}".repeat(400_000 / "\u{65e5}\u{672c}".len());
+        for text in [latin, caps, cjk] {
+            let started = std::time::Instant::now();
+            erase_words(&text, &needles);
+            let elapsed = started.elapsed();
+            assert!(
+                elapsed < std::time::Duration::from_secs(5),
+                "took {elapsed:?} for {} bytes",
+                text.len()
+            );
+        }
+    }
+
+    /// Text, names and expected output of probes from the scrubber review.
+    const REVIEW_PROBES: &[(&str, &[&str], &str)] = &[
+        (
+            "STRASSE strasse Stra\u{df}e",
+            &["Stra\u{df}e"],
+            "redacted redacted redacted",
+        ),
+        (
+            "\u{39f}\u{394}\u{3a5}\u{3a3}\u{3a3}\u{395}\u{391}\u{3a3} \u{3bf}\u{3b4}\u{3c5}\u{3c3}\u{3c3}\u{3b5}\u{3b1}\u{3c3}",
+            &["\u{39f}\u{3b4}\u{3c5}\u{3c3}\u{3c3}\u{3b5}\u{3b1}\u{3c2}"],
+            "redacted redacted",
+        ),
+        (
+            "istanbul ISTANBUL",
+            &["\u{130}stanbul"],
+            "redacted redacted",
+        ),
+        (
+            "Ben123 BEN\u{65e5}\u{672c} Ben\u{3055}\u{3093}",
+            &["Ben"],
+            "Ben123 BEN\u{65e5}\u{672c} Ben\u{3055}\u{3093}",
+        ),
+        ("Jo jo", &["Jo"], "Jo jo"),
+        (
+            "0123facedade89 face89 deadbeef12 Elodie2024 2024ELODIE",
+            &["face", "dead", "beef", "Elodie"],
+            "0123facedade89 redacted89 deadbeef12 redacted2024 2024redacted",
+        ),
+        (
+            "MarieClaire elodieMartin LoveKing",
+            &["Marie", "Claire", "Martin", "Elodie", "Love", "King"],
+            "redactedredacted redactedredacted redactedredacted",
+        ),
+        (
+            "JEANLUC MARIECLAIRE KINGDOM",
+            &["Jean", "Luc", "Marie", "King"],
+            "redactedLUC redactedCLAIRE redactedDOM",
+        ),
+        (
+            "ELODIEmartin XELODIEmartin Elodiemartin",
+            &["Elodie"],
+            "redactedmartin XELODIEmartin Elodiemartin",
+        ),
+        (
+            "O'Brien O\u{2019}Brien d'Elodie l\u{2019}Elodie",
+            &["O'Brien", "Brien", "Elodie"],
+            "redacted O\u{2019}redacted d'redacted l\u{2019}redacted",
+        ),
+        (
+            "mail elodie.martin@example.com x",
+            &["elodie.martin@example.com"],
+            "mail redacted x",
+        ),
+        (
+            "ELODIE.MARTIN@EXAMPLE.COM",
+            &["elodie.martin@example.com"],
+            "redacted",
+        ),
+        (
+            "www.example.com/u/elodie?name=Elodie&x=1",
+            &["Elodie"],
+            "www.example.com/u/redacted?name=redacted&x=1",
+        ),
+        (
+            "elodieelodie ElodieElodie ELODIEELODIE",
+            &["Elodie"],
+            "elodieelodie redactedredacted redactedredacted",
+        ),
+        (
+            "Elodie\u{301}\u{302}x Elodie\u{301} y",
+            &["Elodie"],
+            "Elodie\u{301}\u{302}x redacted y",
+        ),
+        ("e\u{301}", &["\u{c9}"], "e\u{301}"),
+        ("  ", &["", "   ", " "], "  "),
+        (
+            "Saint \u{c9}tienne Saint-E\u{301}tienne",
+            &["Saint-E\u{301}tienne"],
+            "Saint \u{c9}tienne redacted",
+        ),
+        (
+            "Annabelle Anna",
+            &["Anna", "Annabelle"],
+            "redacted redacted",
+        ),
+        ("cafe1234Elodie", &["Elodie"], "cafe1234redacted"),
+        (
+            "Elodie\u{b2} Elodie\u{bd} \u{216b}Elodie",
+            &["Elodie"],
+            "redacted\u{b2} redacted\u{bd} \u{216b}redacted",
+        ),
+        (
+            "ELODIE_MARTIN coach_elodie",
+            &["Elodie"],
+            "redacted_MARTIN coach_redacted",
+        ),
+    ];
+
+    #[test]
+    fn review_probes_scrub_as_specified() {
+        for (text, names, expected) in REVIEW_PROBES {
+            let mut needles: Vec<String> = names
+                .iter()
+                .map(|name| fold_case(name))
+                .filter(|needle| needle.chars().count() >= 3)
+                .collect();
+            needles.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+            needles.dedup();
+            assert_eq!(erase_words(text, &needles), *expected, "{text:?} {names:?}");
+        }
+    }
+
+    #[test]
+    fn keys_that_fold_to_the_same_name_stay_distinct() {
+        let files = vec![(
+            "me.json".to_owned(),
+            json!({
+                "user": {"username": "maxpower", "first_name": "Max", "last_name": "Zone"},
+                "data": {"Max": 3, "MAX": 4, "max_value": 1, "redacted": 5}
+            }),
+        )];
+        let output = scrub_files(files, PARAMS);
+        let data = output[0].1["data"].as_object().expect("object");
+        let mut values: Vec<i64> = data
+            .values()
+            .filter_map(serde_json::Value::as_i64)
+            .collect();
+        values.sort_unstable();
+        assert_eq!(values, [1, 3, 4, 5]);
+        assert_eq!(data["max_value"], 1);
+        assert_eq!(data["redacted"], 5);
     }
 
     #[test]
