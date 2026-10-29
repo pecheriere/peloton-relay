@@ -8,8 +8,11 @@
 //! - objects describing a person (they carry `username`, `first_name` or
 //!   `last_name`: the member and instructors) have every free-text field
 //!   that is not a bare id replaced by a `<key>-<n>` placeholder, and their names, usernames and
-//!   locations are additionally erased (whole word, any case) from every
-//!   other string in the run;
+//!   locations are additionally erased (any case, any Unicode normalization
+//!   form; names of four or more characters also inside longer words) from
+//!   every other string in the run. Strings are rewritten in NFC, which is
+//!   canonically equivalent to the input, so fixtures may differ from the
+//!   capture in the byte spelling of accented characters;
 //! - URLs, opaque tokens, locations, e-mails, device serials, time zones,
 //!   birthdays, heights and weights are replaced with fixed values; lists of
 //!   devices, contracts, social links and Q&As are emptied;
@@ -63,6 +66,7 @@ use serde_json::{Map, Value, json};
 use time::OffsetDateTime;
 use time::format_description::BorrowedFormatItem;
 use time::format_description::well_known::Rfc3339;
+use unicode_normalization::UnicodeNormalization as _;
 
 use crate::capture::{prepare_dir, save};
 
@@ -886,16 +890,15 @@ fn has_opaque_token(text: &str) -> bool {
         .any(|run| run.len() >= MIN_TOKEN_RUN && !run.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
-/// Folds `text` for case-insensitive comparison: each character is
-/// lower-cased, upper-cased and lower-cased again, so "ß", "ẞ" and "SS", "ς"
-/// and "σ", "É" and "é" all agree.
+/// Folds `text` for case- and normalization-insensitive comparison: the text
+/// is put in NFC, then each character is lower-cased, upper-cased and
+/// lower-cased again, so "ß", "ẞ" and "SS", "ς" and "σ", "É" and "é", and
+/// "é" written as one character or as "e" plus a combining accent all agree.
 ///
-/// This matches Unicode full case folding (`CaseFolding.txt`, statuses C and
-/// F) for the scripts that have case. It does not normalise, so a name
-/// written with combining accents (NFD) is not equal to its precomposed
-/// (NFC) form.
+/// The case part matches Unicode full case folding (`CaseFolding.txt`,
+/// statuses C and F) for the scripts that have case.
 fn fold_case(text: &str) -> String {
-    text.chars().flat_map(fold_char).collect()
+    text.nfc().flat_map(fold_char).collect()
 }
 
 fn fold_char(c: char) -> impl Iterator<Item = char> {
@@ -904,13 +907,15 @@ fn fold_char(c: char) -> impl Iterator<Item = char> {
         .flat_map(char::to_lowercase)
 }
 
-/// Replaces occurrences of each folded needle, ignoring case.
+/// Replaces occurrences of each folded needle, ignoring case and Unicode
+/// normalization form. The result is in NFC (canonically equivalent to the
+/// input), so canonical equivalents of a name cannot survive.
 ///
 /// A needle of at least [`MIN_SUBSTRING_LEN`] characters matches anywhere, so
 /// compound forms (`MarieClaire`, `Jean-Luc`) are erased; a shorter one only
 /// matches as a whole word, so "ben" does not erase half of "benefits".
 fn erase_words(text: &str, needles: &[String]) -> String {
-    let mut current = text.to_owned();
+    let mut current: String = text.nfc().collect();
     for needle in needles {
         let whole_word = needle.chars().count() < MIN_SUBSTRING_LEN;
         let (folded, origins) = fold_with_origins(&current);
@@ -945,6 +950,7 @@ fn erase_words(text: &str, needles: &[String]) -> String {
 fn fold_with_origins(text: &str) -> (String, Vec<(usize, usize)>) {
     let mut folded = String::with_capacity(text.len());
     let mut origins = Vec::with_capacity(text.len());
+    debug_assert!(text.nfc().eq(text.chars()), "text must be in NFC");
     for (start, c) in text.char_indices() {
         let range = (start, start + c.len_utf8());
         for f in fold_char(c) {
@@ -960,6 +966,7 @@ mod tests {
     use super::{erase_words, fold_case, has_opaque_token, is_month_buckets, is_uuid};
     use proptest::prelude::*;
     use serde_json::json;
+    use unicode_normalization::UnicodeNormalization as _;
 
     #[test]
     fn erases_whole_words_only() {
@@ -1006,6 +1013,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn erases_decomposed_names_from_precomposed_text() {
+        let needles = vec![fold_case("e\u{301}lodie")];
+        assert_eq!(
+            erase_words("Ride with \u{c9}lodie, \u{e9}lodie", &needles),
+            "Ride with redacted, redacted"
+        );
+    }
+
+    #[test]
+    fn erases_precomposed_names_from_decomposed_text() {
+        let needles = vec![fold_case("\u{e9}lodie")];
+        assert_eq!(
+            erase_words("Ride with E\u{301}lodie, e\u{301}lodie", &needles),
+            "Ride with redacted, redacted"
+        );
+    }
+
+    #[test]
+    fn output_is_canonically_equivalent_nfc() {
+        let needles = vec![fold_case("zed")];
+        assert_eq!(
+            erase_words("cafe\u{301} zed", &needles),
+            "caf\u{e9} redacted"
+        );
+    }
+
     proptest! {
         #[test]
         fn scrubbed_text_never_contains_the_name_in_any_case(
@@ -1016,7 +1050,9 @@ mod tests {
             let folded = fold_case(&name);
             prop_assume!(!"redacted".contains(&folded));
             let needles = vec![folded.clone()];
-            for variant in [name.to_lowercase(), name.to_uppercase(), name.clone()] {
+            let forms = [name.to_lowercase(), name.to_uppercase(), name.clone()];
+            let decomposed = forms.iter().map(|v| v.nfd().collect::<String>());
+            for variant in forms.iter().cloned().chain(decomposed) {
                 let text = format!("{before}{variant}{after}x{variant}");
                 let scrubbed = erase_words(&text, &needles);
                 prop_assert!(

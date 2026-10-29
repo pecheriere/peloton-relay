@@ -24,6 +24,7 @@ time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
+unicode-normalization = "0.1.26"
 url = "2"
 utoipa = { version = "5", features = ["time"] }
 wiremock = "0.6"
