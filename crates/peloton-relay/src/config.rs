@@ -41,8 +41,6 @@ pub enum ConfigError {
 pub struct Config {
     /// Address the HTTP server binds to, which the healthcheck probes.
     pub listen: SocketAddr,
-    /// Directory holding the state file.
-    pub state_dir: PathBuf,
     /// The accounts this relay serves, under the state directory.
     pub accounts: Accounts,
 }
@@ -83,13 +81,8 @@ impl Config {
             .map(str::parse::<AccountName>)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| ConfigError::Accounts)?;
-        let accounts =
-            Accounts::new(state_dir.clone(), names).map_err(|_| ConfigError::Accounts)?;
-        Ok(Self {
-            listen,
-            state_dir,
-            accounts,
-        })
+        let accounts = Accounts::new(state_dir, names).map_err(|_| ConfigError::Accounts)?;
+        Ok(Self { listen, accounts })
     }
 
     /// URL of the liveness probe of a server bound to [`Self::listen`]: the

@@ -6,7 +6,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use peloton::endpoints::API_BASE;
 use peloton::oauth::{AUTH_DOMAIN, AuthClient};
-use peloton_relay::account::AccountName;
+use peloton_relay::account::{AccountName, Accounts};
 use peloton_relay::api::{AccountContext, AccountRegistry, AppState, Clock, router};
 use peloton_relay::config::{Config, http_client};
 use peloton_relay::seed::{run_bind, run_seed};
@@ -83,28 +83,35 @@ async fn serve() -> Result<(), String> {
     let http = http_client().map_err(|err| format!("cannot build the HTTP client: {err}"))?;
     let auth_base = Url::parse(&format!("https://{AUTH_DOMAIN}")).map_err(|err| err.to_string())?;
     let api_base = Url::parse(API_BASE).map_err(|err| err.to_string())?;
-    // The first configured account, until the server serves them all.
-    let account = config
-        .accounts
-        .names()
-        .first()
-        .cloned()
-        .ok_or("PELOTON_RELAY_ACCOUNTS names no account")?;
-    let store = config.accounts.state_file(&account);
-    let tokens = Arc::new(TokenManager::new(
-        account,
-        store,
-        AuthClient::new(http.clone(), auth_base),
-        DEFAULT_REFRESH_MARGIN,
-    ));
-    let peloton = Arc::new(Peloton::new(
-        http,
-        api_base,
-        Arc::clone(&tokens),
-        DEFAULT_MAX_IN_FLIGHT,
-    ));
-    let accounts =
-        AccountRegistry::new(vec![AccountContext::new(peloton)]).map_err(|err| err.to_string())?;
+    refuse_single_account_state(&config.accounts)?;
+    let mut contexts = Vec::new();
+    let mut managers = Vec::new();
+    for account in config.accounts.names() {
+        if let Err(err) = config.accounts.ensure_dir(account) {
+            // Not fatal: the account stays unauthenticated, the others serve.
+            tracing::error!(
+                event = "account_dir_unusable",
+                account = %account,
+                error = %err,
+                "cannot create the account directory"
+            );
+        }
+        let tokens = Arc::new(TokenManager::new(
+            account.clone(),
+            config.accounts.state_file(account),
+            AuthClient::new(http.clone(), auth_base.clone()),
+            DEFAULT_REFRESH_MARGIN,
+        ));
+        let peloton = Arc::new(Peloton::new(
+            http.clone(),
+            api_base.clone(),
+            Arc::clone(&tokens),
+            DEFAULT_MAX_IN_FLIGHT,
+        ));
+        contexts.push(AccountContext::new(peloton));
+        managers.push(tokens);
+    }
+    let accounts = AccountRegistry::new(contexts).map_err(|err| err.to_string())?;
     let app = router(AppState {
         accounts: Arc::new(accounts),
         clock: Clock::system(),
@@ -115,35 +122,73 @@ async fn serve() -> Result<(), String> {
         .map_err(|err| format!("cannot listen on {}: {err}", config.listen))?;
     let shutdown = CancellationToken::new();
     let signal = shutdown_signal(shutdown.clone())?;
-    let refresher = tokio::spawn({
-        let tokens = Arc::clone(&tokens);
+    let mut refreshers = tokio::task::JoinSet::new();
+    for tokens in &managers {
+        let tokens = Arc::clone(tokens);
         let shutdown = shutdown.clone();
-        async move {
+        refreshers.spawn(async move {
             tokens
                 .keep_fresh(BACKGROUND_REFRESH_INTERVAL, &shutdown)
                 .await;
-        }
-    });
-    tracing::info!(listen = %config.listen, "serving");
+        });
+    }
+    let names = config
+        .accounts
+        .names()
+        .iter()
+        .map(AccountName::as_str)
+        .collect::<Vec<_>>()
+        .join(",");
+    tracing::info!(listen = %config.listen, accounts = %names, "serving");
     let served = axum::serve(listener, app)
         .with_graceful_shutdown(signal)
         .await;
 
-    // Also reached when the server fails: stop refreshing, then let an
-    // in-flight refresh save the rotated refresh token before exiting.
+    // Also reached when the server fails: stop refreshing, then let in-flight
+    // refreshes save their rotated refresh tokens before exiting, all
+    // accounts waiting concurrently.
     shutdown.cancel();
-    if refresher.await.is_err() {
-        tracing::error!("background refresh task failed");
+    while let Some(joined) = refreshers.join_next().await {
+        if joined.is_err() {
+            tracing::error!("background refresh task failed");
+        }
     }
-    if !tokens.drain(DRAIN_TIMEOUT).await {
-        tracing::warn!(
-            event = "token_work_abandoned",
-            "a token refresh was still running at shutdown"
-        );
+    let mut drains = tokio::task::JoinSet::new();
+    for tokens in managers {
+        drains.spawn(async move {
+            if !tokens.drain(DRAIN_TIMEOUT).await {
+                tracing::warn!(
+                    event = "token_work_abandoned",
+                    account = %tokens.account(),
+                    "a token refresh was still running at shutdown"
+                );
+            }
+        });
+    }
+    while let Some(joined) = drains.join_next().await {
+        if joined.is_err() {
+            tracing::error!("token drain task failed");
+        }
     }
     served.map_err(|err| format!("server failed: {err}"))?;
     tracing::info!("shut down");
     Ok(())
+}
+
+/// Refuses to serve while the state file of the single-account releases is
+/// still in the state directory: it would be silently ignored.
+fn refuse_single_account_state(accounts: &Accounts) -> Result<(), String> {
+    let legacy = accounts.legacy_state_file();
+    match std::fs::symlink_metadata(&legacy) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(format!("cannot inspect {}: {err}", legacy.display())),
+        Ok(_) => Err(format!(
+            "found {} from a single-account release; move it to {}/<account>/state.json \
+             and run \"peloton-relay bind --account <account>\"",
+            legacy.display(),
+            accounts.root().display()
+        )),
+    }
 }
 
 /// Resolves on SIGTERM or Ctrl-C, cancelling `shutdown` first.
