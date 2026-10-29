@@ -313,14 +313,7 @@ impl StateFile {
     }
 
     fn dir(&self) -> Result<&Path, StoreError> {
-        match self.path.parent() {
-            Some(dir) if dir.as_os_str().is_empty() => Ok(Path::new(".")),
-            Some(dir) => Ok(dir),
-            None => Err(StoreError::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "state path has no parent directory",
-            ))),
-        }
+        parent_dir(&self.path)
     }
 
     fn file_name(&self) -> Result<&OsStr, StoreError> {
@@ -471,16 +464,13 @@ fn exclusive_lock(path: &Path, wait: Duration) -> Result<File, StoreError> {
 /// Writes a private temp file in the same directory, syncs it, renames it
 /// over the target and syncs the directory.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<FileId, StoreError> {
-    let invalid =
-        |what: &'static str| StoreError::Io(io::Error::new(io::ErrorKind::InvalidInput, what));
-    let dir = match path.parent() {
-        Some(dir) if dir.as_os_str().is_empty() => Path::new("."),
-        Some(dir) => dir,
-        None => return Err(invalid("path has no parent directory")),
-    };
-    let name = path
-        .file_name()
-        .ok_or_else(|| invalid("path has no file name"))?;
+    let dir = parent_dir(path)?;
+    let name = path.file_name().ok_or_else(|| {
+        StoreError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path has no file name",
+        ))
+    })?;
     let temp = dir.join(temp_name(name));
 
     // Identity comes from the temp file's handle: rename keeps the inode and
@@ -500,6 +490,18 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<FileId, StoreError> {
             let _ = fs::remove_file(&temp);
             Err(StoreError::Io(err))
         }
+    }
+}
+
+/// The directory holding the file at `path`: `.` for a bare file name.
+fn parent_dir(path: &Path) -> Result<&Path, StoreError> {
+    match path.parent() {
+        Some(dir) if dir.as_os_str().is_empty() => Ok(Path::new(".")),
+        Some(dir) => Ok(dir),
+        None => Err(StoreError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path has no parent directory",
+        ))),
     }
 }
 

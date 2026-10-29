@@ -170,6 +170,12 @@ impl fmt::Display for Bound {
 /// to another user and `rebind` is false. Nothing is written on any refusal,
 /// nor unless `/me` succeeded.
 ///
+/// The binding is written before the state. An I/O failure between the two
+/// leaves the new binding next to the old state; the server refuses an old
+/// state of another user (`state_refused`, reason `user_mismatch`) until a
+/// seed succeeds, so it fails closed and never serves a credential of a user
+/// the account is not bound to.
+///
 /// Each lock is waited for up to `lock_wait` (a refresh the relay has in
 /// flight holds the state lock), so the two never overwrite each other.
 ///

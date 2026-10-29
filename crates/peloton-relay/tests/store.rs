@@ -96,6 +96,16 @@ fn bindings_lock_excludes_a_second_holder() {
 }
 
 #[test]
+fn binding_file_holds_exactly_the_user_id() {
+    let (_root, _accounts, file) = setup();
+    file.lock(WAIT).unwrap().bind(&user()).unwrap();
+    assert_eq!(
+        fs::read(file.binding_path()).unwrap(),
+        format!(r#"{{"user_id":"{USER}"}}"#).into_bytes()
+    );
+}
+
+#[test]
 fn store_errors_name_the_files_they_cover() {
     assert_eq!(
         StoreError::Corrupt.to_string(),

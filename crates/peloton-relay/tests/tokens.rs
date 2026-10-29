@@ -1999,6 +1999,137 @@ async fn credential_events_carry_the_account() {
     }
 }
 
+/// A token manager of account `bob` in a fresh state directory under `root`,
+/// bound to [`user`], with its own refresh token and the given lock wait.
+fn bob_manager(
+    root: &Path,
+    server: &MockServer,
+    clock: &TestClock,
+    lock_wait: StdDuration,
+) -> (TokenManager, StateFile) {
+    let file = account_state_file(root, "bob", &user());
+    let tokens = TokenManager::with_timing(
+        account("bob"),
+        file.clone(),
+        AuthClient::new(common::http(), server_url(server)),
+        MARGIN,
+        clock.clock(),
+        lock_wait,
+    );
+    (tokens, file)
+}
+
+#[tokio::test]
+async fn state_and_refresh_problem_events_carry_the_account() {
+    const EVENTS: [&str; 7] = [
+        "state_corrupt",
+        "state_file_unreadable",
+        "state_save_failed",
+        "state_external_change_ignored",
+        "state_save_recovered",
+        "state_lock_failed",
+        "peloton_unauthorized_after_refresh",
+    ];
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    refresh_mock("unsaved-refresh")
+        .respond_with(rotated_tokens())
+        .mount(&server)
+        .await;
+    refresh_mock("forced-refresh")
+        .respond_with(third_tokens())
+        .mount(&server)
+        .await;
+    let clock = TestClock::new();
+
+    async {
+        // A corrupt state file.
+        let root = tempfile::tempdir().unwrap();
+        let (tokens, file) = bob_manager(root.path(), &server, &clock, LOCK_WAIT);
+        fs::write(&file.path, "{").unwrap();
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+
+        // An account directory that cannot be searched (not as root).
+        let root = tempfile::tempdir().unwrap();
+        let (tokens, file) = bob_manager(root.path(), &server, &clock, LOCK_WAIT);
+        let dir = file.path.parent().unwrap().to_path_buf();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o000)).unwrap();
+        let blocked = fs::metadata(&file.path).is_err();
+        let refused = tokens.bearer().await;
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(blocked, "tests must not run as root");
+        assert!(matches!(refused, Err(NotAuthenticated)));
+
+        // Refreshed tokens that cannot be saved, a seed landing meanwhile,
+        // then a save that succeeds.
+        let root = tempfile::tempdir().unwrap();
+        let (tokens, file) = bob_manager(root.path(), &server, &clock, LOCK_WAIT);
+        let dir = file.path.parent().unwrap().to_path_buf();
+        file.save(
+            &state("unsaved-access", "unsaved-refresh", -Duration::minutes(5)),
+            LOCK_WAIT,
+        )
+        .unwrap();
+        make_read_only(&dir);
+        let withheld = tokens.bearer().await;
+        make_writable(&dir);
+        assert!(matches!(withheld, Err(NotAuthenticated)));
+        file.save(
+            &state("seeded-access", "seeded-refresh", Duration::hours(48)),
+            LOCK_WAIT,
+        )
+        .unwrap();
+        let (access, _) = tokens.bearer().await.unwrap();
+        assert_eq!(access.expose_secret(), "new-access");
+
+        // The state lock stays held while a refresh is due.
+        let root = tempfile::tempdir().unwrap();
+        let (tokens, file) =
+            bob_manager(root.path(), &server, &clock, StdDuration::from_millis(100));
+        file.save(
+            &state("held-access", "held-refresh", Duration::minutes(30)),
+            LOCK_WAIT,
+        )
+        .unwrap();
+        let held = file.lock(LOCK_WAIT).unwrap();
+        let (access, _) = tokens.bearer().await.unwrap();
+        drop(held);
+        assert_eq!(access.expose_secret(), "held-access");
+
+        // Peloton rejects the token a forced refresh just minted.
+        let root = tempfile::tempdir().unwrap();
+        let (tokens, file) = bob_manager(root.path(), &server, &clock, LOCK_WAIT);
+        file.save(
+            &state("forced-access", "forced-refresh", Duration::hours(48)),
+            LOCK_WAIT,
+        )
+        .unwrap();
+        let (used, _) = tokens.bearer().await.unwrap();
+        assert!(tokens.unauthorized(&used).await);
+        assert!(
+            !tokens
+                .unauthorized(&SecretString::from("third-access"))
+                .await
+        );
+    }
+    .instrument(tracing::info_span!("case", name = "bob_problem_events"))
+    .await;
+
+    let output = logs.contents();
+    for event in EVENTS {
+        let lines: Vec<serde_json::Value> = output
+            .lines()
+            .filter(|line| line.contains("bob_problem_events"))
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .filter(|json| json["event"] == event)
+            .collect();
+        assert!(!lines.is_empty(), "no {event}: {output}");
+        for json in lines {
+            assert_eq!(json["account"], "bob", "{json}");
+        }
+    }
+}
+
 /// Lines of the case `case` that log `state_refused` with `reason` for alice.
 fn refusals(output: &str, case: &str, reason: &str) -> usize {
     output

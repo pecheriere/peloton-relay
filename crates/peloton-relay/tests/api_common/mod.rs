@@ -10,7 +10,9 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use http_body_util::BodyExt as _;
 use peloton::ids::PelotonId;
 use peloton_relay::account::AccountName;
-use peloton_relay::api::{AccountContext, AccountRegistry, AppState, Clock, router};
+use peloton_relay::api::{
+    ACCOUNT_HEADER, AccountContext, AccountRegistry, AppState, Clock, router,
+};
 use peloton_relay::store::StateFile;
 use peloton_relay::tokens::TokenManager;
 use peloton_relay::upstream::Peloton;
@@ -33,9 +35,6 @@ pub fn fixture(name: &str) -> String {
     ))
     .unwrap()
 }
-
-/// The account every helper request names.
-pub const ACCOUNT_HEADER: &str = "x-peloton-account";
 
 /// The sample ids of [`V1_ROUTES`], as literals so that `concat!` takes them.
 macro_rules! sample_id {

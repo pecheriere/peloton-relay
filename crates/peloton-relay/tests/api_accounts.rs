@@ -12,7 +12,7 @@ use axum::body::Body;
 use axum::http::{HeaderValue, Request, StatusCode};
 use peloton::graphql::{Op, ops};
 use peloton::ids::PelotonId;
-use peloton_relay::api::openapi;
+use peloton_relay::api::{ACCOUNT_HEADER, openapi};
 use peloton_relay::store::StateFile;
 use serde_json::{Value, json};
 use time::macros::datetime;
@@ -34,9 +34,9 @@ mod common;
 mod api_common;
 
 use api_common::{
-    ACCOUNT_HEADER, SAMPLE_CLASS, SAMPLE_ID, SAMPLE_SCHEDULED, V1_ROUTES, account_context,
-    assert_error, fixture_json, fixture_scheduled_id, relay_with, request_as, router_of,
-    sample_body, send, stack_with_one_class,
+    SAMPLE_CLASS, SAMPLE_ID, SAMPLE_SCHEDULED, V1_ROUTES, account_context, assert_error,
+    fixture_json, fixture_scheduled_id, relay_with, request_as, router_of, sample_body, send,
+    stack_with_one_class,
 };
 use common::{LOCK_WAIT, captured_logs};
 
