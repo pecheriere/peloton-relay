@@ -772,7 +772,8 @@ async fn panic_log_and_500_carry_the_request_id_and_route() {
     // Installs the capture before anything logs.
     common::captured_logs();
     let app = peloton_relay::api::request_handling(Router::new().route("/boom/{id}", get(boom)));
-    let (status, headers, _) = get_with_span(&app, "/boom/42?q=1", "panic_request_context").await;
+    let (status, headers, _) =
+        get_with_span(&app, "/boom/zq7-sentinel?q=1", "panic_request_context").await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     let id = request_id(&headers);
     let panic_line = request_logs(&id)
@@ -782,7 +783,10 @@ async fn panic_log_and_500_carry_the_request_id_and_route() {
     assert_eq!(panic_line["span"]["route"], "/boom/{id}");
     assert_eq!(panic_line["span"]["request_id"], id);
     let line = panic_line.to_string();
-    assert!(!line.contains("42") && !line.contains("q=1"), "{line}");
+    assert!(
+        !line.contains("zq7-sentinel") && !line.contains("q=1"),
+        "{line}"
+    );
 }
 
 #[tokio::test]

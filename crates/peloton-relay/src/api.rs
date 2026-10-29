@@ -107,11 +107,16 @@ pub fn router(state: AppState) -> Router {
     request_handling(routes).with_state(state)
 }
 
-/// Wraps `routes` in the relay's request handling: each request runs in a
-/// span with its id, method and route and is given an `x-request-id` header
-/// (never the query string or the path's own ids), and a panicking handler is answered with 500
-/// (see [`catch_panics`]) inside that span, so the panic's log line carries
-/// the request's id and route too.
+/// Wraps `routes` in the relay's request handling.
+///
+/// Each request runs in a span with its id, method and matched route (never
+/// the query string or the path's own ids) and is answered with an
+/// `x-request-id` header. A panicking handler is answered with 500 (see
+/// [`catch_panics`]) inside that span, so the panic's log line carries the
+/// request's id and route too.
+///
+/// Public only so that the integration tests can wrap their own routes.
+#[doc(hidden)]
 pub fn request_handling<S: Clone + Send + Sync + 'static>(routes: Router<S>) -> Router<S> {
     routes
         .layer(catch_panics())
