@@ -804,11 +804,8 @@ async fn every_request_gets_its_own_request_id() {
         ids.push(request_id(&headers));
     }
     for id in &ids {
-        assert_eq!(id.len(), 36, "{id}");
-        assert!(
-            id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-'),
-            "{id}"
-        );
+        assert_eq!(id.len(), 32, "{id}");
+        assert!(id.bytes().all(|b| b.is_ascii_hexdigit()), "{id}");
     }
     ids.sort();
     ids.dedup();

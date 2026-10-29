@@ -11,6 +11,7 @@ publish.workspace = true
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "matched-path", "tokio", "query"] }
 clap.workspace = true
 peloton = { path = "../peloton", version = "0.2.0" }
+rand.workspace = true
 reqwest.workspace = true
 secrecy.workspace = true
 serde.workspace = true
@@ -20,7 +21,7 @@ thiserror.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = ["net", "signal", "sync", "time"] }
 tokio-util = { version = "0.7.20", features = ["rt"] }
-tower-http = { version = "0.7.1", default-features = false, features = ["catch-panic", "request-id"] }
+tower-http = { version = "0.7.1", default-features = false, features = ["catch-panic"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
 url.workspace = true

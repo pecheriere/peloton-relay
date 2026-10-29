@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use axum::extract::{FromRequest, FromRequestParts, MatchedPath, Path, Query, Request, State};
 use axum::http::request::Parts;
-use axum::http::{HeaderName, StatusCode, header};
+use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get};
@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime, UtcOffset};
 use tower_http::catch_panic::CatchPanicLayer;
-use tower_http::request_id::{MakeRequestId as _, MakeRequestUuid, RequestId};
 use tracing::Instrument as _;
 use utoipa::openapi::RefOr;
 use utoipa::openapi::schema::{ObjectBuilder, Schema, Type};
@@ -139,9 +138,7 @@ const UNMATCHED_ROUTE: &str = "unmatched";
 /// An id sent by the client is ignored. The span holds neither the query
 /// string nor the path's own ids.
 async fn request_context(request: Request, next: Next) -> Response {
-    let id = MakeRequestUuid
-        .make_request_id(&request)
-        .map(RequestId::into_header_value);
+    let id = HeaderValue::from_str(&format!("{:032x}", rand::random::<u128>())).ok();
     let route = request
         .extensions()
         .get::<MatchedPath>()
