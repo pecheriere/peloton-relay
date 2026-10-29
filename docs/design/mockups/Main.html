@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relay design language</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#5B3BF0}a:hover{color:#4326D6}
+</style>
+</head>
+<body>
+<div style="width: 1440px; height: 1960px; box-sizing: border-box; padding: 88px 96px; background: #F6F6FA; color: #15161F; font-family: 'Plus Jakarta Sans', system-ui, sans-serif; display: flex; flex-direction: column; gap: 72px">
+
+  <header style="display: flex; align-items: center; justify-content: space-between; gap: 48px">
+    <div style="display: flex; align-items: center; gap: 28px">
+      <svg width="100" height="125" viewBox="0 0 120 150" aria-hidden="true">
+        <ellipse cx="60" cy="142" rx="28" ry="4" fill="#E4E5EE"></ellipse>
+        <rect x="41" y="4" width="14" height="48" rx="7" fill="#E9E3FF" transform="rotate(-10 48 52)"></rect>
+        <rect x="45" y="11" width="6" height="34" rx="3" fill="#FFB3C1" transform="rotate(-10 48 52)"></rect>
+        <rect x="65" y="4" width="14" height="48" rx="7" fill="#E9E3FF" transform="rotate(10 72 52)"></rect>
+        <rect x="69" y="11" width="6" height="34" rx="3" fill="#FFB3C1" transform="rotate(10 72 52)"></rect>
+        <circle cx="83" cy="114" r="7" fill="#FFFFFF"></circle>
+        <path d="M42 96 Q30 90 30 77" stroke="#D9D0FF" stroke-width="7" fill="none" stroke-linecap="round"></path>
+        <path d="M78 96 Q86 104 84 113" stroke="#D9D0FF" stroke-width="7" fill="none" stroke-linecap="round"></path>
+        <rect x="40" y="84" width="40" height="42" rx="18" fill="#E9E3FF"></rect>
+        <path d="M40 92 H80 V108 A18 18 0 0 1 62 126 H58 A18 18 0 0 1 40 108 Z" fill="#6D4AFF"></path>
+        <path d="M55 101 L60 106 L65 101" stroke="#FFFFFF" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+        <rect x="35" y="124" width="23" height="11" rx="5.5" fill="#FFFFFF" stroke="#BFC2D4" stroke-width="1.5"></rect><rect x="35" y="131.5" width="23" height="3.5" rx="1.75" fill="#15161F"></rect><circle cx="49.26" cy="128.62" r="1.6" fill="#FF7A59"></circle>
+        <rect x="62" y="124" width="23" height="11" rx="5.5" fill="#FFFFFF" stroke="#BFC2D4" stroke-width="1.5"></rect><rect x="62" y="131.5" width="23" height="3.5" rx="1.75" fill="#15161F"></rect><circle cx="76.26" cy="128.62" r="1.6" fill="#FF7A59"></circle>
+        <circle cx="60" cy="63" r="25" fill="#E9E3FF"></circle>
+        <rect x="36" y="49" width="48" height="8" rx="4" fill="#FF7A59"></rect>
+        <path d="M83 52 L95 46 M83 53 L96 58" stroke="#FF7A59" stroke-width="3.5" stroke-linecap="round"></path>
+        <ellipse cx="51" cy="65" rx="2.8" ry="3.6" fill="#15161F"></ellipse><ellipse cx="69" cy="65" rx="2.8" ry="3.6" fill="#15161F"></ellipse>
+        <circle cx="44" cy="72" r="3.6" fill="#FFB3C1"></circle><circle cx="76" cy="72" r="3.6" fill="#FFB3C1"></circle>
+        <ellipse cx="60" cy="72" rx="3" ry="2.2" fill="#FF8FA3"></ellipse>
+        <path d="M56 76 Q58 78.5 60 76 Q62 78.5 64 76" stroke="#15161F" stroke-width="2" fill="none" stroke-linecap="round"></path>
+      </svg>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <div style="font-size: 64px; font-weight: 800; letter-spacing: -0.03em; line-height: 1">Relay</div>
+        <div style="font-size: 20px; color: #55586D; font-weight: 500">Your Peloton data, ready for your agents. An unofficial, self-hosted relay.</div>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px; font-size: 14px; color: #55586D">
+      <div style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #15161F">design language v0.1</div>
+      <div>Light and dark · iPhone first · any modern browser</div>
+    </div>
+  </header>
+
+  <section style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px">
+    <div style="background: #FFFFFF; border: 1px solid #E4E5EE; border-radius: 20px; padding: 28px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #5B3BF0">Principle 1</div>
+      <div style="font-size: 24px; font-weight: 700">Calm until it matters</div>
+      <div style="font-size: 16px; line-height: 1.55; color: #55586D">Neutral ground, one accent. Color appears only to say something: a status, a zone, the one action to take.</div>
+    </div>
+    <div style="background: #FFFFFF; border: 1px solid #E4E5EE; border-radius: 20px; padding: 28px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #5B3BF0">Principle 2</div>
+      <div style="font-size: 24px; font-weight: 700">Zones are the palette</div>
+      <div style="font-size: 16px; line-height: 1.55; color: #55586D">The seven training-zone colors carry data and status everywhere, so every chart and badge feels like the ride.</div>
+    </div>
+    <div style="background: #FFFFFF; border: 1px solid #E4E5EE; border-radius: 20px; padding: 28px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #5B3BF0">Principle 3</div>
+      <div style="font-size: 24px; font-weight: 700">One tap, one thing</div>
+      <div style="font-size: 16px; line-height: 1.55; color: #55586D">Every screen has a single primary action within thumb reach. Risky actions ask once, plainly, and say what happens.</div>
+    </div>
+  </section>
+
+  <section style="display: flex; flex-direction: column; gap: 24px">
+    <div style="font-size: 32px; font-weight: 800; letter-spacing: -0.02em">Color</div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+      <div style="background: #FFFFFF; border: 1px solid #E4E5EE; border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+        <div style="font-size: 16px; font-weight: 700">Light</div>
+        <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px">
+          
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div style="height: 72px; border-radius: 14px; border: 1px solid #E4E5EE; background: #F6F6FA"></div>
+              <div style="font-size: 13px; font-weight: 600">Ground</div>
+              <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #55586D">#F6F6FA</div>
+            </div>
+          
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div style="height: 72px; border-radius: 14px; border: 1px solid #E4E5EE; background: #FFFFFF"></div>
+              <div style="font-size: 13px; font-weight: 600">Surface</div>
+              <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #55586D">#FFFFFF</div>
+            </div>
+          
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div style="height: 72px; border-radius: 14px; border: 1px solid #E4E5EE; background: #15161F"></div>
+              <div style="font-size: 13px; font-weight: 600">Ink</div>
+              <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #55586D">#15161F</div>
+            </div>
+          
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div style="height: 72px; border-radius: 14px; border: 1px solid #E4E5EE; background: #55586D"></div>
+              <div style="font-size: 13px; font-weight: 600">Ink 2</div>
+              <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #55586D">#55586D</div>
+            </div>
+          
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div style="height: 72px; border-radius: 14px; border: 1px solid #E4E5EE; background: #6D4AFF"></div>
+              <div style="font-size: 13px; font-weight: 600">Accent</div>
+              <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #55586D">#6D4AFF</div>
+            </div>
+          
+        </div>
+      </div>
+      <div style="background: #0E0F15; border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 16px; color: #F3F3F8">
+        <div style="font-size: 16px; font-weight: 700">Dark</div>
+        <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px">
+          
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div style="height: 72px; border-radius: 14px; border: 1px solid #2A2D3A; background: #0E0F15"></div>
+              <div style="font-size: 13px; font-weight: 600">Ground</div>
+              <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #A3A6BB">#0E0F15</div>
+            </div>
+          
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div style="height: 72px; border-radius: 14px; border: 1px solid #2A2D3A; background: #181A23"></div>
+              <div style="font-size: 13px; font-weight: 600">Surface</div>
+              <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #A3A6BB">#181A23</div>
+            </div>
+          
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div style="height: 72px; border-radius: 14px; border: 1px solid #2A2D3A; background: #F3F3F8"></div>
+              <div style="font-size: 13px; font-weight: 600">Ink</div>
+              <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #A3A6BB">#F3F3F8</div>
+            </div>
+          
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div style="height: 72px; border-radius: 14px; border: 1px solid #2A2D3A; background: #A3A6BB"></div>
+              <div style="font-size: 13px; font-weight: 600">Ink 2</div>
+              <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #A3A6BB">#A3A6BB</div>
+            </div>
+          
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <div style="height: 72px; border-radius: 14px; border: 1px solid #2A2D3A; background: #8C73FF"></div>
+              <div style="font-size: 13px; font-weight: 600">Accent</div>
+              <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #A3A6BB">#8C73FF</div>
+            </div>
+          
+        </div>
+      </div>
+    </div>
+    <div style="background: #FFFFFF; border: 1px solid #E4E5EE; border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline">
+        <div style="font-size: 16px; font-weight: 700">Zone ramp: data and status</div>
+        <div style="font-size: 14px; color: #55586D">Z3 = healthy · Z4 = needs attention · Z6 = failed</div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px">
+        
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="height: 88px; border-radius: 14px; background: #4C9BFF; display: flex; align-items: flex-end; padding: 10px; box-sizing: border-box; font-weight: 800; font-size: 18px; color: #0B1F3A">Z1</div>
+            <div style="font-size: 13px; font-weight: 600">Recovery</div>
+            <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #55586D">#4C9BFF</div>
+          </div>
+        
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="height: 88px; border-radius: 14px; background: #2EC4B6; display: flex; align-items: flex-end; padding: 10px; box-sizing: border-box; font-weight: 800; font-size: 18px; color: #06302C">Z2</div>
+            <div style="font-size: 13px; font-weight: 600">Endurance</div>
+            <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #55586D">#2EC4B6</div>
+          </div>
+        
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="height: 88px; border-radius: 14px; background: #5BD16E; display: flex; align-items: flex-end; padding: 10px; box-sizing: border-box; font-weight: 800; font-size: 18px; color: #0D3315">Z3</div>
+            <div style="font-size: 13px; font-weight: 600">Tempo</div>
+            <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #55586D">#5BD16E</div>
+          </div>
+        
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="height: 88px; border-radius: 14px; background: #FFC845; display: flex; align-items: flex-end; padding: 10px; box-sizing: border-box; font-weight: 800; font-size: 18px; color: #3D2A00">Z4</div>
+            <div style="font-size: 13px; font-weight: 600">Threshold</div>
+            <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #55586D">#FFC845</div>
+          </div>
+        
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="height: 88px; border-radius: 14px; background: #FF9248; display: flex; align-items: flex-end; padding: 10px; box-sizing: border-box; font-weight: 800; font-size: 18px; color: #3D1A00">Z5</div>
+            <div style="font-size: 13px; font-weight: 600">VO2 max</div>
+            <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #55586D">#FF9248</div>
+          </div>
+        
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="height: 88px; border-radius: 14px; background: #FF5C6B; display: flex; align-items: flex-end; padding: 10px; box-sizing: border-box; font-weight: 800; font-size: 18px; color: #3D0710">Z6</div>
+            <div style="font-size: 13px; font-weight: 600">Anaerobic</div>
+            <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #55586D">#FF5C6B</div>
+          </div>
+        
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="height: 88px; border-radius: 14px; background: #D65CFF; display: flex; align-items: flex-end; padding: 10px; box-sizing: border-box; font-weight: 800; font-size: 18px; color: #330A40">Z7</div>
+            <div style="font-size: 13px; font-weight: 600">Neuromuscular</div>
+            <div style="font-size: 12px; font-family: 'JetBrains Mono', monospace; color: #55586D">#D65CFF</div>
+          </div>
+        
+      </div>
+    </div>
+  </section>
+
+  <section style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+    <div style="background: #FFFFFF; border: 1px solid #E4E5EE; border-radius: 20px; padding: 28px; display: flex; flex-direction: column; gap: 18px">
+      <div style="font-size: 32px; font-weight: 800; letter-spacing: -0.02em">Type</div>
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <div style="font-size: 40px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1">Display 40 · ExtraBold</div>
+        <div style="font-size: 24px; font-weight: 700">Title 24 · Bold</div>
+        <div style="font-size: 17px; font-weight: 500; line-height: 1.5">Body 17 · Medium. Plus Jakarta Sans everywhere text is read, at 1.5 line height.</div>
+        <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #55586D">Label 13 · caps</div>
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 500; background: #F1F1F7; border-radius: 10px; padding: 10px 12px">Mono 15 · commands, ids, times</div>
+      </div>
+    </div>
+    <div style="background: #FFFFFF; border: 1px solid #E4E5EE; border-radius: 20px; padding: 28px; display: flex; flex-direction: column; gap: 18px">
+      <div style="font-size: 32px; font-weight: 800; letter-spacing: -0.02em">Shape and space</div>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; font-size: 15px; line-height: 1.5; color: #55586D">
+        <div><b style="color: #15161F">4 pt grid.</b> Spacing 4, 8, 12, 16, 24, 32, 48.</div>
+        <div><b style="color: #15161F">Radii.</b> 10 inputs, 14 tiles, 20 cards, full pills.</div>
+        <div><b style="color: #15161F">Touch.</b> 44 pt minimum; primary buttons 52 pt tall.</div>
+        <div><b style="color: #15161F">Lines, not shadows.</b> 1 px hairlines; one soft shadow for sheets.</div>
+      </div>
+      <div style="display: flex; gap: 12px; align-items: flex-end">
+        <div style="width: 40px; height: 40px; border-radius: 10px; background: #EDE8FF"></div>
+        <div style="width: 56px; height: 56px; border-radius: 14px; background: #DCD3FF"></div>
+        <div style="width: 80px; height: 80px; border-radius: 20px; background: #B9A8FF"></div>
+        <div style="width: 120px; height: 44px; border-radius: 999px; background: #6D4AFF"></div>
+      </div>
+    </div>
+  </section>
+
+  <section style="display: flex; flex-direction: column; gap: 24px">
+    <div style="font-size: 32px; font-weight: 800; letter-spacing: -0.02em">Components</div>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px">
+      <div style="background: #FFFFFF; border: 1px solid #E4E5EE; border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+        <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #55586D">Buttons</div>
+        <button type="button" style="height: 52px; border: 0; border-radius: 999px; background: #6D4AFF; color: #FFFFFF; font: 700 17px 'Plus Jakarta Sans', sans-serif">Copy sign-in command</button>
+        <button type="button" style="height: 52px; border: 1px solid #D9DAE6; border-radius: 999px; background: #FFFFFF; color: #15161F; font: 700 17px 'Plus Jakarta Sans', sans-serif">View logs</button>
+        <button type="button" style="height: 52px; border: 0; border-radius: 999px; background: #FFE9EB; color: #B4142A; font: 700 17px 'Plus Jakarta Sans', sans-serif">Revoke sign-in</button>
+      </div>
+      <div style="background: #FFFFFF; border: 1px solid #E4E5EE; border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+        <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #55586D">Status pills</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px">
+          <span style="display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px; border-radius: 999px; background: #E3F7E7; color: #17642A; font-weight: 700; font-size: 14px"><span style="width: 8px; height: 8px; border-radius: 99px; background: #2FA548"></span>Healthy</span>
+          <span style="display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px; border-radius: 999px; background: #FFF4D6; color: #7A5200; font-weight: 700; font-size: 14px"><span style="width: 8px; height: 8px; border-radius: 99px; background: #E0A100"></span>Needs sign-in</span>
+          <span style="display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px; border-radius: 999px; background: #FFE9EB; color: #B4142A; font-weight: 700; font-size: 14px"><span style="width: 8px; height: 8px; border-radius: 99px; background: #E5384C"></span>Refresh failed</span>
+          <span style="display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px; border-radius: 999px; background: #EDE8FF; color: #4326D6; font-weight: 700; font-size: 14px">Read + write</span>
+        </div>
+        <div style="font-size: 14px; line-height: 1.5; color: #55586D">Always a word and a dot: color is never the only signal.</div>
+      </div>
+      <div style="background: #FFFFFF; border: 1px solid #E4E5EE; border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+        <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #55586D">Command block</div>
+        <div style="background: #15161F; color: #F3F3F8; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 12px">
+          <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.55; white-space: pre-wrap; word-break: break-all">peloton-relay-login --post-to https://relay.example.ts.net/admin --account alice</code>
+          <button type="button" style="align-self: flex-start; height: 40px; padding: 0 16px; border: 0; border-radius: 999px; background: #6D4AFF; color: #FFFFFF; font: 700 15px 'Plus Jakarta Sans', sans-serif">Copy</button>
+        </div>
+        <div style="font-size: 14px; line-height: 1.5; color: #55586D">One tap copies; the button reads “Copied” for 2 s.</div>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>
