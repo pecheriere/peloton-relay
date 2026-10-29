@@ -18,9 +18,11 @@
 //!     out ("ł", "ø", "đ", "ð", "ħ", "ŧ" as "l", "o", "d", "d", "h", "t";
 //!     "þ", "œ", "æ" as "th", "oe", "ae"), so "Élodie" also erases "ELODIE"
 //!     and "ｅｌｏｄｉｅ", and "Łukasz" erases "Lukasz";
-//!   - a string of fewer than 3 characters is never erased; one of 3 only as
-//!     a whole word or glued to digits ("Ben123", "`ben_2024`"; "ben" leaves
-//!     "benefits" and "Bento" alone, and hex ids alone); one of 4 or more also
+//!   - a string of fewer than 3 characters (counted as written, composed,
+//!     so a spacing vowel sign counts) is never erased; one that folds to 3
+//!     characters or fewer only as a whole word or glued to digits ("Ben123",
+//!     "`ben_2024`"; "ben" leaves "benefits" and "Bento" alone, and hex ids
+//!     alone); one that folds to 4 or more also
 //!     inside a longer word when both its ends are boundaries: the edge of
 //!     the text or a character that is neither a letter nor a digit
 //!     ("Jean-Luc", "`coach_elodie`"); a digit on either side ("Elodie123",
@@ -38,9 +40,9 @@
 //!     schema: `max_value` and `power_zone` stay for names "Max" and "Zone";
 //!     keys of one object that would end up equal ("Max" and "MAX") get
 //!     distinct suffixes ("redacted", "redacted-2"), so no value is lost;
-//!   - a string with percent-encoded UTF-8 is also matched decoded, and a
-//!     match erases the whole encoded span ("%C3%89lodie",
-//!     "elodie%40example.com");
+//!   - a string with percent-encoded UTF-8 is also matched decoded (up to
+//!     three times over, for "%25C3%2589lodie"), and a match erases the whole
+//!     encoded span ("%C3%89lodie", "elodie%40example.com");
 //!   - text outside the erased spans is left byte for byte as it was;
 //! - URLs, opaque tokens, locations, e-mails, device serials, time zones,
 //!   birthdays, heights and weights are replaced with fixed values; lists of
@@ -109,6 +111,8 @@ const MIN_TOKEN_RUN: usize = 40;
 const MIN_SENSITIVE_LEN: usize = 3;
 /// Characters from which a sensitive string is erased inside longer words too.
 const MIN_SUBSTRING_LEN: usize = 4;
+/// How many times percent-encoding is decoded in a row at most.
+const MAX_PERCENT_DECODINGS: usize = 3;
 /// Length from which a word of hex digits (with a decimal digit) is an id.
 const MIN_HEX_WORD: usize = 8;
 
@@ -445,18 +449,28 @@ impl Scrubber {
         for (key, child) in map {
             let Value::String(text) = child else { continue };
             if PERSON_WORDS.contains(&key.as_str()) {
-                self.sensitive.push(fold_case(text));
-                self.sensitive
-                    .extend(text.split(|c: char| !is_word_char(c)).map(fold_case));
+                self.note_sensitive(text);
+                for word in text.split(|c: char| !is_word_char(c)) {
+                    self.note_sensitive(word);
+                }
             } else if PERSON_WHOLE.contains(&key.as_str()) {
-                self.sensitive.push(fold_case(text));
+                self.note_sensitive(text);
             }
         }
     }
 
+    /// Adds `text` to the strings to erase, unless it is shorter than
+    /// [`MIN_SENSITIVE_LEN`]. The length is counted on the text as written
+    /// (composed, so a decomposed "É" is one character and a spacing vowel
+    /// sign counts), not on its folded form, which drops marks: a three
+    /// letter Devanagari name folds to two characters but is still a name.
+    fn note_sensitive(&mut self, text: &str) {
+        if text.nfc().count() >= MIN_SENSITIVE_LEN {
+            self.sensitive.push(fold_case(text));
+        }
+    }
+
     fn finish_collecting(&mut self) {
-        self.sensitive
-            .retain(|s| s.chars().count() >= MIN_SENSITIVE_LEN);
         self.sensitive
             .sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
         self.sensitive.dedup();
@@ -988,8 +1002,10 @@ fn has_opaque_token(text: &str) -> bool {
 ///
 /// The case part matches Unicode full case folding (`CaseFolding.txt`,
 /// statuses C and F) for the scripts that have case. Dropping every
-/// `General_Category=Mark` character also drops spacing marks of some scripts,
-/// which only makes matching stricter on both sides.
+/// `General_Category=Mark` character also drops the spacing marks of some
+/// scripts (Devanagari vowel signs), which makes matching looser: words that
+/// differ only in those marks fold alike, and erasing one erases the other.
+/// Privacy wins that trade.
 fn fold_case(text: &str) -> String {
     text.chars()
         .filter(|c| !is_combining_mark(*c))
@@ -1032,15 +1048,29 @@ fn spell_out(c: char) -> [Option<char>; 2] {
 /// word of its own or glued to digits, so "ben" does not erase half of
 /// "benefits". A longer one also matches inside longer words where
 /// [`FoldedText::counts`] accepts it. A text with percent-encoded UTF-8
-/// (`%C3%89lodie`) is also matched in its decoded form, and a match there
-/// erases the whole encoded span. Each form is folded once.
+/// (`%C3%89lodie`) is also matched in its decoded form, decoded again while
+/// that changes it, up to [`MAX_PERCENT_DECODINGS`] times (`%25C3%2589lodie`),
+/// and a match there erases the whole encoded span. Each form is folded once.
 fn erase_words(text: &str, needles: &[String]) -> String {
     let mut spans = match_spans(text, needles);
-    if let Some(decoded) = PercentDecoded::new(text) {
+    let mut layers: Vec<PercentDecoded> = Vec::new();
+    while layers.len() < MAX_PERCENT_DECODINGS {
+        let source = layers.last().map_or(text, |layer| layer.text.as_str());
+        let Some(decoded) = PercentDecoded::new(source) else {
+            break;
+        };
+        layers.push(decoded);
+    }
+    for (depth, layer) in layers.iter().enumerate() {
         spans.extend(
-            match_spans(&decoded.text, needles)
+            match_spans(&layer.text, needles)
                 .into_iter()
-                .filter_map(|(from, to)| decoded.original(from, to)),
+                .filter_map(|span| {
+                    layers[..=depth]
+                        .iter()
+                        .rev()
+                        .try_fold(span, |(from, to), outer| outer.original(from, to))
+                }),
         );
     }
     spans.sort_unstable();
@@ -1776,6 +1806,47 @@ mod tests {
     }
 
     #[test]
+    fn name_length_counts_vowel_signs_and_composed_letters() {
+        let files = vec![(
+            "me.json".to_owned(),
+            json!({
+                "user": {
+                    "username": "u_x1",
+                    "name": "\u{930}\u{93e}\u{92e} \u{938}\u{940}\u{924}\u{93e}",
+                    "first_name": "Le\u{301}a"
+                },
+                "feed": [
+                    "\u{930}\u{93e}\u{92e} \u{91c}\u{940}",
+                    "Varal%20\u{930}\u{93e}\u{92e}",
+                    "%E0%A4%B0%E0%A4%BE%E0%A4%AE",
+                    "\u{938}\u{940}\u{924}\u{93e}",
+                    "Ride with L\u{e9}a"
+                ]
+            }),
+        )];
+        let output = scrub_files(files, PARAMS);
+        assert_eq!(
+            output[0].1["feed"],
+            json!([
+                "redacted \u{91c}\u{940}",
+                "Varal%20redacted",
+                "redacted",
+                "redacted",
+                "Ride with redacted"
+            ])
+        );
+    }
+
+    #[test]
+    fn repeatedly_percent_encoded_names_are_erased() {
+        let needles = vec![fold_case("\u{c9}lodie")];
+        assert_eq!(
+            erase_words("%25C3%2589lodie, %2525C3%252589lodie, x%2540y", &needles),
+            "redacted, redacted, x%2540y"
+        );
+    }
+
+    #[test]
     fn decomposed_names_are_split_into_whole_words() {
         let files = vec![(
             "me.json".to_owned(),
@@ -1954,8 +2025,8 @@ mod tests {
         for (text, names, expected) in REVIEW_PROBES {
             let mut needles: Vec<String> = names
                 .iter()
+                .filter(|name| name.nfc().count() >= 3)
                 .map(|name| fold_case(name))
-                .filter(|needle| needle.chars().count() >= 3)
                 .collect();
             needles.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
             needles.dedup();
