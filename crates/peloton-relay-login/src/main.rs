@@ -58,7 +58,7 @@ fn main() -> ExitCode {
     match run(cli.command.unwrap_or(Command::Login)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("error: {}", error.report());
+            eprintln!("error: {}", peloton_relay_login::report(&error));
             ExitCode::FAILURE
         }
     }

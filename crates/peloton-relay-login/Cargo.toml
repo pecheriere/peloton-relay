@@ -26,5 +26,8 @@ muda.workspace = true
 tao.workspace = true
 wry.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

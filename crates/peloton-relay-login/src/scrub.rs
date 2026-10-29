@@ -53,7 +53,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -64,7 +64,7 @@ use time::OffsetDateTime;
 use time::format_description::BorrowedFormatItem;
 use time::format_description::well_known::Rfc3339;
 
-use crate::capture::{prepare_dir, save};
+use crate::capture::{StoreError, prepare_dir, save};
 
 /// Timestamps between these bounds (2010-01-01 and 2033-05-18) are shifted.
 const EPOCH_RANGE: std::ops::RangeInclusive<i64> = 1_262_304_000..=2_000_000_000;
@@ -239,30 +239,105 @@ impl ScrubParams {
     }
 }
 
+/// Why `scrub` failed. Never carries file contents.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ScrubError {
+    /// The input directory does not exist or cannot be resolved.
+    #[error("bad input directory {}", .path.display())]
+    InputDir {
+        /// The directory as given.
+        path: PathBuf,
+        /// The underlying failure.
+        #[source]
+        source: std::io::Error,
+    },
+    /// The output directory cannot be resolved.
+    #[error("bad output directory {}", .path.display())]
+    OutputDir {
+        /// The directory as given.
+        path: PathBuf,
+        /// The underlying failure.
+        #[source]
+        source: std::io::Error,
+    },
+    /// Input and output are the same directory, so the raw files would be
+    /// overwritten.
+    #[error("output directory must differ from the input directory")]
+    SameDirectory,
+    /// The output directory could not be prepared or a result not written.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// The input directory could not be listed.
+    #[error("could not list {}", .path.display())]
+    List {
+        /// The input directory.
+        path: PathBuf,
+        /// The underlying failure.
+        #[source]
+        source: std::io::Error,
+    },
+    /// An input file could not be read.
+    #[error("could not read {name}")]
+    Read {
+        /// The file name.
+        name: String,
+        /// The underlying failure.
+        #[source]
+        source: std::io::Error,
+    },
+    /// An input file is not valid JSON.
+    #[error("could not parse {name}")]
+    Parse {
+        /// The file name.
+        name: String,
+        /// The underlying failure.
+        #[source]
+        source: serde_json::Error,
+    },
+    /// A scrubbed file could not be encoded.
+    #[error("could not encode {name}")]
+    Encode {
+        /// The file name.
+        name: String,
+        /// The underlying failure.
+        #[source]
+        source: serde_json::Error,
+    },
+}
+
 /// Reads every `*.json` file of `in_dir`, scrubs them together and writes
 /// the results (with scrubbed file names) to `out_dir`.
 ///
 /// # Errors
 ///
-/// Returns a message when a file cannot be read, parsed or written, or when
-/// `out_dir` is `in_dir`.
-pub fn run(in_dir: &Path, out_dir: &Path) -> Result<(), String> {
+/// Returns a [`ScrubError`] when a file cannot be read, parsed or written, or
+/// when `out_dir` is `in_dir`.
+pub fn run(in_dir: &Path, out_dir: &Path) -> Result<(), ScrubError> {
     let input = in_dir
         .canonicalize()
-        .map_err(|e| format!("bad input directory {}: {e}", in_dir.display()))?;
+        .map_err(|source| ScrubError::InputDir {
+            path: in_dir.to_path_buf(),
+            source,
+        })?;
     prepare_dir(out_dir)?;
     let output = out_dir
         .canonicalize()
-        .map_err(|e| format!("bad output directory {}: {e}", out_dir.display()))?;
+        .map_err(|source| ScrubError::OutputDir {
+            path: out_dir.to_path_buf(),
+            source,
+        })?;
     if input == output {
-        return Err("output directory must differ from the input directory".to_owned());
+        return Err(ScrubError::SameDirectory);
     }
 
+    let list_error = |source| ScrubError::List {
+        path: input.clone(),
+        source,
+    };
     let mut names = Vec::new();
-    for entry in
-        fs::read_dir(&input).map_err(|e| format!("could not list {}: {e}", input.display()))?
-    {
-        let entry = entry.map_err(|e| format!("could not list {}: {e}", input.display()))?;
+    for entry in fs::read_dir(&input).map_err(list_error)? {
+        let entry = entry.map_err(list_error)?;
         let is_file = entry.file_type().is_ok_and(|t| t.is_file());
         let path = entry.path();
         let is_json = path
@@ -280,15 +355,22 @@ pub fn run(in_dir: &Path, out_dir: &Path) -> Result<(), String> {
     let mut files = Vec::with_capacity(names.len());
     for name in names {
         let path = input.join(&name);
-        let body = fs::read(&path).map_err(|e| format!("could not read {name}: {e}"))?;
-        let value: Value =
-            serde_json::from_slice(&body).map_err(|e| format!("could not parse {name}: {e}"))?;
+        let body = fs::read(&path).map_err(|source| ScrubError::Read {
+            name: name.clone(),
+            source,
+        })?;
+        let value: Value = serde_json::from_slice(&body).map_err(|source| ScrubError::Parse {
+            name: name.clone(),
+            source,
+        })?;
         files.push((name, value));
     }
 
     for (name, value) in scrub_files(files, ScrubParams::random()) {
-        let mut body = serde_json::to_vec_pretty(&value)
-            .map_err(|e| format!("could not encode {name}: {e}"))?;
+        let mut body = serde_json::to_vec_pretty(&value).map_err(|source| ScrubError::Encode {
+            name: name.clone(),
+            source,
+        })?;
         body.push(b'\n');
         save(&output, &name, &body)?;
     }
@@ -919,7 +1001,8 @@ fn erase_words(text: &str, needles: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{erase_words, has_opaque_token, is_month_buckets, is_uuid};
+    use super::{ScrubError, erase_words, has_opaque_token, is_month_buckets, is_uuid, run};
+    use crate::report;
     use serde_json::json;
 
     #[test]
@@ -956,5 +1039,39 @@ mod tests {
         assert!(is_month_buckets(buckets.as_object().expect("object")));
         assert!(!is_month_buckets(other.as_object().expect("object")));
         assert!(!is_month_buckets(json!({}).as_object().expect("object")));
+    }
+
+    #[test]
+    fn refuses_to_scrub_a_directory_into_itself() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let error = run(dir.path(), dir.path()).expect_err("same directory");
+        assert!(matches!(error, ScrubError::SameDirectory));
+        assert_eq!(
+            report(&error),
+            "output directory must differ from the input directory"
+        );
+    }
+
+    #[test]
+    fn missing_input_directory_names_it_then_the_io_cause() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("absent");
+        let error = run(&missing, &dir.path().join("out")).expect_err("no input");
+        assert!(matches!(error, ScrubError::InputDir { .. }));
+        assert!(
+            report(&error).starts_with(&format!("bad input directory {}: ", missing.display()))
+        );
+    }
+
+    #[test]
+    fn unparseable_input_names_the_file_and_keeps_the_json_cause() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let input = dir.path().join("in");
+        std::fs::create_dir(&input).expect("input");
+        std::fs::write(input.join("a.json"), b"{").expect("file");
+        let error = run(&input, &dir.path().join("out")).expect_err("bad json");
+        assert!(matches!(error, ScrubError::Parse { .. }));
+        assert!(report(&error).starts_with("could not parse a.json: "));
+        assert!(std::error::Error::source(&error).is_some());
     }
 }
