@@ -4,6 +4,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use peloton::hostname::is_dns_name;
+use url::{Host, Url};
+
 use crate::account::{AccountName, Accounts};
 
 /// Environment variable holding the listen address.
@@ -12,6 +15,8 @@ pub const LISTEN_VAR: &str = "PELOTON_RELAY_LISTEN";
 pub const STATE_DIR_VAR: &str = "PELOTON_RELAY_STATE_DIR";
 /// Environment variable holding the comma-separated account names.
 pub const ACCOUNTS_VAR: &str = "PELOTON_RELAY_ACCOUNTS";
+/// Environment variable holding the relay's externally reachable origin.
+pub const PUBLIC_URL_VAR: &str = "PELOTON_RELAY_PUBLIC_URL";
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:8080";
 const DEFAULT_STATE_DIR: &str = "/state";
@@ -34,6 +39,11 @@ pub enum ConfigError {
         "{ACCOUNTS_VAR} must list one or more distinct account names (1 to 16 lowercase ASCII letters), comma-separated"
     )]
     Accounts,
+    /// The public URL is not an `https` origin.
+    #[error(
+        "{PUBLIC_URL_VAR} must be an https origin like https://relay.example.net (a DNS name or an IP address), without credentials, path, query or fragment"
+    )]
+    PublicUrl,
 }
 
 /// Settings shared by all commands.
@@ -43,6 +53,10 @@ pub struct Config {
     pub listen: SocketAddr,
     /// The accounts this relay serves, under the state directory.
     pub accounts: Accounts,
+    /// The origin the deployment's gateway serves the relay at, which the
+    /// admin page puts in the renew command; renewing from the page is off
+    /// when unset.
+    pub public_url: Option<Url>,
 }
 
 impl Config {
@@ -82,7 +96,19 @@ impl Config {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| ConfigError::Accounts)?;
         let accounts = Accounts::new(state_dir, names).map_err(|_| ConfigError::Accounts)?;
-        Ok(Self { listen, accounts })
+        let public_url = lookup(PUBLIC_URL_VAR)
+            .map(|value| {
+                value
+                    .into_string()
+                    .map_err(|_| ConfigError::PublicUrl)
+                    .and_then(|text| public_origin(&text))
+            })
+            .transpose()?;
+        Ok(Self {
+            listen,
+            accounts,
+            public_url,
+        })
     }
 
     /// URL of the liveness probe of a server bound to [`Self::listen`]: the
@@ -103,6 +129,33 @@ impl Config {
             }
             IpAddr::V6(ip) => format!("http://[{ip}]:{port}/healthz"),
         }
+    }
+}
+
+/// `text` as an `https` origin: a host and optional port, nothing else. The
+/// admin routes sit at the root of that origin.
+///
+/// The host must be an IP address or a DNS name of letters, digits and
+/// hyphens (after IDNA), since the admin page puts it in a command to paste
+/// into a shell.
+fn public_origin(text: &str) -> Result<Url, ConfigError> {
+    let url = Url::parse(text).map_err(|_| ConfigError::PublicUrl)?;
+    let plain_host = match url.host() {
+        Some(Host::Ipv4(_) | Host::Ipv6(_)) => true,
+        Some(Host::Domain(name)) => is_dns_name(name),
+        None => false,
+    };
+    let origin_only = url.scheme() == "https"
+        && plain_host
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none();
+    if origin_only {
+        Ok(url)
+    } else {
+        Err(ConfigError::PublicUrl)
     }
 }
 
@@ -143,6 +196,7 @@ mod tests {
     fn defaults() {
         let config = config(&[("PELOTON_RELAY_ACCOUNTS", "alice")]).unwrap();
         assert_eq!(config.listen.to_string(), "0.0.0.0:8080");
+        assert_eq!(config.public_url, None);
         assert_eq!(
             config.accounts.state_file(&alice()).path.to_str(),
             Some("/state/alice/state.json")
@@ -199,6 +253,76 @@ mod tests {
             ]),
             Err(ConfigError::StateDir)
         ));
+    }
+
+    #[test]
+    fn config_reads_an_https_public_origin() {
+        for (given, kept) in [
+            ("https://relay.example.net", "https://relay.example.net/"),
+            ("https://relay.example.net/", "https://relay.example.net/"),
+            (
+                "https://relay.example.net:8443",
+                "https://relay.example.net:8443/",
+            ),
+            ("https://192.0.2.7", "https://192.0.2.7/"),
+            ("https://[2001:db8::7]", "https://[2001:db8::7]/"),
+            ("https://Relay.Example.NET", "https://relay.example.net/"),
+            (
+                "https://xn--rly-0ma.example.net",
+                "https://xn--rly-0ma.example.net/",
+            ),
+            (
+                "https://r\u{e9}lay.example.net",
+                "https://xn--rlay-bpa.example.net/",
+            ),
+        ] {
+            let config = config(&[
+                ("PELOTON_RELAY_ACCOUNTS", "alice"),
+                ("PELOTON_RELAY_PUBLIC_URL", given),
+            ])
+            .unwrap();
+            assert_eq!(config.public_url.unwrap().as_str(), kept, "{given}");
+        }
+    }
+
+    #[test]
+    fn config_rejects_a_public_url_that_is_not_an_https_origin() {
+        for bad in [
+            "",
+            "relay.example.net",
+            "http://relay.example.net",
+            "ftp://relay.example.net",
+            "https://relay.example.net/relay",
+            "https://relay.example.net/admin/seed",
+            "https://relay.example.net/?a=1",
+            "https://relay.example.net/#top",
+            "https://user@relay.example.net",
+            "https://user:pass@relay.example.net",
+            "https://",
+            "https://a$(id).example",
+            "https://a;id.example",
+            "https://a`id`.example",
+            "https://a&b.example",
+            "https://a'b.example",
+            "https://a{b}.example",
+            "https://a*b.example",
+            "https://a!b.example",
+            "https://-relay.example.net",
+            "https://relay-.example.net",
+            "https://relay..example.net",
+            "https://relay.example.net.",
+        ] {
+            assert!(
+                matches!(
+                    config(&[
+                        ("PELOTON_RELAY_ACCOUNTS", "alice"),
+                        ("PELOTON_RELAY_PUBLIC_URL", bad),
+                    ]),
+                    Err(ConfigError::PublicUrl)
+                ),
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]

@@ -4,6 +4,7 @@ pub mod account;
 pub mod body;
 pub mod endpoints;
 pub mod graphql;
+pub mod hostname;
 pub mod ids;
 pub mod oauth;
 pub mod text;
