@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{self, IsTerminal as _};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -14,6 +15,7 @@ use peloton_relay::tokens::{BACKGROUND_REFRESH_INTERVAL, DEFAULT_REFRESH_MARGIN,
 use peloton_relay::upstream::{DEFAULT_MAX_IN_FLIGHT, Peloton};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
+use tokio::task::{self, JoinSet};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
@@ -122,11 +124,12 @@ async fn serve() -> Result<(), String> {
         .map_err(|err| format!("cannot listen on {}: {err}", config.listen))?;
     let shutdown = CancellationToken::new();
     let signal = shutdown_signal(shutdown.clone())?;
-    let mut refreshers = tokio::task::JoinSet::new();
+    let mut refreshers = AccountTasks::default();
     for tokens in &managers {
+        let account = tokens.account().clone();
         let tokens = Arc::clone(tokens);
         let shutdown = shutdown.clone();
-        refreshers.spawn(async move {
+        refreshers.spawn(account, async move {
             tokens
                 .keep_fresh(BACKGROUND_REFRESH_INTERVAL, &shutdown)
                 .await;
@@ -148,14 +151,10 @@ async fn serve() -> Result<(), String> {
     // refreshes save their rotated refresh tokens before exiting, all
     // accounts waiting concurrently.
     shutdown.cancel();
-    while let Some(joined) = refreshers.join_next().await {
-        if joined.is_err() {
-            tracing::error!("background refresh task failed");
-        }
-    }
-    let mut drains = tokio::task::JoinSet::new();
+    refreshers.join_all("background refresh task failed").await;
+    let mut drains = AccountTasks::default();
     for tokens in managers {
-        drains.spawn(async move {
+        drains.spawn(tokens.account().clone(), async move {
             if !tokens.drain(DRAIN_TIMEOUT).await {
                 tracing::warn!(
                     event = "token_work_abandoned",
@@ -165,14 +164,44 @@ async fn serve() -> Result<(), String> {
             }
         });
     }
-    while let Some(joined) = drains.join_next().await {
-        if joined.is_err() {
-            tracing::error!("token drain task failed");
-        }
-    }
+    drains.join_all("token drain task failed").await;
     served.map_err(|err| format!("server failed: {err}"))?;
     tracing::info!("shut down");
     Ok(())
+}
+
+/// Tasks that each work for one account, so that a failed one can be logged
+/// with the account it served.
+#[derive(Default)]
+struct AccountTasks {
+    tasks: JoinSet<()>,
+    accounts: HashMap<task::Id, AccountName>,
+}
+
+impl AccountTasks {
+    fn spawn(&mut self, account: AccountName, work: impl Future<Output = ()> + Send + 'static) {
+        let id = self.tasks.spawn(work).id();
+        self.accounts.insert(id, account);
+    }
+
+    /// Waits for every task to end, logging `failure` with the account of
+    /// each one that panicked or was cancelled.
+    async fn join_all(mut self, failure: &'static str) {
+        while let Some(joined) = self.tasks.join_next_with_id().await {
+            match joined {
+                Ok((id, ())) => {
+                    self.accounts.remove(&id);
+                }
+                Err(err) => {
+                    let account = self.accounts.remove(&err.id());
+                    tracing::error!(
+                        account = account.as_ref().map(tracing::field::display),
+                        "{failure}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Refuses to serve while the state file of the single-account releases is
@@ -269,5 +298,61 @@ async fn healthcheck() -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("unhealthy: status {}", response.status().as_u16()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::sync::{Arc, Mutex};
+
+    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::fmt::MakeWriter;
+
+    use super::AccountTasks;
+
+    #[derive(Clone, Default)]
+    struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+    impl io::Write for Buffer {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl MakeWriter<'_> for Buffer {
+        type Writer = Self;
+
+        fn make_writer(&self) -> Self {
+            self.clone()
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_account_task_is_logged_with_its_account() {
+        let buffer = Buffer::default();
+        let subscriber = peloton_relay::logging::subscriber(buffer.clone(), EnvFilter::new("info"));
+        let _default = tracing::subscriber::set_default(subscriber);
+        let mut tasks = AccountTasks::default();
+        tasks.spawn("alice".parse().unwrap(), async {});
+        tasks.spawn("bob".parse().unwrap(), async {
+            panic!("the task of bob fails");
+        });
+
+        tasks.join_all("test task failed").await;
+
+        let output = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        let lines: Vec<serde_json::Value> = output
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 1, "{output}");
+        assert_eq!(lines[0]["message"], "test task failed");
+        assert_eq!(lines[0]["account"], "bob");
     }
 }
