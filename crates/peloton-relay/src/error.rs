@@ -146,6 +146,7 @@ impl From<UpstreamError> for ApiError {
             UpstreamError::CannotSchedule { message } => Self::CannotSchedule { message },
             UpstreamError::Upstream { .. }
             | UpstreamError::Decode { .. }
+            | UpstreamError::BodyTooLarge
             | UpstreamError::Transport
             | UpstreamError::GraphQl => {
                 tracing::warn!(%error, "upstream request failed");

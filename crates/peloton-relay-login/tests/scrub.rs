@@ -294,7 +294,10 @@ fn scrub_maps_ids_consistently_across_files() {
     let workout = &find(&output, &workout_file)[0].1;
     assert_eq!(workout["id"], workout_id);
     let ride_id = workout["ride"]["id"].as_str().expect("ride id");
-    assert!(find(&output, &format!("performance_graph-{workout_id}.json")).len() == 1);
+    assert_eq!(
+        find(&output, &format!("performance_graph-{workout_id}.json")).len(),
+        1
+    );
     let details = &find(&output, &format!("ride_details-{ride_id}.json"))[0].1;
     assert_eq!(details["ride"]["id"], ride_id);
     assert_eq!(

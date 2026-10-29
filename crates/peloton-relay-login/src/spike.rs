@@ -29,8 +29,9 @@ use serde_json::{Value, json};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime, UtcOffset};
 
-use crate::capture::{find_worktree, guard_dir, prepare_dir, resolve_dir, save};
-use crate::session::{GraphqlReply, Session};
+use crate::capture::{StoreError, find_worktree, guard_dir, prepare_dir, resolve_dir, save};
+use crate::report;
+use crate::session::{GraphqlReply, Session, SessionError};
 
 /// How far ahead the spike schedules, so it cannot collide with real plans.
 const SCHEDULE_LEAD: Duration = Duration::days(13);
@@ -39,31 +40,217 @@ const SCHEDULE_WINDOW: Duration = Duration::days(14);
 /// Longest GraphQL error message echoed to the terminal.
 const MAX_MESSAGE: usize = 160;
 
-/// Why a GraphQL call did not yield data.
-#[derive(Debug, PartialEq, Eq)]
+/// Why `spike` failed as a whole. Per-step failures are reported as they
+/// happen and only counted here.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum SpikeError {
+    /// The capture directory was refused or a file could not be saved.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// Login failed.
+    #[error(transparent)]
+    Session(#[from] SessionError),
+    /// The schedule dates could not be computed.
+    #[error(transparent)]
+    Date(#[from] DateError),
+    /// The very first call showed the token is refused.
+    #[error("GraphQL gateway rejected the token; stopping before any other call")]
+    GatewayRejected,
+    /// At least one step failed; each was reported when it happened.
+    #[error("some spike steps failed; see above")]
+    StepsFailed,
+}
+
+/// Date arithmetic or formatting failed.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum DateError {
+    /// The date is out of the supported range.
+    #[error("date overflow")]
+    Overflow,
+    /// A time component was out of range.
+    #[error("date")]
+    Component(#[from] time::error::ComponentRange),
+    /// The date could not be formatted.
+    #[error("date format")]
+    Format(#[from] time::error::Format),
+}
+
+/// Why a GraphQL call did not yield data. Summarised without the body.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum CallFailure {
     /// The gateway refused the token (HTTP 401/403 or an auth error).
+    #[error("the gateway rejected the token")]
     Auth,
-    /// Anything else, summarised without the body.
-    Other(String),
+    /// The answer was not JSON.
+    #[error("status {status}, body is not JSON")]
+    NotJson {
+        /// The HTTP status.
+        status: reqwest::StatusCode,
+    },
+    /// The answer carried GraphQL errors.
+    #[error("status {status}, GraphQL errors: {summary}")]
+    Graphql {
+        /// The HTTP status.
+        status: reqwest::StatusCode,
+        /// Error codes and truncated messages, joined with " | ".
+        summary: String,
+    },
+    /// The answer was a failure status without GraphQL errors.
+    #[error("status {status}")]
+    Status {
+        /// The HTTP status.
+        status: reqwest::StatusCode,
+    },
+    /// The answer has no (or a null) `data.<field>`.
+    #[error("no data.{field}")]
+    NoData {
+        /// The expected root field.
+        field: String,
+    },
+}
+
+/// Peloton answered, but not in a shape (or with a content) the spike accepts.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum AnswerError {
+    /// The schedule list answered with an error variant.
+    #[error("schedule list answered {typename}: {message}")]
+    ScheduleListVariant {
+        /// The union variant, or "no __typename".
+        typename: String,
+        /// Its message.
+        message: String,
+    },
+    /// `yourScheduleItems` is missing or not a list.
+    #[error("yourScheduleItems is not a list")]
+    ScheduleItemsNotList,
+    /// A `ScheduledClass` carried no id.
+    #[error("ScheduledClass without an id")]
+    ScheduledClassWithoutId,
+    /// A schedule mutation answered with an error variant.
+    #[error("{typename}: {code}: {message}")]
+    ScheduleRejected {
+        /// The union variant, or "unknown result".
+        typename: String,
+        /// Peloton's error code.
+        code: String,
+        /// Its (truncated) message.
+        message: String,
+    },
+    /// The scheduled-class id does not decode.
+    #[error("Peloton's scheduled-class id does not decode as an event id")]
+    EventUndecodable,
+    /// The scheduled-class id names another ride.
+    #[error("the scheduled class names a different ride")]
+    EventWrongRide,
+    /// The scheduled-class id names another start time.
+    #[error("the scheduled class has a different start time")]
+    EventWrongStart,
+    /// The scheduled class read back has another id.
+    #[error("the scheduled class read back has a different id")]
+    ReadBackIdDiffers,
+    /// The Stack response has no `numClasses`.
+    #[error("Stack response without numClasses")]
+    StackWithoutCount,
+    /// The Stack response has no list although `numClasses` is not zero.
+    #[error("Stack response without userStack.stackedClassList")]
+    StackWithoutList,
+    /// `stackedClassList` is not a list.
+    #[error("stackedClassList is not a list")]
+    StackListNotList,
+    /// `numClasses` disagrees with the list.
+    #[error("numClasses is {count} but the list holds {entries} entries")]
+    StackCountMismatch {
+        /// The reported count.
+        count: i64,
+        /// The entries actually listed.
+        entries: usize,
+    },
+    /// A Stack entry has no `playOrder`.
+    #[error("Stack entry {index} has no playOrder")]
+    StackEntryWithoutOrder {
+        /// The zero-based entry index.
+        index: usize,
+    },
+    /// A Stack entry has no `pelotonClass`.
+    #[error("Stack entry {index} has no pelotonClass")]
+    StackEntryWithoutClass {
+        /// The zero-based entry index.
+        index: usize,
+    },
+    /// A Stack entry has no `classId`.
+    #[error("Stack entry {index} has no classId")]
+    StackEntryWithoutClassId {
+        /// The zero-based entry index.
+        index: usize,
+    },
+    /// A Stack entry's `classId` is neither a ride id nor a class id.
+    #[error("Stack entry {index}: classId is neither a ride id nor a class id")]
+    StackEntryBadClassId {
+        /// The zero-based entry index.
+        index: usize,
+    },
+    /// A saved Stack entry has no `joinToken`.
+    #[error("Stack entry {entry} ({ride}): Peloton returned no joinToken")]
+    RestoreWithoutToken {
+        /// The one-based entry number.
+        entry: usize,
+        /// The entry's ride.
+        ride: PelotonId,
+    },
+    /// A saved Stack entry's `joinToken` is not for its ride.
+    #[error(
+        "Stack entry {entry} ({ride}): Peloton's joinToken is not an on-demand class id for this ride"
+    )]
+    RestoreForeignToken {
+        /// The one-based entry number.
+        entry: usize,
+        /// The entry's ride.
+        ride: PelotonId,
+    },
+    /// The Stack read back differs from the saved one.
+    #[error("the Stack differs from the saved one")]
+    StackDiffers,
+    /// The Stack after the add is not the saved Stack plus the class.
+    #[error("the Stack after the add is not the saved Stack plus the class")]
+    StackAddMismatch,
+}
+
+/// Why one spike step failed.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum StepError {
+    /// The gateway did not yield data.
+    #[error(transparent)]
+    Call(#[from] CallFailure),
+    /// A request could not be made.
+    #[error(transparent)]
+    Session(#[from] SessionError),
+    /// The raw answer could not be saved.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// Peloton's answer was not acceptable.
+    #[error(transparent)]
+    Answer(#[from] AnswerError),
 }
 
 /// Extracts `data.<field>` from a gateway reply, or says why it is missing.
 ///
 /// # Errors
 ///
-/// [`CallFailure::Auth`] when the token was refused, otherwise
-/// [`CallFailure::Other`] with the status and the GraphQL error codes and
-/// (truncated) messages.
+/// [`CallFailure::Auth`] when the token was refused, otherwise another
+/// [`CallFailure`] with the status and the GraphQL error codes and (truncated)
+/// messages.
 pub fn root_field(reply: &GraphqlReply, field: &str) -> Result<Value, CallFailure> {
     let status = reply.status;
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
         return Err(CallFailure::Auth);
     }
     let Ok(body) = serde_json::from_slice::<Value>(&reply.body) else {
-        return Err(CallFailure::Other(format!(
-            "status {status}, body is not JSON"
-        )));
+        return Err(CallFailure::NotJson { status });
     };
     let errors = body
         .get("errors")
@@ -74,16 +261,18 @@ pub fn root_field(reply: &GraphqlReply, field: &str) -> Result<Value, CallFailur
     }
     if !errors.is_empty() {
         let summary: Vec<String> = errors.iter().map(describe_error).collect();
-        return Err(CallFailure::Other(format!(
-            "status {status}, GraphQL errors: {}",
-            summary.join(" | ")
-        )));
+        return Err(CallFailure::Graphql {
+            status,
+            summary: summary.join(" | "),
+        });
     }
     if !status.is_success() {
-        return Err(CallFailure::Other(format!("status {status}")));
+        return Err(CallFailure::Status { status });
     }
     match body.pointer(&format!("/data/{field}")) {
-        Some(Value::Null) | None => Err(CallFailure::Other(format!("no data.{field}"))),
+        Some(Value::Null) | None => Err(CallFailure::NoData {
+            field: field.to_owned(),
+        }),
         Some(value) => Ok(value.clone()),
     }
 }
@@ -130,29 +319,25 @@ fn describe_error(error: &Value) -> String {
 ///
 /// # Errors
 ///
-/// Returns a message when the date arithmetic overflows.
-pub fn spike_start(now: OffsetDateTime) -> Result<OffsetDateTime, String> {
+/// Returns [`DateError`] when the date arithmetic overflows.
+pub fn spike_start(now: OffsetDateTime) -> Result<OffsetDateTime, DateError> {
     let earliest = now
         .to_offset(UtcOffset::UTC)
         .checked_add(SCHEDULE_LEAD)
-        .ok_or("date overflow")?;
+        .ok_or(DateError::Overflow)?;
     let hour = earliest
         .replace_minute(0)
         .and_then(|t| t.replace_second(0))
-        .and_then(|t| t.replace_nanosecond(0))
-        .map_err(|e| format!("date: {e}"))?;
+        .and_then(|t| t.replace_nanosecond(0))?;
     if hour == earliest {
         Ok(hour)
     } else {
-        hour.checked_add(Duration::HOUR)
-            .ok_or_else(|| "date overflow".to_owned())
+        hour.checked_add(Duration::HOUR).ok_or(DateError::Overflow)
     }
 }
 
-fn iso(t: OffsetDateTime) -> Result<String, String> {
-    t.to_offset(UtcOffset::UTC)
-        .format(&Rfc3339)
-        .map_err(|e| format!("date format: {e}"))
+fn iso(t: OffsetDateTime) -> Result<String, DateError> {
+    Ok(t.to_offset(UtcOffset::UTC).format(&Rfc3339)?)
 }
 
 /// Every scheduled-class id found anywhere under `list`, whatever its shape.
@@ -185,19 +370,19 @@ pub fn schedule_ids(list: &Value) -> BTreeSet<String> {
 ///
 /// Returns the variant's type and message when Peloton answered with an
 /// error variant instead of a list, so it never reads as an empty schedule.
-pub fn listed_ids(list: &Value) -> Result<BTreeSet<String>, String> {
+pub fn listed_ids(list: &Value) -> Result<BTreeSet<String>, AnswerError> {
     let typename = list.get("__typename").and_then(Value::as_str);
     if typename != Some("YourScheduleItemList") {
         let message = list.get("message").and_then(Value::as_str).unwrap_or("");
-        return Err(format!(
-            "schedule list answered {}: {message}",
-            typename.unwrap_or("no __typename")
-        ));
+        return Err(AnswerError::ScheduleListVariant {
+            typename: typename.unwrap_or("no __typename").to_owned(),
+            message: message.to_owned(),
+        });
     }
     let items = list
         .get("yourScheduleItems")
         .filter(|items| items.is_array())
-        .ok_or("yourScheduleItems is not a list")?;
+        .ok_or(AnswerError::ScheduleItemsNotList)?;
     Ok(schedule_ids(items))
 }
 
@@ -208,14 +393,14 @@ pub fn listed_ids(list: &Value) -> Result<BTreeSet<String>, String> {
 /// # Errors
 ///
 /// Returns Peloton's error code and message, or a shape problem.
-pub fn scheduled_result(value: &Value) -> Result<String, String> {
+pub fn scheduled_result(value: &Value) -> Result<String, AnswerError> {
     let typename = value.get("__typename").and_then(Value::as_str);
     if typename == Some("ScheduledClass") {
         return value
             .get("id")
             .and_then(Value::as_str)
             .map(str::to_owned)
-            .ok_or_else(|| "ScheduledClass without an id".to_owned());
+            .ok_or(AnswerError::ScheduledClassWithoutId);
     }
     let code = value.get("code").and_then(Value::as_str).unwrap_or("?");
     let message: String = value
@@ -225,10 +410,11 @@ pub fn scheduled_result(value: &Value) -> Result<String, String> {
         .chars()
         .take(MAX_MESSAGE)
         .collect();
-    Err(format!(
-        "{}: {code}: {message}",
-        typename.unwrap_or("unknown result")
-    ))
+    Err(AnswerError::ScheduleRejected {
+        typename: typename.unwrap_or("unknown result").to_owned(),
+        code: code.to_owned(),
+        message,
+    })
 }
 
 /// Checks that the raw scheduled-class id `raw` decodes to `ride` at `start`.
@@ -236,15 +422,13 @@ pub fn scheduled_result(value: &Value) -> Result<String, String> {
 /// # Errors
 ///
 /// Says whether the id does not decode or names another ride or time.
-pub fn check_event(raw: &str, ride: &PelotonId, start: OffsetDateTime) -> Result<(), String> {
-    let id: ScheduledClassId = raw
-        .parse()
-        .map_err(|_| "Peloton's scheduled-class id does not decode as an event id".to_owned())?;
+pub fn check_event(raw: &str, ride: &PelotonId, start: OffsetDateTime) -> Result<(), AnswerError> {
+    let id: ScheduledClassId = raw.parse().map_err(|_| AnswerError::EventUndecodable)?;
     if id.ride_id() != ride {
-        return Err("the scheduled class names a different ride".to_owned());
+        return Err(AnswerError::EventWrongRide);
     }
     if id.scheduled_start_time() != start {
-        return Err("the scheduled class has a different start time".to_owned());
+        return Err(AnswerError::EventWrongStart);
     }
     Ok(())
 }
@@ -282,38 +466,38 @@ pub struct StackItem {
 /// Returns a message when the shape is unexpected, when `numClasses` is
 /// missing or disagrees with the list, or when an entry lacks a `playOrder` or a class
 /// id that can be turned into a ride id (nothing is ever silently dropped).
-pub fn stack_items(stack: &Value) -> Result<Vec<StackItem>, String> {
+pub fn stack_items(stack: &Value) -> Result<Vec<StackItem>, AnswerError> {
     let count = stack
         .get("numClasses")
         .and_then(Value::as_i64)
-        .ok_or("Stack response without numClasses")?;
+        .ok_or(AnswerError::StackWithoutCount)?;
     let Some(list) = stack.pointer("/userStack/stackedClassList") else {
         return if count == 0 {
             Ok(Vec::new())
         } else {
-            Err("Stack response without userStack.stackedClassList".to_owned())
+            Err(AnswerError::StackWithoutList)
         };
     };
-    let list = list.as_array().ok_or("stackedClassList is not a list")?;
+    let list = list.as_array().ok_or(AnswerError::StackListNotList)?;
     if usize::try_from(count).ok() != Some(list.len()) {
-        return Err(format!(
-            "numClasses is {count} but the list holds {} entries",
-            list.len()
-        ));
+        return Err(AnswerError::StackCountMismatch {
+            count,
+            entries: list.len(),
+        });
     }
     let mut items = Vec::with_capacity(list.len());
     for (index, entry) in list.iter().enumerate() {
         let order = entry
             .get("playOrder")
             .and_then(Value::as_i64)
-            .ok_or_else(|| format!("Stack entry {index} has no playOrder"))?;
+            .ok_or(AnswerError::StackEntryWithoutOrder { index })?;
         let class = entry
             .get("pelotonClass")
-            .ok_or_else(|| format!("Stack entry {index} has no pelotonClass"))?;
+            .ok_or(AnswerError::StackEntryWithoutClass { index })?;
         let class_id = class
             .get("classId")
             .and_then(Value::as_str)
-            .ok_or_else(|| format!("Stack entry {index} has no classId"))?;
+            .ok_or(AnswerError::StackEntryWithoutClassId { index })?;
         let ride = class_id
             .parse::<PelotonId>()
             .or_else(|_| {
@@ -321,9 +505,7 @@ pub fn stack_items(stack: &Value) -> Result<Vec<StackItem>, String> {
                     .parse::<OnDemandClassId>()
                     .map(|c| c.ride_id().clone())
             })
-            .map_err(|_| {
-                format!("Stack entry {index}: classId is neither a ride id nor a class id")
-            })?;
+            .map_err(|_| AnswerError::StackEntryBadClassId { index })?;
         items.push((
             order,
             StackItem {
@@ -361,28 +543,27 @@ pub struct Restore {
 /// Refuses (naming the entry) when a `joinToken` is missing or is not an
 /// on-demand class id for that entry's ride, so a restore never sends an id
 /// Peloton did not issue for that class.
-pub fn restore_ids(saved: &[StackItem]) -> Result<Restore, String> {
+pub fn restore_ids(saved: &[StackItem]) -> Result<Restore, AnswerError> {
     let mut restore = Restore {
         ids: Vec::with_capacity(saved.len()),
         encoding_mismatches: Vec::new(),
     };
     for (index, item) in saved.iter().enumerate() {
-        let token = item.join_token.as_deref().ok_or_else(|| {
-            format!(
-                "Stack entry {} ({}): Peloton returned no joinToken",
-                index + 1,
-                item.ride
-            )
-        })?;
+        let token = item
+            .join_token
+            .as_deref()
+            .ok_or_else(|| AnswerError::RestoreWithoutToken {
+                entry: index + 1,
+                ride: item.ride.clone(),
+            })?;
         let same_ride = token
             .parse::<OnDemandClassId>()
             .is_ok_and(|t| t.ride_id() == &item.ride);
         if !same_ride {
-            return Err(format!(
-                "Stack entry {} ({}): Peloton's joinToken is not an on-demand class id for this ride",
-                index + 1,
-                item.ride
-            ));
+            return Err(AnswerError::RestoreForeignToken {
+                entry: index + 1,
+                ride: item.ride.clone(),
+            });
         }
         if token != OnDemandClassId::from_ride(&item.ride).as_str() {
             restore
@@ -437,14 +618,18 @@ impl Steps {
         self.entries.push((step.to_owned(), status, detail));
     }
 
-    fn result(&mut self, step: &str, result: Result<String, String>) -> bool {
+    fn result<E: std::error::Error + 'static>(
+        &mut self,
+        step: &str,
+        result: Result<String, E>,
+    ) -> bool {
         match result {
             Ok(detail) => {
                 self.record(step, Status::Pass, detail);
                 true
             }
-            Err(detail) => {
-                self.record(step, Status::Fail, detail);
+            Err(error) => {
+                self.record(step, Status::Fail, report(&error));
                 false
             }
         }
@@ -481,32 +666,16 @@ impl Spike<'_> {
         op: &Op,
         variables: &Value,
         file: &str,
-    ) -> Result<Value, CallFailure> {
+    ) -> Result<Value, StepError> {
         self.session.pause();
         let reply = self
             .session
-            .graphql(self.access, op.name, op.kind, op.document, variables)
-            .map_err(CallFailure::Other)?;
+            .graphql(self.access, op.name, op.kind, op.document, variables)?;
         let result = root_field(&reply, op.field);
         if let Err(e) = save(self.dir, file, &reply.body) {
-            steps.record(&format!("save {file}"), Status::Fail, e);
+            steps.record(&format!("save {file}"), Status::Fail, report(&e));
         }
-        result
-    }
-
-    /// Like [`Spike::call`], with failures as plain messages.
-    fn call_msg(
-        &self,
-        steps: &mut Steps,
-        op: &Op,
-        variables: &Value,
-        file: &str,
-    ) -> Result<Value, String> {
-        self.call(steps, op, variables, file)
-            .map_err(|failure| match failure {
-                CallFailure::Auth => "the gateway rejected the token".to_owned(),
-                CallFailure::Other(message) => message,
-            })
+        Ok(result?)
     }
 
     fn rest(&self, steps: &mut Steps, step: &str, path_and_query: &str, file: &str) {
@@ -514,7 +683,12 @@ impl Spike<'_> {
         let result = self
             .session
             .get(self.access, path_and_query)
-            .and_then(|body| save(self.dir, file, &body).map(|()| format!("saved {file}")));
+            .map_err(StepError::from)
+            .and_then(|body| {
+                save(self.dir, file, &body)
+                    .map(|()| format!("saved {file}"))
+                    .map_err(StepError::from)
+            });
         steps.result(step, result);
     }
 
@@ -523,19 +697,19 @@ impl Spike<'_> {
         steps: &mut Steps,
         window: &Window,
         file: &str,
-    ) -> Result<BTreeSet<String>, String> {
-        self.call_msg(
+    ) -> Result<BTreeSet<String>, StepError> {
+        let list = self.call(
             steps,
             &LIST,
             &json!({ "startTime": window.start, "endTime": window.end }),
             file,
-        )
-        .and_then(|list| listed_ids(&list))
+        )?;
+        Ok(listed_ids(&list)?)
     }
 
-    fn view_stack(&self, steps: &mut Steps, file: &str) -> Result<Vec<StackItem>, String> {
-        let stack = self.call_msg(steps, &VIEW, &json!({}), file)?;
-        stack_items(&stack)
+    fn view_stack(&self, steps: &mut Steps, file: &str) -> Result<Vec<StackItem>, StepError> {
+        let stack = self.call(steps, &VIEW, &json!({}), file)?;
+        Ok(stack_items(&stack)?)
     }
 }
 
@@ -543,9 +717,9 @@ impl Spike<'_> {
 ///
 /// # Errors
 ///
-/// Returns a message when setup fails, when the gateway rejects the token,
-/// or when any step failed.
-pub fn run(session: &Session, dir: &Path, class: &PelotonId) -> Result<(), String> {
+/// Returns a [`SpikeError`] when setup fails, when the gateway rejects the
+/// token, or when any step failed.
+pub fn run(session: &Session, dir: &Path, class: &PelotonId) -> Result<(), SpikeError> {
     let dir = resolve_dir(dir)?;
     guard_dir(&dir, find_worktree(&dir).as_deref())?;
     prepare_dir(&dir)?;
@@ -589,14 +763,14 @@ pub fn run(session: &Session, dir: &Path, class: &PelotonId) -> Result<(), Strin
 
     steps.print_summary();
     if steps.any_failed() {
-        Err("some spike steps failed; see above".to_owned())
+        Err(SpikeError::StepsFailed)
     } else {
         Ok(())
     }
 }
 
 /// Step 1. Returns whether Peloton says the class is in the Stack, if known.
-fn check_class(spike: &Spike<'_>, steps: &mut Steps) -> Result<Option<bool>, String> {
+fn check_class(spike: &Spike<'_>, steps: &mut Steps) -> Result<Option<bool>, SpikeError> {
     let step = "check class in Stack (token + id encoding)";
     match spike.call(
         steps,
@@ -613,12 +787,12 @@ fn check_class(spike: &Spike<'_>, steps: &mut Steps) -> Result<Option<bool>, Str
             steps.record(step, Status::Pass, detail);
             Ok(answer)
         }
-        Err(CallFailure::Auth) => {
+        Err(StepError::Call(CallFailure::Auth)) => {
             steps.record(step, Status::Fail, "GraphQL gateway rejected the token");
-            Err("GraphQL gateway rejected the token; stopping before any other call".to_owned())
+            Err(SpikeError::GatewayRejected)
         }
-        Err(CallFailure::Other(message)) => {
-            steps.record(step, Status::Fail, message);
+        Err(error) => {
+            steps.record(step, Status::Fail, report(&error));
             Ok(None)
         }
     }
@@ -644,7 +818,7 @@ impl Plan<'_> {
 }
 
 /// Step 3.
-fn schedule_round_trip(spike: &Spike<'_>, steps: &mut Steps) -> Result<(), String> {
+fn schedule_round_trip(spike: &Spike<'_>, steps: &mut Steps) -> Result<(), DateError> {
     let now = OffsetDateTime::now_utc();
     let window = Window {
         start: iso(now)?,
@@ -660,7 +834,7 @@ fn schedule_round_trip(spike: &Spike<'_>, steps: &mut Steps) -> Result<(), Strin
     let before = match spike.list_schedule(steps, &window, "schedule_before.json") {
         Ok(before) => before,
         Err(e) => {
-            steps.record("schedule list (before)", Status::Fail, e);
+            steps.record("schedule list (before)", Status::Fail, report(&e));
             steps.record(
                 "schedule writes",
                 Status::Skip,
@@ -704,7 +878,7 @@ fn schedule_round_trip(spike: &Spike<'_>, steps: &mut Steps) -> Result<(), Strin
         }
         Err(e) => {
             // An add was always attempted by now, and its reply may have been lost.
-            steps.record("schedule list (after)", Status::Fail, e);
+            steps.record("schedule list (after)", Status::Fail, report(&e));
             eprintln!();
             eprintln!(
                 "!!! Could not re-read the schedule. Check it by hand for {}",
@@ -735,20 +909,20 @@ fn schedule_writes(
     window: &Window,
     plan: &Plan<'_>,
     before: &BTreeSet<String>,
-) -> Result<WriteOutcome, String> {
+) -> Result<WriteOutcome, DateError> {
     let start_iso = iso(plan.start)?;
     let added = spike
-        .call_msg(
+        .call(
             steps,
             &ADD,
             &json!({ "id": spike.class.as_str(), "startTime": start_iso }),
             "schedule_add.json",
         )
-        .and_then(|v| scheduled_result(&v));
+        .and_then(|v| Ok(scheduled_result(&v)?));
     let first = match added {
         Ok(first) => first,
         Err(e) => {
-            steps.record("schedule add", Status::Fail, e);
+            steps.record("schedule add", Status::Fail, report(&e));
             steps.record(
                 "schedule read, move and remove",
                 Status::Skip,
@@ -789,13 +963,13 @@ fn schedule_writes(
             false
         }
         Err(e) => {
-            steps.record("schedule list (with spike item)", Status::Fail, e);
+            steps.record("schedule list (with spike item)", Status::Fail, report(&e));
             false
         }
     };
 
     let read = spike
-        .call_msg(
+        .call(
             steps,
             &READ,
             &json!({ "id": first }),
@@ -805,7 +979,7 @@ fn schedule_writes(
             if v.get("id").and_then(Value::as_str) == Some(first.as_str()) {
                 Ok("read back the scheduled class".to_owned())
             } else {
-                Err("the scheduled class read back has a different id".to_owned())
+                Err(AnswerError::ReadBackIdDiffers.into())
             }
         });
     steps.result("schedule read", read);
@@ -813,13 +987,13 @@ fn schedule_writes(
     let current = schedule_move(spike, steps, &first, plan)?;
 
     let removed = spike
-        .call_msg(
+        .call(
             steps,
             &REMOVE,
             &json!({ "id": current }),
             "schedule_remove.json",
         )
-        .and_then(|v| scheduled_result(&v).map(|_| "removed".to_owned()));
+        .and_then(|v| Ok(scheduled_result(&v).map(|_| "removed".to_owned())?));
     let left_over = removed.is_err().then_some(current);
     steps.result("schedule remove", removed);
     Ok(WriteOutcome {
@@ -835,15 +1009,15 @@ fn schedule_move(
     steps: &mut Steps,
     first: &str,
     plan: &Plan<'_>,
-) -> Result<String, String> {
+) -> Result<String, DateError> {
     let moved = spike
-        .call_msg(
+        .call(
             steps,
             &MOVE,
             &json!({ "id": first, "startTime": iso(plan.moved)? }),
             "schedule_reschedule.json",
         )
-        .and_then(|v| scheduled_result(&v));
+        .and_then(|v| Ok(scheduled_result(&v)?));
     match moved {
         Ok(new_id) => {
             let same = if new_id == first {
@@ -863,7 +1037,7 @@ fn schedule_move(
             Ok(new_id)
         }
         Err(e) => {
-            steps.record("schedule move (+1 h)", Status::Fail, e);
+            steps.record("schedule move (+1 h)", Status::Fail, report(&e));
             Ok(first.to_owned())
         }
     }
@@ -883,7 +1057,7 @@ fn stack_round_trip(spike: &Spike<'_>, steps: &mut Steps, in_stack: Option<bool>
     let saved = match spike.view_stack(steps, "stack_before.json") {
         Ok(saved) => saved,
         Err(e) => {
-            steps.record("Stack read (before)", Status::Fail, e);
+            steps.record("Stack read (before)", Status::Fail, report(&e));
             steps.record(
                 "Stack writes",
                 Status::Skip,
@@ -909,7 +1083,7 @@ fn stack_round_trip(spike: &Spike<'_>, steps: &mut Steps, in_stack: Option<bool>
     let restore = match restore_ids(&saved) {
         Ok(restore) => restore,
         Err(e) => {
-            steps.record("Stack restore ids", Status::Fail, e);
+            steps.record("Stack restore ids", Status::Fail, report(&e));
             steps.record(
                 "Stack writes",
                 Status::Skip,
@@ -953,7 +1127,7 @@ fn stack_round_trip(spike: &Spike<'_>, steps: &mut Steps, in_stack: Option<bool>
     };
 
     let modified = spike
-        .call_msg(
+        .call(
             steps,
             &MODIFY,
             &json!({ "input": { "pelotonClassIdList": restore.ids } }),
@@ -972,7 +1146,7 @@ fn stack_round_trip(spike: &Spike<'_>, steps: &mut Steps, in_stack: Option<bool>
             {
                 Ok("the Stack matches the saved order".to_owned())
             } else {
-                Err("the Stack differs from the saved one".to_owned())
+                Err(AnswerError::StackDiffers.into())
             }
         });
     ok &= steps.result("Stack read (after)", verified);
@@ -986,18 +1160,18 @@ fn stack_round_trip(spike: &Spike<'_>, steps: &mut Steps, in_stack: Option<bool>
 fn stack_add(spike: &Spike<'_>, steps: &mut Steps, saved_len: usize) -> bool {
     let ride = spike.class.ride_id();
     let added = spike
-        .call_msg(
+        .call(
             steps,
             &STACK_ADD,
             &json!({ "input": { "pelotonClassId": spike.class.as_str() } }),
             "stack_add.json",
         )
-        .and_then(|v| stack_items(&v))
+        .and_then(|v| Ok(stack_items(&v)?))
         .and_then(|items| {
             if items.last().map(|i| &i.ride) == Some(ride) && items.len() == saved_len + 1 {
                 Ok("the class was appended".to_owned())
             } else {
-                Err("the Stack after the add is not the saved Stack plus the class".to_owned())
+                Err(AnswerError::StackAddMismatch.into())
             }
         });
     steps.result("Stack add", added)
@@ -1020,9 +1194,11 @@ mod tests {
     use time::macros::datetime;
 
     use super::{
-        CallFailure, Restore, StackItem, check_event, json_type, listed_ids, newly_listed,
-        restore_ids, root_field, schedule_ids, scheduled_result, spike_start, stack_items,
+        AnswerError, CallFailure, Restore, SpikeError, StackItem, check_event, json_type,
+        listed_ids, newly_listed, restore_ids, root_field, schedule_ids, scheduled_result,
+        spike_start, stack_items,
     };
+    use crate::report;
     use crate::session::GraphqlReply;
     use peloton::ids::{OnDemandClassId, PelotonId};
 
@@ -1074,46 +1250,60 @@ mod tests {
     #[test]
     fn root_field_summarises_other_errors() {
         let invalid = json!({"errors": [{"message": "Cannot query field \"y\" on type \"Q\".", "extensions": {"code": "GRAPHQL_VALIDATION_FAILED"}}]});
-        let Err(CallFailure::Other(message)) = root_field(&reply(400, &invalid), "x") else {
-            panic!("expected a failure");
-        };
-        assert!(message.contains("GRAPHQL_VALIDATION_FAILED: Cannot query field"));
-        assert!(matches!(
+        let error = root_field(&reply(400, &invalid), "x").expect_err("a failure");
+        assert!(matches!(error, CallFailure::Graphql { .. }));
+        assert!(
+            report(&error).contains("GRAPHQL_VALIDATION_FAILED: Cannot query field"),
+            "{error}"
+        );
+        assert_eq!(
             root_field(&reply(200, &json!({"data": {"x": null}})), "x"),
-            Err(CallFailure::Other(_))
-        ));
-        assert!(matches!(
+            Err(CallFailure::NoData {
+                field: "x".to_owned()
+            })
+        );
+        assert_eq!(
             root_field(&reply(500, &json!({"data": {"x": 1}})), "x"),
-            Err(CallFailure::Other(_))
-        ));
+            Err(CallFailure::Status {
+                status: reqwest::StatusCode::INTERNAL_SERVER_ERROR
+            })
+        );
         let not_json = GraphqlReply {
             status: reqwest::StatusCode::OK,
             body: b"<html>".to_vec(),
         };
-        assert!(matches!(
-            root_field(&not_json, "x"),
-            Err(CallFailure::Other(_))
-        ));
+        let error = root_field(&not_json, "x").expect_err("not json");
+        assert_eq!(report(&error), "status 200 OK, body is not JSON");
     }
 
     #[test]
     fn spike_start_is_next_whole_hour_at_least_13_days_ahead() {
-        assert_eq!(
-            spike_start(datetime!(2026-10-25 10:20:30 UTC)),
-            Ok(datetime!(2026-11-07 11:00 UTC))
-        );
-        assert_eq!(
-            spike_start(datetime!(2026-10-25 10:00 UTC)),
-            Ok(datetime!(2026-11-07 10:00 UTC))
-        );
-        assert_eq!(
-            spike_start(datetime!(2026-10-25 23:59:59.5 UTC)),
-            Ok(datetime!(2026-11-08 00:00 UTC))
-        );
-        assert_eq!(
-            spike_start(datetime!(2026-10-25 08:30 -07:00)),
-            Ok(datetime!(2026-11-07 16:00 UTC))
-        );
+        for (now, start) in [
+            (
+                datetime!(2026-10-25 10:20:30 UTC),
+                datetime!(2026-11-07 11:00 UTC),
+            ),
+            (
+                datetime!(2026-10-25 10:00 UTC),
+                datetime!(2026-11-07 10:00 UTC),
+            ),
+            (
+                datetime!(2026-10-25 23:59:59.5 UTC),
+                datetime!(2026-11-08 00:00 UTC),
+            ),
+            (
+                datetime!(2026-10-25 08:30 -07:00),
+                datetime!(2026-11-07 16:00 UTC),
+            ),
+        ] {
+            assert_eq!(spike_start(now).expect("start"), start);
+        }
+    }
+
+    #[test]
+    fn spike_start_reports_date_overflow() {
+        let error = spike_start(time::PrimitiveDateTime::MAX.assume_utc()).expect_err("overflow");
+        assert_eq!(report(&error), "date overflow");
     }
 
     #[test]
@@ -1136,10 +1326,20 @@ mod tests {
         let error = json!({"__typename": "InviteFriendsError", "message": "down"});
         assert_eq!(
             listed_ids(&error),
-            Err("schedule list answered InviteFriendsError: down".to_owned())
+            Err(AnswerError::ScheduleListVariant {
+                typename: "InviteFriendsError".to_owned(),
+                message: "down".to_owned(),
+            })
+        );
+        assert_eq!(
+            report(&listed_ids(&error).expect_err("error variant")),
+            "schedule list answered InviteFriendsError: down"
         );
         let shapeless = json!({"__typename": "YourScheduleItemList"});
-        assert!(listed_ids(&shapeless).is_err());
+        assert_eq!(
+            listed_ids(&shapeless),
+            Err(AnswerError::ScheduleItemsNotList)
+        );
     }
 
     #[test]
@@ -1153,10 +1353,13 @@ mod tests {
         let err =
             json!({"__typename": "CannotScheduleClassError", "code": "X", "message": "too far"});
         assert_eq!(
-            scheduled_result(&err),
-            Err("CannotScheduleClassError: X: too far".to_owned())
+            report(&scheduled_result(&err).expect_err("rejected")),
+            "CannotScheduleClassError: X: too far"
         );
-        assert!(scheduled_result(&json!({"__typename": "ScheduledClass"})).is_err());
+        assert_eq!(
+            scheduled_result(&json!({"__typename": "ScheduledClass"})),
+            Err(AnswerError::ScheduledClassWithoutId)
+        );
     }
 
     #[test]
@@ -1164,9 +1367,18 @@ mod tests {
         let start = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
         let id = event(RIDE, 1_700_000_000);
         assert_eq!(check_event(&id, &ride(RIDE), start), Ok(()));
-        assert!(check_event(&id, &ride(OTHER), start).is_err());
-        assert!(check_event(&id, &ride(RIDE), start + time::Duration::HOUR).is_err());
-        assert!(check_event("opaque", &ride(RIDE), start).is_err());
+        assert_eq!(
+            check_event(&id, &ride(OTHER), start),
+            Err(AnswerError::EventWrongRide)
+        );
+        assert_eq!(
+            check_event(&id, &ride(RIDE), start + time::Duration::HOUR),
+            Err(AnswerError::EventWrongStart)
+        );
+        assert_eq!(
+            check_event("opaque", &ride(RIDE), start),
+            Err(AnswerError::EventUndecodable)
+        );
     }
 
     #[test]
@@ -1239,8 +1451,14 @@ mod tests {
         let stack = json!({"numClasses": 1, "userStack": {"stackedClassList": [
             {"playOrder": 1, "pelotonClass": {"classId": "../x", "title": "A"}},
         ]}});
-        assert!(stack_items(&stack).is_err());
-        assert!(stack_items(&json!({"numClasses": 3})).is_err());
+        assert_eq!(
+            stack_items(&stack),
+            Err(AnswerError::StackEntryBadClassId { index: 0 })
+        );
+        assert_eq!(
+            stack_items(&json!({"numClasses": 3})),
+            Err(AnswerError::StackWithoutList)
+        );
     }
 
     #[test]
@@ -1249,7 +1467,7 @@ mod tests {
             {"playOrder": 1, "pelotonClass": {"classId": RIDE, "title": "A"}},
         ]}});
         let err = stack_items(&stack).expect_err("partial list");
-        assert!(err.contains("numClasses is 2"));
+        assert_eq!(report(&err), "numClasses is 2 but the list holds 1 entries");
     }
 
     #[test]
@@ -1261,7 +1479,7 @@ mod tests {
             json!({}),
         ] {
             let err = stack_items(&stack).expect_err("no numClasses");
-            assert!(err.contains("numClasses"), "{err}");
+            assert_eq!(err, AnswerError::StackWithoutCount);
         }
     }
 
@@ -1272,7 +1490,8 @@ mod tests {
             {"pelotonClass": {"classId": OTHER, "title": "B"}},
         ]}});
         let err = stack_items(&stack).expect_err("no playOrder");
-        assert!(err.contains("playOrder"));
+        assert_eq!(err, AnswerError::StackEntryWithoutOrder { index: 1 });
+        assert_eq!(report(&err), "Stack entry 1 has no playOrder");
     }
 
     #[test]
@@ -1299,16 +1518,37 @@ mod tests {
         assert_eq!(restore.ids, vec![compact]);
         assert_eq!(restore.encoding_mismatches.len(), 1);
         // Missing, other ride, or not a class id: refuse.
-        assert!(restore_ids(&[item(None)]).is_err());
+        let missing = restore_ids(&[item(None)]).expect_err("no joinToken");
+        assert_eq!(
+            report(&missing),
+            format!("Stack entry 1 ({RIDE}): Peloton returned no joinToken")
+        );
         let other = OnDemandClassId::from_ride(&ride(OTHER));
-        assert!(restore_ids(&[item(Some(other.as_str()))]).is_err());
-        assert!(restore_ids(&[item(Some("opaque"))]).is_err());
+        for token in [other.as_str(), "opaque"] {
+            let foreign = restore_ids(&[item(Some(token))]).expect_err("foreign joinToken");
+            assert!(matches!(
+                foreign,
+                AnswerError::RestoreForeignToken { entry: 1, .. }
+            ));
+        }
         assert_eq!(
             restore_ids(&[]),
             Ok(Restore {
                 ids: Vec::new(),
                 encoding_mismatches: Vec::new(),
             })
+        );
+    }
+
+    #[test]
+    fn rejected_token_stops_the_spike_with_its_own_message() {
+        assert_eq!(
+            report(&SpikeError::GatewayRejected),
+            "GraphQL gateway rejected the token; stopping before any other call"
+        );
+        assert_eq!(
+            report(&SpikeError::StepsFailed),
+            "some spike steps failed; see above"
         );
     }
 

@@ -4,6 +4,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use peloton::ids::PelotonId;
+use peloton_relay_login::CliError;
 use peloton_relay_login::output::TokenOutput;
 use peloton_relay_login::session::Session;
 use peloton_relay_login::{capture, check, scrub, spike};
@@ -56,29 +57,29 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(cli.command.unwrap_or(Command::Login)) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(message) => {
-            eprintln!("error: {message}");
+        Err(error) => {
+            eprintln!("error: {}", peloton_relay_login::report(&error));
             ExitCode::FAILURE
         }
     }
 }
 
-fn run(command: Command) -> Result<(), String> {
+fn run(command: Command) -> Result<(), CliError> {
     match command {
         Command::Login => login(),
-        Command::Check => check::run(&Session::new()?),
-        Command::Capture { dir, workouts } => capture::run(&Session::new()?, &dir, workouts),
-        Command::Spike { class, dir } => spike::run(&Session::new()?, &dir, &class),
-        Command::Scrub { in_dir, out_dir } => scrub::run(&in_dir, &out_dir),
+        Command::Check => Ok(check::run(&Session::new()?)?),
+        Command::Capture { dir, workouts } => Ok(capture::run(&Session::new()?, &dir, workouts)?),
+        Command::Spike { class, dir } => Ok(spike::run(&Session::new()?, &dir, &class)?),
+        Command::Scrub { in_dir, out_dir } => Ok(scrub::run(&in_dir, &out_dir)?),
     }
 }
 
-fn login() -> Result<(), String> {
+fn login() -> Result<(), CliError> {
     let stdout = stdout();
     let is_terminal = stdout.is_terminal();
-    let output = TokenOutput::new(stdout, is_terminal).map_err(|e| e.to_string())?;
+    let output = TokenOutput::new(stdout, is_terminal)?;
     let tokens = Session::new()?.login()?;
-    output.write(&tokens).map_err(|e| e.to_string())?;
+    output.write(&tokens)?;
     eprintln!("Login succeeded.");
     Ok(())
 }

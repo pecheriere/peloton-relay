@@ -3,11 +3,13 @@
 
 use std::any::Any;
 use std::collections::HashSet;
+use std::future;
 use std::sync::Arc;
 
-use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request, State};
+use axum::extract::{FromRequest, FromRequestParts, MatchedPath, Path, Query, Request, State};
 use axum::http::request::Parts;
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderName, HeaderValue, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get};
 use axum::{Json, Router};
@@ -16,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime, UtcOffset};
 use tower_http::catch_panic::CatchPanicLayer;
+use tracing::Instrument as _;
 use utoipa::openapi::RefOr;
 use utoipa::openapi::schema::{ObjectBuilder, Schema, Type};
 use utoipa::{IntoParams, OpenApi, ToSchema};
@@ -81,7 +84,7 @@ pub struct AppState {
 
 /// Builds the router for the relay's API.
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let routes = Router::new()
         .route("/v1/me", get(me))
         .route("/v1/workouts", get(workouts))
         .route("/v1/workouts/{id}", get(workout))
@@ -100,9 +103,59 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .fallback(|| async { ApiError::NotFound })
-        .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
+        .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed });
+    request_handling(routes).with_state(state)
+}
+
+/// Wraps `routes` in the relay's request handling.
+///
+/// Each request runs in a span with its id, method and matched route (never
+/// the query string or the path's own ids) and is answered with an
+/// `x-request-id` header. A panicking handler is answered with 500 (see
+/// [`catch_panics`]) inside that span, so the panic's log line carries the
+/// request's id and route too.
+///
+/// Public only so that the integration tests can wrap their own routes.
+#[doc(hidden)]
+pub fn request_handling<S: Clone + Send + Sync + 'static>(routes: Router<S>) -> Router<S> {
+    routes
         .layer(catch_panics())
-        .with_state(state)
+        .layer(middleware::from_fn(request_context))
+}
+
+/// Header carrying the id the relay gives each request.
+const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
+
+/// The `route` logged for a request that matched no route, so that a log line
+/// never holds the path of an arbitrary request.
+const UNMATCHED_ROUTE: &str = "unmatched";
+
+/// Gives the request a fresh id, returned as `x-request-id`, and runs it in a
+/// span with that id, its method and its matched route (the path template,
+/// e.g. `/v1/workouts/{id}`), so that every log line of the handler, such as
+/// an upstream failure, carries them.
+///
+/// An id sent by the client is ignored. The span holds neither the query
+/// string nor the path's own ids.
+async fn request_context(request: Request, next: Next) -> Response {
+    let id = HeaderValue::from_str(&format!("{:032x}", rand::random::<u128>())).ok();
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or(UNMATCHED_ROUTE, MatchedPath::as_str);
+    // An error-level span, so that it stays enabled (and its fields reach the
+    // log lines) under any `RUST_LOG` that enables the warnings logged in it.
+    let span = tracing::error_span!(
+        "request",
+        method = %request.method(),
+        route,
+        request_id = id.as_ref().and_then(|id| id.to_str().ok()),
+    );
+    let mut response = next.run(request).instrument(span).await;
+    if let Some(id) = id {
+        response.headers_mut().insert(REQUEST_ID_HEADER, id);
+    }
+    response
 }
 
 /// Answers a request whose handler panicked with 500 `internal_error`.
@@ -195,13 +248,18 @@ impl<S: Send + Sync> FromRequestParts<S> for Id {
 /// A query string deserialised into `T`; rejection is the JSON error.
 struct Params<T>(T);
 
-impl<S: Send + Sync, T: serde::de::DeserializeOwned> FromRequestParts<S> for Params<T> {
+impl<S: Send + Sync, T: serde::de::DeserializeOwned + Send> FromRequestParts<S> for Params<T> {
     type Rejection = ApiError;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, ApiError> {
-        Query::<T>::try_from_uri(&parts.uri)
-            .map(|Query(value)| Self(value))
-            .map_err(|_| ApiError::InvalidInput)
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, ApiError>> + Send {
+        future::ready(
+            Query::<T>::try_from_uri(&parts.uri)
+                .map(|Query(value)| Self(value))
+                .map_err(|_| ApiError::InvalidInput),
+        )
     }
 }
 
@@ -598,7 +656,7 @@ struct Status {
     get,
     path = "/v1/me",
     responses(
-        (status = 200, body = Profile),
+        (status = 200, description = "The credential owner's profile.", body = Profile),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
         (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
@@ -620,7 +678,7 @@ async fn me(
     path = "/v1/workouts",
     params(WorkoutsParams),
     responses(
-        (status = 200, body = WorkoutPage),
+        (status = 200, description = "One page of the member's workouts, newest first.", body = WorkoutPage),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
         (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
@@ -642,7 +700,7 @@ async fn workouts(
     path = "/v1/workouts/{id}",
     params(("id" = String, Path, description = "Workout id: 32 lowercase hex characters")),
     responses(
-        (status = 200, body = WorkoutDetail),
+        (status = 200, description = "The workout with its ride and instructor.", body = WorkoutDetail),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 404, description = "`not_found`: no such workout of the credential's owner.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
@@ -669,7 +727,7 @@ async fn workout(
         MetricsParams
     ),
     responses(
-        (status = 200, body = Metrics),
+        (status = 200, description = "The workout's performance metrics.", body = Metrics),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 404, description = "`not_found`: no such workout of the credential's owner.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
@@ -697,7 +755,7 @@ async fn metrics(
     path = "/v1/classes/{id}",
     params(("id" = String, Path, description = "Class id: 32 lowercase hex characters")),
     responses(
-        (status = 200, body = ClassDetails),
+        (status = 200, description = "The on-demand class's details.", body = ClassDetails),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 404, description = "`not_found`: no such class.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
@@ -721,7 +779,7 @@ async fn class(
     path = "/v1/library",
     params(LibraryParams),
     responses(
-        (status = 200, body = LibraryPage),
+        (status = 200, description = "One page of on-demand classes matching the query.", body = LibraryPage),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
         (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
@@ -744,7 +802,7 @@ async fn library(
     path = "/v1/library/filters",
     params(FiltersParams),
     responses(
-        (status = 200, body = LibraryFilters),
+        (status = 200, description = "The filters the library search accepts.", body = LibraryFilters),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
         (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
@@ -774,7 +832,7 @@ async fn library_filters(
     path = "/v1/schedule",
     params(ScheduleParams),
     responses(
-        (status = 200, body = ScheduleList),
+        (status = 200, description = "The member's scheduled classes.", body = ScheduleList),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
         (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
@@ -792,14 +850,17 @@ async fn schedule(
 }
 
 /// One class on the member's schedule.
+///
+/// Only a class the schedule still lists is found: after a remove, and for
+/// the old id after a move, the id answers 404.
 #[utoipa::path(
     get,
     path = "/v1/schedule/{scheduled_id}",
     params(("scheduled_id" = String, Path, pattern = "^[A-Za-z0-9_-]+$", max_length = 512, description = "Scheduled-class id as the relay issues it (`scheduled_id`): URL-safe base64 without padding")),
     responses(
-        (status = 200, body = ScheduledClassView),
+        (status = 200, description = "The scheduled class.", body = ScheduledClassView),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
-        (status = 404, description = "`not_found`: no such scheduled class.", body = ErrorBody),
+        (status = 404, description = "`not_found`: no such scheduled class, or it is no longer on the schedule (removed, or moved to a new id).", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
         (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
@@ -951,7 +1012,7 @@ async fn schedule_remove(
     get,
     path = "/v1/stack",
     responses(
-        (status = 200, body = StackView),
+        (status = 200, description = "The Stack as it is.", body = StackView),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
         (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
@@ -1090,7 +1151,7 @@ async fn stack_replace(
 #[utoipa::path(
     get,
     path = "/healthz",
-    responses((status = 200, body = Status))
+    responses((status = 200, description = "The service status.", body = Status))
 )]
 async fn healthz() -> Json<Status> {
     Json(Status { status: "ok" })
@@ -1101,7 +1162,7 @@ async fn healthz() -> Json<Status> {
     get,
     path = "/readyz",
     responses(
-        (status = 200, body = Status),
+        (status = 200, description = "A usable Peloton credential is held.", body = Status),
         (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential.", body = ErrorBody)
     )
 )]
