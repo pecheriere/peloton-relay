@@ -1,12 +1,14 @@
 //! Crash-safe persistence of the Peloton credential.
 
 use std::ffi::OsStr;
-use std::fs::{self, File, Metadata, OpenOptions};
+use std::fs::{self, File, Metadata, OpenOptions, TryLockError};
 use std::io::{self, Read as _, Write as _};
 use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime};
 
 use peloton::ids::PelotonId;
 use peloton::oauth::TokenSet;
@@ -33,6 +35,9 @@ pub enum StoreError {
     /// The file system refused the operation.
     #[error("state file I/O failed")]
     Io(#[source] io::Error),
+    /// Another writer held the state file lock for the whole wait.
+    #[error("state file is locked by another writer")]
+    Locked,
 }
 
 /// Distinguishes temp files of concurrent saves within one process.
@@ -40,6 +45,9 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A temp file untouched for this long belongs to a writer that crashed.
 const STALE_TEMP_AGE: Duration = Duration::from_secs(60);
+
+/// How often [`StateFile::lock`] retries a lock another writer holds.
+const LOCK_POLL: Duration = Duration::from_millis(50);
 
 /// Identifies one version of the state file.
 ///
@@ -120,22 +128,66 @@ impl StateFile {
         }
     }
 
-    /// Atomically replaces the state file.
+    /// Takes the exclusive lock every writer of the state file holds, waiting
+    /// at most `wait` for another holder to release it.
     ///
-    /// Writes a temp file (mode 0600 from creation) in the same directory,
-    /// syncs it, renames it over the target and syncs the directory, so a crash
-    /// leaves either the old or the new state, never a partial one. Afterwards
-    /// removes temp files that crashed writers left behind.
+    /// The lock is an advisory `flock` on `.<name>.lock` next to the state
+    /// file, created with mode 0600 and never removed, so every writer locks
+    /// the same inode. It keeps the relay's refresh (from re-reading the file
+    /// to saving the rotated tokens) and `seed` in another process apart. It
+    /// is released when the returned [`StateLock`] and its clones are dropped,
+    /// or when the process exits. Blocks the calling thread while it waits.
     ///
     /// # Errors
     ///
-    /// [`StoreError::Io`] when any step fails; the target is then unchanged.
-    pub fn save(&self, state: &State) -> Result<(), StoreError> {
-        self.save_with_id(state).map(|_| ())
+    /// [`StoreError::Locked`] when another holder kept the lock for all of
+    /// `wait`, [`StoreError::Io`] when the lock file cannot be opened or locked.
+    pub fn lock(&self, wait: Duration) -> Result<StateLock, StoreError> {
+        let path = self.dir()?.join(lock_name(self.file_name()?));
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(path)
+            .map_err(StoreError::Io)?;
+        // `None`: the wait does not fit in an `Instant`, so it never ends.
+        let deadline = Instant::now().checked_add(wait);
+        loop {
+            match file.try_lock() {
+                Ok(()) => {
+                    return Ok(StateLock {
+                        store: self.clone(),
+                        _file: Arc::new(file),
+                    });
+                }
+                Err(TryLockError::WouldBlock) => {}
+                Err(TryLockError::Error(err)) => return Err(StoreError::Io(err)),
+            }
+            let pause = match deadline {
+                Some(deadline) => match deadline.checked_duration_since(Instant::now()) {
+                    Some(left) if !left.is_zero() => left.min(LOCK_POLL),
+                    _ => return Err(StoreError::Locked),
+                },
+                None => LOCK_POLL,
+            };
+            thread::sleep(pause);
+        }
     }
 
-    /// [`Self::save`], returning the identity of the version written.
-    pub(crate) fn save_with_id(&self, state: &State) -> Result<FileId, StoreError> {
+    /// Takes the lock, waiting at most `wait` (see [`Self::lock`]), and
+    /// atomically replaces the state file (see [`StateLock::save`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::lock`] and [`StateLock::save`]; the target is then unchanged.
+    pub fn save(&self, state: &State, wait: Duration) -> Result<(), StoreError> {
+        self.lock(wait)?.save(state)
+    }
+
+    /// Atomically replaces the state file; the caller holds the lock.
+    fn replace(&self, state: &State) -> Result<FileId, StoreError> {
         let dir = self.dir()?;
         let name = self.file_name()?;
         let json = serde_json::to_vec(state).map_err(|err| StoreError::Io(err.into()))?;
@@ -180,6 +232,45 @@ impl StateFile {
             ))
         })
     }
+}
+
+/// Exclusive hold on the state file lock, from [`StateFile::lock`].
+///
+/// Clones share the hold; it ends when the last one is dropped.
+#[derive(Debug, Clone)]
+pub struct StateLock {
+    store: StateFile,
+    /// Holds the `flock`; closing the last handle releases it.
+    _file: Arc<File>,
+}
+
+impl StateLock {
+    /// Atomically replaces the state file.
+    ///
+    /// Writes a temp file (mode 0600 from creation) in the same directory,
+    /// syncs it, renames it over the target and syncs the directory, so a crash
+    /// leaves either the old or the new state, never a partial one. Afterwards
+    /// removes temp files that crashed writers left behind.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Io`] when any step fails; the target is then unchanged.
+    pub fn save(&self, state: &State) -> Result<(), StoreError> {
+        self.store.replace(state).map(|_| ())
+    }
+
+    /// [`Self::save`], returning the identity of the version written.
+    pub(crate) fn save_with_id(&self, state: &State) -> Result<FileId, StoreError> {
+        self.store.replace(state)
+    }
+}
+
+/// `.<name>.lock`: the lock file of the state file `name`.
+fn lock_name(name: &OsStr) -> std::ffi::OsString {
+    let mut lock = std::ffi::OsString::from(".");
+    lock.push(name);
+    lock.push(".lock");
+    lock
 }
 
 /// `.<name>.<pid>.<counter>.tmp`: unique among live writers.
@@ -272,7 +363,7 @@ mod tests {
 
     use std::ffi::OsStr;
 
-    use super::{is_temp_name, temp_name, write_synced};
+    use super::{is_temp_name, lock_name, temp_name, write_synced};
 
     #[test]
     fn temp_names_match_only_their_own_pattern() {
@@ -294,6 +385,8 @@ mod tests {
         ] {
             assert!(!is_temp_name(name, OsStr::new(other)), "{other}");
         }
+        // Stale temp cleanup never removes the lock file.
+        assert!(!is_temp_name(name, &lock_name(name)));
     }
 
     #[test]

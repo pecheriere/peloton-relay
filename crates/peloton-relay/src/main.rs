@@ -39,6 +39,9 @@ enum Command {
 const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long shutdown waits for an in-flight refresh to be saved.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
+/// How long `seed` waits for a refresh the server has in flight: longer than
+/// one refresh request may take (30 s) plus saving its result.
+const SEED_LOCK_WAIT: Duration = Duration::from_secs(60);
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -139,9 +142,15 @@ async fn seed() -> Result<(), String> {
     }
     let http = http_client().map_err(|err| format!("cannot build the HTTP client: {err}"))?;
     let api_base = Url::parse(API_BASE).map_err(|err| err.to_string())?;
-    let username = run_seed(io::stdin().lock(), &config.state_file(), &http, &api_base)
-        .await
-        .map_err(|err| err.to_string())?;
+    let username = run_seed(
+        io::stdin().lock(),
+        &config.state_file(),
+        &http,
+        &api_base,
+        SEED_LOCK_WAIT,
+    )
+    .await
+    .map_err(|err| err.to_string())?;
     eprintln!("seeded user {username}");
     Ok(())
 }

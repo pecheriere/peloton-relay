@@ -177,7 +177,11 @@ cargo run --release -p peloton-relay-login | \
 
 `seed` reads the token set from stdin, verifies it with Peloton and stores it in
 the state directory. The tokens never touch a command line or a disk outside the
-state directory. Seed right after logging in: a token set whose access token has
+state directory. `seed` and the server's token refresh take turns on a lock file
+(`.state.json.lock`, 0600, next to `state.json`), so neither overwrites the
+other: a seed that lands first is used by the refresh, and a seed that arrives
+during a refresh waits for it (up to a minute, then it fails and can be run
+again). Seed right after logging in: a token set whose access token has
 already expired fails the check against `/me`; run the login again. For a login
 that only reports non-secret facts, run
 `cargo run --release -p peloton-relay-login -- check`.
@@ -210,6 +214,9 @@ per transition into the failed state as `event="peloton_auth_failed"`. When
 Peloton rejects an access token the relay has just refreshed after a 401, it
 logs `event="peloton_unauthorized_after_refresh"` once and forces at most one
 refresh per 10 minutes, rather than rotating the credential on every request.
+A failure to save refreshed tokens is logged once per streak as
+`event="state_save_failed"`, and the next successful save as
+`event="state_save_recovered"`.
 Each write logs `event="peloton_write"` (see [Security model](#security-model)).
 A panic is logged as `event="panic"` with its source location only.
 

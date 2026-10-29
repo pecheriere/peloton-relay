@@ -30,7 +30,7 @@ use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 )]
 mod common;
 
-use common::{captured_logs, http, state, state_file};
+use common::{LOCK_WAIT, captured_logs, http, state, state_file};
 
 /// The ride of every scrubbed schedule and Stack fixture.
 const FIXTURE_RIDE: &str = "00000000000000000000000000000f1d";
@@ -73,7 +73,7 @@ fn scheduled_id() -> ScheduledClassId {
 /// endpoint on `server`.
 fn client_with(dir: &tempfile::TempDir, server: &MockServer, http: reqwest::Client) -> Peloton {
     state_file(dir.path())
-        .save(&state("tok-1", "refresh-1", Duration::hours(48)))
+        .save(&state("tok-1", "refresh-1", Duration::hours(48)), LOCK_WAIT)
         .unwrap();
     let auth = peloton::oauth::AuthClient::new(common::http(), Url::parse(&server.uri()).unwrap());
     let tokens = TokenManager::new(state_file(dir.path()), auth, StdDuration::from_secs(3600));
