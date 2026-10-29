@@ -6,9 +6,10 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use peloton::endpoints::API_BASE;
 use peloton::oauth::{AUTH_DOMAIN, AuthClient};
+use peloton_relay::account::AccountName;
 use peloton_relay::api::{AppState, Clock, router};
 use peloton_relay::config::{Config, http_client};
-use peloton_relay::seed::run_seed;
+use peloton_relay::seed::{run_bind, run_seed};
 use peloton_relay::stack::StackService;
 use peloton_relay::tokens::{BACKGROUND_REFRESH_INTERVAL, DEFAULT_REFRESH_MARGIN, TokenManager};
 use peloton_relay::upstream::{DEFAULT_MAX_IN_FLIGHT, Peloton};
@@ -29,8 +30,22 @@ struct Cli {
 enum Command {
     /// Run the HTTP server.
     Serve,
-    /// Read a token set as JSON from stdin, verify it with Peloton and store it.
-    Seed,
+    /// Read a token set as JSON from stdin, verify it with Peloton and store
+    /// it in one account, bound to its Peloton user.
+    Seed {
+        /// The configured account to seed.
+        #[arg(long)]
+        account: AccountName,
+        /// Replace the account's binding to another Peloton user.
+        #[arg(long)]
+        rebind: bool,
+    },
+    /// Bind one account to the Peloton user of the state file it already has.
+    Bind {
+        /// The configured account to bind.
+        #[arg(long)]
+        account: AccountName,
+    },
     /// Exit 0 when the local server answers its liveness probe, else 1.
     Healthcheck,
 }
@@ -39,8 +54,8 @@ enum Command {
 const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long shutdown waits for an in-flight refresh to be saved.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
-/// How long `seed` waits for a refresh the server has in flight: longer than
-/// one refresh request may take (30 s) plus saving its result.
+/// How long `seed` and `bind` wait for a refresh the server has in flight:
+/// longer than one refresh request may take (30 s) plus saving its result.
 const SEED_LOCK_WAIT: Duration = Duration::from_secs(60);
 
 #[tokio::main]
@@ -48,7 +63,8 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Serve => serve().await,
-        Command::Seed => seed().await,
+        Command::Seed { account, rebind } => seed(&account, rebind).await,
+        Command::Bind { account } => bind(account).await,
         Command::Healthcheck => healthcheck().await,
     };
     match result {
@@ -144,23 +160,37 @@ fn shutdown_signal(shutdown: CancellationToken) -> Result<impl Future<Output = (
     })
 }
 
-async fn seed() -> Result<(), String> {
+async fn seed(account: &AccountName, rebind: bool) -> Result<(), String> {
     let config = Config::from_env().map_err(|err| err.to_string())?;
     if io::stdin().is_terminal() {
         eprintln!("reading the token JSON from stdin; pipe it in, e.g. from peloton-relay-login");
     }
     let http = http_client().map_err(|err| format!("cannot build the HTTP client: {err}"))?;
     let api_base = Url::parse(API_BASE).map_err(|err| err.to_string())?;
-    let username = run_seed(
+    let seeded = run_seed(
         io::stdin().lock(),
-        &config.state_file(),
+        &config.accounts,
+        account,
+        rebind,
         &http,
         &api_base,
         SEED_LOCK_WAIT,
     )
     .await
     .map_err(|err| err.to_string())?;
-    eprintln!("seeded user {username}");
+    eprintln!("{seeded}");
+    Ok(())
+}
+
+async fn bind(account: AccountName) -> Result<(), String> {
+    let config = Config::from_env().map_err(|err| err.to_string())?;
+    // Waiting for the locks blocks a thread; keep it off the async workers.
+    let bound =
+        tokio::task::spawn_blocking(move || run_bind(&config.accounts, &account, SEED_LOCK_WAIT))
+            .await
+            .map_err(|_| "the bind task did not complete".to_owned())?
+            .map_err(|err| err.to_string())?;
+    eprintln!("{bound}");
     Ok(())
 }
 

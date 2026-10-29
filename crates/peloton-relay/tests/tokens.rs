@@ -10,6 +10,7 @@ use std::time::{Duration as StdDuration, Instant};
 
 use peloton::ids::PelotonId;
 use peloton::oauth::AuthClient;
+use peloton_relay::account::Accounts;
 use peloton_relay::seed::run_seed;
 use peloton_relay::store::{State, StateFile, StoreError};
 use peloton_relay::tokens::{
@@ -1378,13 +1379,20 @@ async fn seed_during_a_refresh_lands_after_the_rotated_tokens() {
         .mount(&server)
         .await;
     let dir = tempfile::tempdir().unwrap();
-    let file = state_file(dir.path());
+    let accounts = Accounts::new(dir.path().to_owned(), vec![account(ACCOUNT)]).unwrap();
+    let file = account_state_file(dir.path(), ACCOUNT, &user());
     file.save(
         &state("old-access", "old-refresh", -Duration::minutes(5)),
         LOCK_WAIT,
     )
     .unwrap();
-    let tokens = Arc::new(manager(dir.path(), &server));
+    let auth = AuthClient::new(common::http(), server_url(&server));
+    let tokens = Arc::new(TokenManager::new(
+        account(ACCOUNT),
+        file.clone(),
+        auth,
+        MARGIN,
+    ));
 
     let refreshing = tokio::spawn({
         let tokens = Arc::clone(&tokens);
@@ -1395,7 +1403,9 @@ async fn seed_during_a_refresh_lands_after_the_rotated_tokens() {
     let seeded = br#"{"access_token":"seeded-access","refresh_token":"seeded-refresh","expires_at":"2099-01-01T00:00:00Z"}"#;
     run_seed(
         &seeded[..],
-        &file,
+        &accounts,
+        &account(ACCOUNT),
+        false,
         &common::http(),
         &server_url(&server),
         LOCK_WAIT,

@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::account::{AccountName, Accounts};
-use crate::store::StateFile;
 
 /// Environment variable holding the listen address.
 pub const LISTEN_VAR: &str = "PELOTON_RELAY_LISTEN";
@@ -16,7 +15,6 @@ pub const ACCOUNTS_VAR: &str = "PELOTON_RELAY_ACCOUNTS";
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:8080";
 const DEFAULT_STATE_DIR: &str = "/state";
-const STATE_FILE_NAME: &str = "state.json";
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -113,14 +111,6 @@ impl Config {
             IpAddr::V6(ip) => format!("http://[{ip}]:{port}/healthz"),
         }
     }
-
-    /// The state file inside the state directory.
-    #[must_use]
-    pub fn state_file(&self) -> StateFile {
-        StateFile {
-            path: self.state_dir.join(STATE_FILE_NAME),
-        }
-    }
 }
 
 /// Builds the HTTP client for Peloton and Auth0: no redirects (a redirect must
@@ -160,7 +150,6 @@ mod tests {
     fn defaults() {
         let config = config(&[("PELOTON_RELAY_ACCOUNTS", "alice")]).unwrap();
         assert_eq!(config.listen.to_string(), "0.0.0.0:8080");
-        assert_eq!(config.state_file().path.to_str(), Some("/state/state.json"));
         assert_eq!(
             config.accounts.state_file(&alice()).path.to_str(),
             Some("/state/alice/state.json")
@@ -176,7 +165,6 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(config.listen.port(), 9000);
-        assert_eq!(config.state_file().path.to_str(), Some("/tmp/x/state.json"));
         assert_eq!(
             config.accounts.state_file(&alice()).path.to_str(),
             Some("/tmp/x/alice/state.json")
