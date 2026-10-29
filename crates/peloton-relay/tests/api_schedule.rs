@@ -255,6 +255,13 @@ async fn scheduled_class_reads_by_relay_id() {
         .expect(1)
         .mount(&server)
         .await;
+    mount_op(
+        &server,
+        &ops::YOUR_SCHEDULE_ITEMS,
+        &fixture_json("schedule_during.json"),
+        Some(1),
+    )
+    .await;
     let dir = tempfile::tempdir().unwrap();
     let (status, _, body) = send(
         &app(&dir, &server),
@@ -287,6 +294,36 @@ async fn missing_scheduled_class_is_404() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_error(&body, "not_found");
+}
+
+#[tokio::test]
+async fn removed_scheduled_class_is_404() {
+    // Peloton still answers `ScheduledClass` for a removed class's id, but
+    // its schedule no longer lists it.
+    let server = MockServer::start().await;
+    mount_op(
+        &server,
+        &ops::SCHEDULED_CLASS,
+        &fixture_json("scheduled_class.json"),
+        Some(1),
+    )
+    .await;
+    mount_op(
+        &server,
+        &ops::YOUR_SCHEDULE_ITEMS,
+        &fixture_json("schedule_after.json"),
+        Some(1),
+    )
+    .await;
+    let (_, url_safe) = fixture_scheduled_id();
+    let dir = tempfile::tempdir().unwrap();
+    let (status, _, body) = send(
+        &app(&dir, &server),
+        bare("GET", &format!("/v1/schedule/{url_safe}")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_error(&body, "not_found");
 }
 
