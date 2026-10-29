@@ -5,13 +5,15 @@ use std::io;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::Duration;
 
 use peloton::ids::PelotonId;
 
-use crate::store::StateFile;
+use crate::store::{BindingsLock, StateFile, StoreError};
 
 const MAX_NAME_LEN: usize = 16;
 const STATE_FILE_NAME: &str = "state.json";
+const BINDINGS_LOCK_NAME: &str = ".bindings.lock";
 const ACCOUNT_DIR_MODE: u32 = 0o700;
 const SUFFIX_LEN: usize = 4;
 
@@ -116,6 +118,18 @@ impl Accounts {
         StateFile {
             path: self.root.join(name.as_str()).join(STATE_FILE_NAME),
         }
+    }
+
+    /// Takes the cross-account lock `<root>/.bindings.lock`, waiting at most
+    /// `wait`. Writers take it after the account's state lock; the server
+    /// never takes it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Locked`] when another holder kept it for all of `wait`,
+    /// [`StoreError::Io`] when the lock file cannot be opened or locked.
+    pub fn lock_bindings(&self, wait: Duration) -> Result<BindingsLock, StoreError> {
+        BindingsLock::acquire(&self.root.join(BINDINGS_LOCK_NAME), wait)
     }
 
     /// The single-account state file of earlier versions, directly in the
