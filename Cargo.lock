@@ -2115,7 +2115,7 @@ dependencies = [
 
 [[package]]
 name = "peloton"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "rand",
@@ -2133,7 +2133,7 @@ dependencies = [
 
 [[package]]
 name = "peloton-relay"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -2162,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "peloton-relay-login"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "clap",

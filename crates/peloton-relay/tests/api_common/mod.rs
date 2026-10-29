@@ -8,15 +8,19 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
 use http_body_util::BodyExt as _;
-use peloton_relay::api::{AppState, Clock, router};
-use peloton_relay::stack::StackService;
+use peloton::ids::PelotonId;
+use peloton_relay::account::AccountName;
+use peloton_relay::api::{
+    ACCOUNT_HEADER, AccountContext, AccountRegistry, AppState, Clock, router,
+};
+use peloton_relay::store::StateFile;
 use peloton_relay::tokens::TokenManager;
 use peloton_relay::upstream::Peloton;
 use time::{Duration, OffsetDateTime};
 use tower::ServiceExt as _;
 use url::Url;
 
-use crate::common::{LOCK_WAIT, http, state, state_file};
+use crate::common::{ACCOUNT, LOCK_WAIT, account, account_state_file, http, state, state_file};
 
 /// The access token the relay under test holds.
 pub const ACCESS: &str = "access-secret-1";
@@ -32,36 +36,179 @@ pub fn fixture(name: &str) -> String {
     .unwrap()
 }
 
-/// The relay's router with every upstream on `server` (REST under `/api`,
-/// GraphQL at `/graphql`) and its clock stopped at `now`; `seeded` gives it
-/// the tokens [`ACCESS`] and [`REFRESH`].
+/// The sample ids of [`V1_ROUTES`], as literals so that `concat!` takes them.
+macro_rules! sample_id {
+    () => {
+        "fedcba9876543210fedcba9876543210"
+    };
+}
+macro_rules! sample_class {
+    () => {
+        "00000000000000000000000000000f1d"
+    };
+}
+macro_rules! sample_scheduled {
+    () => {
+        "eyJob21lX3BlbG90b25faWQiOiAiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDBmM2IiLCAicmlkZV9pZCI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGYxZCIsICJzY2hlZHVsZWRfc3RhcnRfdGltZSI6IDE4OTQwMTc2MDAsICJzdHVkaW9fcGVsb3Rvbl9pZCI6IG51bGwsICJ0eXBlIjogImV2ZW50In0"
+    };
+}
+
+/// A workout or class id the `/v1` samples use for `{id}`.
+pub const SAMPLE_ID: &str = sample_id!();
+/// A class id the `/v1` samples use for `{class_id}`.
+pub const SAMPLE_CLASS: &str = sample_class!();
+/// The relay form of the scheduled-class id of `schedule_add.json`, which the
+/// `/v1` samples use for `{scheduled_id}`.
+pub const SAMPLE_SCHEDULED: &str = sample_scheduled!();
+
+/// Every `/v1` route: its method and a path with the sample ids above.
+pub const V1_ROUTES: &[(&str, &str)] = &[
+    ("GET", "/v1/me"),
+    ("GET", "/v1/workouts"),
+    ("GET", concat!("/v1/workouts/", sample_id!())),
+    ("GET", concat!("/v1/workouts/", sample_id!(), "/metrics")),
+    ("GET", concat!("/v1/classes/", sample_id!())),
+    ("GET", "/v1/library"),
+    ("GET", "/v1/library/filters?category=cycling"),
+    ("GET", "/v1/schedule"),
+    ("POST", "/v1/schedule"),
+    ("GET", concat!("/v1/schedule/", sample_scheduled!())),
+    ("PATCH", concat!("/v1/schedule/", sample_scheduled!())),
+    ("DELETE", concat!("/v1/schedule/", sample_scheduled!())),
+    ("GET", "/v1/stack"),
+    ("POST", "/v1/stack"),
+    ("PUT", "/v1/stack"),
+    ("DELETE", concat!("/v1/stack/", sample_class!())),
+];
+
+/// A body the write route `method` `uri` of [`V1_ROUTES`] accepts at a
+/// relay clock before 2030-01-07; `None` for a route that takes none.
+pub fn sample_body(method: &str, uri: &str) -> Option<serde_json::Value> {
+    let start = "2030-01-07T12:00:00Z";
+    match (method, uri) {
+        ("POST", "/v1/schedule") => Some(serde_json::json!({
+            "class_id": SAMPLE_CLASS, "start_time": start
+        })),
+        ("PATCH", _) => Some(serde_json::json!({ "start_time": start })),
+        ("POST", "/v1/stack") => Some(serde_json::json!({ "class_id": SAMPLE_CLASS })),
+        ("PUT", "/v1/stack") => Some(serde_json::json!({ "class_ids": [SAMPLE_CLASS] })),
+        _ => None,
+    }
+}
+
+/// The context of account `name` with every upstream on `server` (REST under
+/// `/api`, GraphQL at `/graphql`) and at most `max_in_flight` upstream
+/// requests at once. Its state lives under `root`, bound to `user`; `tokens`
+/// (access, refresh) seeds it with a token set valid for 48 hours.
+pub fn account_context(
+    root: &std::path::Path,
+    server: &wiremock::MockServer,
+    name: &str,
+    tokens: Option<(&str, &str)>,
+    user: &PelotonId,
+    max_in_flight: usize,
+) -> AccountContext {
+    let file = account_state_file(root, name, user);
+    if let Some((access, refresh)) = tokens {
+        let mut seeded = state(access, refresh, Duration::hours(48));
+        seeded.user_id = user.clone();
+        file.save(&seeded, LOCK_WAIT).unwrap();
+    }
+    context(server, account(name), file, max_in_flight)
+}
+
+fn context(
+    server: &wiremock::MockServer,
+    name: AccountName,
+    file: StateFile,
+    max_in_flight: usize,
+) -> AccountContext {
+    let auth = peloton::oauth::AuthClient::new(http(), Url::parse(&server.uri()).unwrap());
+    let tokens = Arc::new(TokenManager::new(
+        name,
+        file,
+        auth,
+        StdDuration::from_secs(3600),
+    ));
+    let api = Url::parse(&format!("{}/api", server.uri())).unwrap();
+    let graphql = Url::parse(&format!("{}/graphql", server.uri())).unwrap();
+    let peloton = Peloton::new(http(), api, tokens, max_in_flight).with_graphql_url(graphql);
+    AccountContext::new(Arc::new(peloton))
+}
+
+/// The relay's router serving `contexts`, its clock stopped at `now`.
+pub fn router_of(contexts: Vec<AccountContext>, now: OffsetDateTime) -> Router {
+    router(AppState {
+        accounts: Arc::new(AccountRegistry::new(contexts).unwrap()),
+        clock: Clock::fixed(now),
+    })
+}
+
+/// One account of [`relay_with`]: its name, the (access, refresh) tokens to
+/// seed it with, if any, and the Peloton user it is bound to.
+pub type AccountSpec<'a> = (&'a str, Option<(&'a str, &'a str)>, &'a PelotonId);
+
+/// The relay's router serving `accounts` (name, tokens to seed, bound user;
+/// see [`account_context`]) under `dir`, its clock stopped at `now`.
+pub fn relay_with(
+    dir: &tempfile::TempDir,
+    server: &wiremock::MockServer,
+    now: OffsetDateTime,
+    accounts: &[AccountSpec<'_>],
+) -> Router {
+    let contexts = accounts
+        .iter()
+        .map(|(name, tokens, user)| account_context(dir.path(), server, name, *tokens, user, 4))
+        .collect();
+    router_of(contexts, now)
+}
+
+/// The context of account [`ACCOUNT`], its state file directly in `dir`;
+/// `seeded` gives it the tokens [`ACCESS`] and [`REFRESH`].
+pub fn alice(
+    dir: &tempfile::TempDir,
+    server: &wiremock::MockServer,
+    seeded: bool,
+) -> AccountContext {
+    if seeded {
+        state_file(dir.path())
+            .save(&state(ACCESS, REFRESH, Duration::hours(48)), LOCK_WAIT)
+            .unwrap();
+    }
+    context(server, account(ACCOUNT), state_file(dir.path()), 4)
+}
+
+/// The relay's router serving the one account [`ACCOUNT`] with every
+/// upstream on `server` (REST under `/api`, GraphQL at `/graphql`) and its
+/// clock stopped at `now`; `seeded` gives it the tokens [`ACCESS`] and
+/// [`REFRESH`].
 pub fn relay(
     dir: &tempfile::TempDir,
     server: &wiremock::MockServer,
     seeded: bool,
     now: OffsetDateTime,
 ) -> Router {
-    if seeded {
-        state_file(dir.path())
-            .save(&state(ACCESS, REFRESH, Duration::hours(48)), LOCK_WAIT)
-            .unwrap();
+    router_of(vec![alice(dir, server, seeded)], now)
+}
+
+/// A request naming `account` (none when `None`), with `body` as JSON.
+pub fn request_as(
+    account: Option<&str>,
+    method: &str,
+    uri: &str,
+    body: Option<&serde_json::Value>,
+) -> Request<Body> {
+    let mut builder = Request::builder().method(method).uri(uri);
+    if let Some(account) = account {
+        builder = builder.header(ACCOUNT_HEADER, account);
     }
-    let auth = peloton::oauth::AuthClient::new(http(), Url::parse(&server.uri()).unwrap());
-    let tokens = Arc::new(TokenManager::new(
-        state_file(dir.path()),
-        auth,
-        StdDuration::from_secs(3600),
-    ));
-    let api = Url::parse(&format!("{}/api", server.uri())).unwrap();
-    let graphql = Url::parse(&format!("{}/graphql", server.uri())).unwrap();
-    let peloton =
-        Arc::new(Peloton::new(http(), api, Arc::clone(&tokens), 4).with_graphql_url(graphql));
-    router(AppState {
-        stack: Arc::new(StackService::new(Arc::clone(&peloton))),
-        peloton,
-        tokens,
-        clock: Clock::fixed(now),
-    })
+    match body {
+        Some(body) => builder
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string())),
+        None => builder.body(Body::empty()),
+    }
+    .unwrap()
 }
 
 /// Sends `request` to `app`: status, headers and body text.
@@ -73,23 +220,14 @@ pub async fn send(app: &Router, request: Request<Body>) -> (StatusCode, HeaderMa
     (status, headers, String::from_utf8(body.to_vec()).unwrap())
 }
 
-/// A request with a JSON body.
+/// A request of [`ACCOUNT`] with a JSON body.
 pub fn with_json(method: &str, uri: &str, body: &serde_json::Value) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap()
+    request_as(Some(ACCOUNT), method, uri, Some(body))
 }
 
-/// A request without a body.
+/// A request of [`ACCOUNT`] without a body.
 pub fn bare(method: &str, uri: &str) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap()
+    request_as(Some(ACCOUNT), method, uri, None)
 }
 
 /// Asserts `body` is an error body with code `code` and some message.

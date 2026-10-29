@@ -31,6 +31,7 @@ pub struct ErrorBody {
 /// `Debug` never shows [`ApiError::CannotSchedule`]'s message, so logging an
 /// error with `?` cannot leak it.
 #[derive(Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum ApiError {
     /// The request failed validation.
     #[error("invalid input")]
@@ -38,6 +39,9 @@ pub enum ApiError {
     /// No such route or resource.
     #[error("not found")]
     NotFound,
+    /// The request does not name an account the relay serves.
+    #[error("forbidden")]
+    Forbidden,
     /// The route exists but not for this method.
     #[error("method not allowed")]
     MethodNotAllowed,
@@ -72,6 +76,7 @@ impl fmt::Debug for ApiError {
         match self {
             Self::InvalidInput => f.write_str("InvalidInput"),
             Self::NotFound => f.write_str("NotFound"),
+            Self::Forbidden => f.write_str("Forbidden"),
             Self::MethodNotAllowed => f.write_str("MethodNotAllowed"),
             Self::NotAuthenticated => f.write_str("NotAuthenticated"),
             Self::AlreadyInStack => f.write_str("AlreadyInStack"),
@@ -91,6 +96,7 @@ impl ApiError {
         match self {
             Self::InvalidInput => StatusCode::BAD_REQUEST,
             Self::NotFound => StatusCode::NOT_FOUND,
+            Self::Forbidden => StatusCode::FORBIDDEN,
             Self::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
             Self::AlreadyInStack => StatusCode::CONFLICT,
             Self::CannotSchedule { .. } => StatusCode::UNPROCESSABLE_ENTITY,
@@ -106,6 +112,7 @@ impl ApiError {
         match self {
             Self::InvalidInput => "invalid_input",
             Self::NotFound => "not_found",
+            Self::Forbidden => "forbidden",
             Self::MethodNotAllowed => "method_not_allowed",
             Self::NotAuthenticated => "not_authenticated",
             Self::RateLimited { .. } => "upstream_rate_limited",
@@ -120,6 +127,9 @@ impl ApiError {
         let message = match self {
             Self::InvalidInput => Cow::Borrowed("The request is invalid."),
             Self::NotFound => Cow::Borrowed("No such resource."),
+            Self::Forbidden => {
+                Cow::Borrowed("The request does not name an account this relay serves.")
+            }
             Self::MethodNotAllowed => Cow::Borrowed("This resource does not support that method."),
             Self::NotAuthenticated => Cow::Borrowed("The relay is not authenticated with Peloton."),
             Self::RateLimited { .. } => {
