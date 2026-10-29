@@ -8,7 +8,10 @@ FROM --platform=$BUILDPLATFORM rust:1.99.0-alpine3.23@sha256:42c2519fdf75d9e34cc
 
 ARG TARGETARCH
 
-RUN apk add --no-cache musl-dev zig \
+# zig is pinned to the version in Alpine 3.23 community, so a repository update
+# cannot change the C compiler and linker under a digest-pinned base image.
+
+RUN apk add --no-cache musl-dev zig=0.15.2-r0 \
     && cargo install --locked --version 0.24.0 cargo-zigbuild \
     && rustup target add aarch64-unknown-linux-musl x86_64-unknown-linux-musl
 
