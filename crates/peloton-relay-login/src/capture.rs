@@ -2,7 +2,9 @@
 
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::Write as _;
-use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
+use std::os::unix::fs::{
+    DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _,
+};
 use std::path::{Component, Path, PathBuf};
 
 use peloton::endpoints;
@@ -126,14 +128,28 @@ pub(crate) fn prepare_dir(dir: &Path) -> Result<(), String> {
 /// Opens `path` for writing, empty, with mode 0600 before any content is
 /// written: new files are created with it, and an existing file is
 /// restricted before it is truncated.
+///
+/// A symbolic link is refused (`O_NOFOLLOW`), and so is a file with several
+/// hard links, so a planted link cannot redirect the capture or have another
+/// file truncated and re-permissioned.
 fn create_private(path: &Path) -> Result<fs::File, String> {
     let file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(false)
         .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
         .open(path)
         .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    let meta = file
+        .metadata()
+        .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    if !meta.is_file() || meta.nlink() > 1 {
+        return Err(format!(
+            "refusing to write {}: not a regular file with a single link",
+            path.display()
+        ));
+    }
     file.set_permissions(fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("could not secure {}: {e}", path.display()))?;
     file.set_len(0)
@@ -316,6 +332,38 @@ mod tests {
         let meta = file.metadata().expect("metadata");
         assert_eq!(meta.permissions().mode() & 0o777, 0o600);
         assert_eq!(meta.len(), 0);
+    }
+
+    #[test]
+    fn create_private_refuses_a_symlink_and_leaves_its_target_alone() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let target = dir.path().join("target.txt");
+        fs::write(&target, b"keep me").expect("seed");
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).expect("chmod");
+        let link = dir.path().join("me.json");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+        assert!(create_private(&link).is_err());
+
+        assert_eq!(fs::read(&target).expect("read"), b"keep me");
+        let mode = fs::metadata(&target)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o644);
+    }
+
+    #[test]
+    fn create_private_refuses_a_hard_linked_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let target = dir.path().join("target.txt");
+        fs::write(&target, b"keep me").expect("seed");
+        let link = dir.path().join("me.json");
+        fs::hard_link(&target, &link).expect("hard link");
+
+        assert!(create_private(&link).is_err());
+
+        assert_eq!(fs::read(&target).expect("read"), b"keep me");
     }
 
     #[test]
