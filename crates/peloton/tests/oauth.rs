@@ -145,7 +145,10 @@ fn parse_callback_ignores_duplicates_of_unread_parameters() {
 }
 
 fn client_for(server: &MockServer) -> AuthClient {
-    AuthClient::new(reqwest::Client::new(), Url::parse(&server.uri()).unwrap())
+    AuthClient::new(
+        peloton::tls::client_builder().unwrap().build().unwrap(),
+        Url::parse(&server.uri()).unwrap(),
+    )
 }
 
 #[tokio::test]
@@ -313,7 +316,7 @@ async fn other_failures_map_to_rejected_decode_transport() {
     let addr = listener.local_addr().unwrap();
     drop(listener);
     let client = AuthClient::new(
-        reqwest::Client::new(),
+        peloton::tls::client_builder().unwrap().build().unwrap(),
         Url::parse(&format!("http://{addr}")).unwrap(),
     );
     let err = client

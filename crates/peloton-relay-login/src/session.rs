@@ -109,7 +109,8 @@ impl Session {
     pub fn new() -> Result<Self, SessionError> {
         let auth_base =
             Url::parse(&format!("https://{AUTH_DOMAIN}")).map_err(SessionError::AuthUrl)?;
-        let http = reqwest::Client::builder()
+        let http = peloton::tls::client_builder()
+            .map_err(|e| SessionError::HttpClient(e.without_url()))?
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))

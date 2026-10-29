@@ -29,7 +29,7 @@ RUN case "$TARGETARCH" in \
     && install -D "target/$target/release/peloton-relay" /out/peloton-relay \
     && install -d -m 0700 -o 65532 -g 65532 /out/state
 
-# reqwest uses rustls with the compiled-in webpki-roots trust anchors, so no CA
+# The clients trust the Mozilla root certificates compiled into the binary, so no CA
 # bundle is copied in.
 FROM scratch
 

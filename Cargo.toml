@@ -18,7 +18,7 @@ muda = { version = "0.21", default-features = false }
 peloton = { path = "crates/peloton", version = "0.3.0" }
 proptest = "1.12.0"
 rand = "0.10"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "query"] }
 rustix = { version = "1.1.6", features = ["fs"] }
 secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
@@ -38,6 +38,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 unicode-normalization = "0.1.26"
 url = "2"
 utoipa = { version = "6", features = ["time"] }
+webpki-root-certs = "1.0.11"
 wiremock = "0.6"
 wry = "0.57"
 

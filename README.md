@@ -239,7 +239,7 @@ Between steps 3 and 4 the account's `/v1` routes answer 503
   from holding another user's credential, and a Peloton user from serving two
   accounts (see [Accounts](#accounts)).
 - **Minimal image.** Static musl binary, no shell, no package manager, no CA
-  bundle (TLS trust anchors are compiled in via rustls and `webpki-roots`),
+  bundle (TLS trust anchors are compiled in via rustls and `webpki-root-certs`),
   running as UID/GID 65532.
 
 ## Running
