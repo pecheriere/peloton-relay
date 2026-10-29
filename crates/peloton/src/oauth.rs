@@ -10,6 +10,8 @@ use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 use url::Url;
 
+use crate::body::{BodyError, read_limited};
+
 /// Auth0 tenant domain.
 pub const AUTH_DOMAIN: &str = "auth.onepeloton.com";
 /// Public OAuth client id of Peloton's web app.
@@ -194,6 +196,10 @@ pub enum AuthError {
     /// The token endpoint's answer could not be understood.
     #[error("token endpoint response could not be decoded")]
     Decode,
+    /// The token endpoint's answer is larger than
+    /// [`MAX_RESPONSE_BODY_BYTES`](crate::body::MAX_RESPONSE_BODY_BYTES).
+    #[error("token endpoint response is too large")]
+    BodyTooLarge,
 }
 
 #[derive(Deserialize)]
@@ -289,10 +295,11 @@ impl AuthClient {
         let status = response.status();
         if !status.is_success() {
             let invalid_grant = matches!(status, StatusCode::FORBIDDEN | StatusCode::BAD_REQUEST)
-                && response
-                    .json::<ErrorResponse>()
+                && read_limited(response)
                     .await
-                    .is_ok_and(|body| body.error == "invalid_grant");
+                    .ok()
+                    .and_then(|body| serde_json::from_slice::<ErrorResponse>(&body).ok())
+                    .is_some_and(|body| body.error == "invalid_grant");
             return Err(if invalid_grant {
                 AuthError::InvalidGrant
             } else {
@@ -302,7 +309,11 @@ impl AuthClient {
             });
         }
 
-        let parsed: TokenResponse = response.json().await.map_err(|_| AuthError::Decode)?;
+        let body = read_limited(response).await.map_err(|err| match err {
+            BodyError::TooLarge => AuthError::BodyTooLarge,
+            BodyError::Transport { .. } => AuthError::Transport,
+        })?;
+        let parsed: TokenResponse = serde_json::from_slice(&body).map_err(|_| AuthError::Decode)?;
         let refresh_token = match (parsed.refresh_token, previous_refresh) {
             (Some(new), _) => new,
             (None, Some(old)) => SecretString::from(old.expose_secret().to_owned()),

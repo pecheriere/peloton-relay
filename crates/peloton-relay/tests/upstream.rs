@@ -5,11 +5,10 @@ use std::io::{Read as _, Write as _};
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
+use peloton::body::MAX_RESPONSE_BODY_BYTES;
 use peloton::ids::PelotonId;
 use peloton_relay::tokens::TokenManager;
-use peloton_relay::upstream::{
-    LibraryQuery, LibrarySort, MAX_RESPONSE_BODY_BYTES, Peloton, UpstreamError, WorkoutQuery,
-};
+use peloton_relay::upstream::{LibraryQuery, LibrarySort, Peloton, UpstreamError, WorkoutQuery};
 use time::Duration;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;

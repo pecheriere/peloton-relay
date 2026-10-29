@@ -1,5 +1,6 @@
 //! Tests for the OAuth PKCE client and Peloton identifiers.
 
+use peloton::body::MAX_RESPONSE_BODY_BYTES;
 use peloton::ids::PelotonId;
 use peloton::oauth::{AuthClient, AuthError, AuthRequest, CallbackError, TokenSet, parse_callback};
 use secrecy::{ExposeSecret, SecretString};
@@ -346,4 +347,56 @@ fn endpoint_paths() {
         format!("/workout/{id}/performance_graph")
     );
     assert_eq!(endpoints::ride_details(&id), format!("/ride/{id}/details"));
+}
+
+/// A token response padded with trailing whitespace to `len` bytes.
+fn token_response_of_len(len: usize) -> String {
+    let body = r#"{"access_token":"a","refresh_token":"r","expires_in":3600}"#;
+    format!("{body}{}", " ".repeat(len - body.len()))
+}
+
+async fn token_endpoint_answering(status: u16, body: String) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/oauth/token"))
+        .respond_with(ResponseTemplate::new(status).set_body_raw(body, "application/json"))
+        .mount(&server)
+        .await;
+    server
+}
+
+#[tokio::test]
+async fn token_response_at_the_size_limit_is_read() {
+    let server =
+        token_endpoint_answering(200, token_response_of_len(MAX_RESPONSE_BODY_BYTES)).await;
+    let set = client_for(&server)
+        .refresh(&SecretString::from("r".to_owned()))
+        .await
+        .unwrap();
+    assert_eq!(set.access_token.expose_secret(), "a");
+}
+
+#[tokio::test]
+async fn token_response_over_the_size_limit_is_rejected() {
+    let server =
+        token_endpoint_answering(200, token_response_of_len(MAX_RESPONSE_BODY_BYTES + 1)).await;
+    let err = client_for(&server)
+        .refresh(&SecretString::from("r".to_owned()))
+        .await
+        .unwrap_err();
+    assert_eq!(err, AuthError::BodyTooLarge);
+}
+
+#[tokio::test]
+async fn oversized_error_response_is_not_an_invalid_grant() {
+    let body = format!(
+        r#"{{"error":"invalid_grant"}}{}"#,
+        " ".repeat(MAX_RESPONSE_BODY_BYTES)
+    );
+    let server = token_endpoint_answering(403, body).await;
+    let err = client_for(&server)
+        .refresh(&SecretString::from("r".to_owned()))
+        .await
+        .unwrap_err();
+    assert_eq!(err, AuthError::Rejected { status: 403 });
 }

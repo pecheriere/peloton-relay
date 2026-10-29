@@ -15,6 +15,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use peloton::body::{BodyError, MAX_RESPONSE_BODY_BYTES, read_limited};
 use peloton::endpoints::{self, GRAPHQL_URL, PLATFORM_HEADER};
 use peloton::graphql::{Op, ops};
 use peloton::ids::{OnDemandClassId, PelotonId, ScheduledClassId};
@@ -38,14 +39,6 @@ use crate::tokens::TokenManager;
 
 /// Default bound on concurrent upstream requests.
 pub const DEFAULT_MAX_IN_FLIGHT: usize = 4;
-
-/// Most bytes read from one upstream response body.
-///
-/// The largest legitimate answers are workout metrics and library pages,
-/// about 40 KiB in the scrubbed fixtures and well under 1 MiB for a long
-/// workout; this leaves ample headroom while bounding the memory a faulty or
-/// hostile upstream can make the relay hold.
-pub const MAX_RESPONSE_BODY_BYTES: usize = 8 * 1024 * 1024;
 
 /// Why an upstream call failed. Carries no response bodies and no tokens.
 ///
@@ -802,37 +795,21 @@ async fn interpret<T: DeserializeOwned>(response: reqwest::Response) -> Result<T
     )
 }
 
-/// The body of `response`, read in chunks so that it never holds more than
-/// [`MAX_RESPONSE_BODY_BYTES`].
-///
-/// A declared `Content-Length` over the limit is refused before any of the
-/// body is read; a body without one, or understating it, is cut off at the
-/// limit.
-async fn read_body(mut response: reqwest::Response) -> Result<Vec<u8>, UpstreamError> {
-    let too_large = || {
-        tracing::warn!(
-            limit = MAX_RESPONSE_BODY_BYTES,
-            "upstream response body exceeds the size limit"
-        );
-        UpstreamError::BodyTooLarge
-    };
-    let declared_too_large = response
-        .content_length()
-        .is_some_and(|length| usize::try_from(length).is_ok_and(|n| n > MAX_RESPONSE_BODY_BYTES));
-    if declared_too_large {
-        return Err(too_large());
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|err| {
-        tracing::warn!(timeout = err.is_timeout(), "reading upstream body failed");
-        UpstreamError::Transport
-    })? {
-        if chunk.len() > MAX_RESPONSE_BODY_BYTES - body.len() {
-            return Err(too_large());
+/// The body of `response`, at most [`MAX_RESPONSE_BODY_BYTES`] long.
+async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, UpstreamError> {
+    read_limited(response).await.map_err(|err| match err {
+        BodyError::TooLarge => {
+            tracing::warn!(
+                limit = MAX_RESPONSE_BODY_BYTES,
+                "upstream response body exceeds the size limit"
+            );
+            UpstreamError::BodyTooLarge
         }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(body)
+        BodyError::Transport { timeout } => {
+            tracing::warn!(timeout, "reading upstream body failed");
+            UpstreamError::Transport
+        }
+    })
 }
 
 #[cfg(test)]

@@ -766,6 +766,26 @@ async fn upstream_failure_log_carries_the_route_and_request_id() {
 }
 
 #[tokio::test]
+async fn panic_log_and_500_carry_the_request_id_and_route() {
+    use axum::routing::get;
+
+    // Installs the capture before anything logs.
+    common::captured_logs();
+    let app = peloton_relay::api::request_handling(Router::new().route("/boom/{id}", get(boom)));
+    let (status, headers, _) = get_with_span(&app, "/boom/42?q=1", "panic_request_context").await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    let id = request_id(&headers);
+    let panic_line = request_logs(&id)
+        .into_iter()
+        .find(|line| line["event"] == "handler_panicked")
+        .unwrap_or_else(|| panic!("no panic log for {id}"));
+    assert_eq!(panic_line["span"]["route"], "/boom/{id}");
+    assert_eq!(panic_line["span"]["request_id"], id);
+    let line = panic_line.to_string();
+    assert!(!line.contains("42") && !line.contains("q=1"), "{line}");
+}
+
+#[tokio::test]
 async fn every_request_gets_its_own_request_id() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();

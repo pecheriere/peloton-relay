@@ -73,8 +73,17 @@ impl GatedServer {
     }
 
     /// Waits until `count` more requests have reached the gate.
+    ///
+    /// # Panics
+    ///
+    /// When they have not all arrived after a generous wait, so a regression
+    /// that holds requests back fails the test instead of hanging it.
     pub async fn wait_for_arrivals(&self, count: u32) {
-        self.arrived.acquire_many(count).await.unwrap().forget();
+        tokio::time::timeout(Duration::from_secs(30), self.arrived.acquire_many(count))
+            .await
+            .unwrap_or_else(|_| panic!("fewer than {count} requests reached the server"))
+            .unwrap()
+            .forget();
     }
 
     /// Whether no further request reaches the gate for a short while. Only a

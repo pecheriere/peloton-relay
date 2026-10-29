@@ -215,8 +215,9 @@ A panic is logged as `event="panic"` with its source location only.
 Every request gets a fresh id, returned as the `x-request-id` header (an id sent
 by the client is ignored), and its log lines carry the id, the method and the
 matched route template (never the query string or the path's own ids) in their
-`span` field. Upstream response bodies are read up to 8 MiB; a larger one fails
-the request with 502 `upstream_error`.
+`span` field. Responses from Peloton and its token endpoint are read up to
+8 MiB; a larger one fails the request with 502 `upstream_error` (or the token
+refresh or seed with an error).
 
 ## Building
 

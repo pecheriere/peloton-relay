@@ -84,7 +84,7 @@ pub struct AppState {
 
 /// Builds the router for the relay's API.
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let routes = Router::new()
         .route("/v1/me", get(me))
         .route("/v1/workouts", get(workouts))
         .route("/v1/workouts/{id}", get(workout))
@@ -103,10 +103,19 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .fallback(|| async { ApiError::NotFound })
-        .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
+        .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed });
+    request_handling(routes).with_state(state)
+}
+
+/// Wraps `routes` in the relay's request handling: each request runs in a
+/// span with its id, method and route and is given an `x-request-id` header
+/// (never the query string or the path's own ids), and a panicking handler is answered with 500
+/// (see [`catch_panics`]) inside that span, so the panic's log line carries
+/// the request's id and route too.
+pub fn request_handling<S: Clone + Send + Sync + 'static>(routes: Router<S>) -> Router<S> {
+    routes
         .layer(catch_panics())
         .layer(middleware::from_fn(request_context))
-        .with_state(state)
 }
 
 /// Header carrying the id the relay gives each request.
@@ -131,7 +140,9 @@ async fn request_context(request: Request, next: Next) -> Response {
         .extensions()
         .get::<MatchedPath>()
         .map_or(UNMATCHED_ROUTE, MatchedPath::as_str);
-    let span = tracing::info_span!(
+    // An error-level span, so that it stays enabled (and its fields reach the
+    // log lines) under any `RUST_LOG` that enables the warnings logged in it.
+    let span = tracing::error_span!(
         "request",
         method = %request.method(),
         route,

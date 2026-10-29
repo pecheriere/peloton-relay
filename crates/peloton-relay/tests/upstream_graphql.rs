@@ -6,6 +6,7 @@ use std::io::Write as _;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
+use peloton::body::MAX_RESPONSE_BODY_BYTES;
 use peloton::graphql::{
     ADD_CLASS_TO_SCHEDULE, ADD_CLASS_TO_STACK, CHECK_CLASS_IN_STACK, MODIFY_STACK,
     REMOVE_CLASS_FROM_SCHEDULE, RESCHEDULE_CLASS, SCHEDULED_CLASS, VIEW_USER_STACK,
@@ -16,7 +17,7 @@ use peloton::upstream::ScheduleItem;
 use peloton_relay::error::ApiError;
 use peloton_relay::stack::{StackError, StackService, Undecodable};
 use peloton_relay::tokens::TokenManager;
-use peloton_relay::upstream::{MAX_RESPONSE_BODY_BYTES, Peloton, UpstreamError};
+use peloton_relay::upstream::{Peloton, UpstreamError};
 use serde_json::{Value, json};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};

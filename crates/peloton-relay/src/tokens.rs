@@ -181,7 +181,7 @@ fn is_terminal(err: AuthError) -> bool {
     match err {
         AuthError::InvalidGrant => true,
         AuthError::Rejected { status } => (400..500).contains(&status) && status != 429,
-        AuthError::Transport | AuthError::Decode => false,
+        AuthError::Transport | AuthError::Decode | AuthError::BodyTooLarge => false,
     }
 }
 
@@ -611,6 +611,7 @@ mod tests {
         }
         assert!(!is_terminal(AuthError::Transport));
         assert!(!is_terminal(AuthError::Decode));
+        assert!(!is_terminal(AuthError::BodyTooLarge));
     }
 
     #[test]
