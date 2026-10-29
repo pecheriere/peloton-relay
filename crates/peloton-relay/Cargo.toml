@@ -8,9 +8,10 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-axum = { workspace = true, features = ["http1", "json", "tokio", "query"] }
+axum = { workspace = true, features = ["http1", "json", "matched-path", "tokio", "query"] }
 clap.workspace = true
 peloton.workspace = true
+rand.workspace = true
 reqwest.workspace = true
 secrecy.workspace = true
 serde.workspace = true
@@ -31,6 +32,7 @@ base64.workspace = true
 http-body-util.workspace = true
 tempfile.workspace = true
 time = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["process"] }
 tower = { workspace = true, features = ["util"] }
 wiremock.workspace = true
 

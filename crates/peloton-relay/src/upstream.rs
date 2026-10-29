@@ -15,6 +15,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use peloton::body::{BodyError, MAX_RESPONSE_BODY_BYTES, read_limited};
 use peloton::endpoints::{self, GRAPHQL_URL, PLATFORM_HEADER};
 use peloton::graphql::{Op, ops};
 use peloton::ids::{OnDemandClassId, PelotonId, ScheduledClassId};
@@ -69,6 +70,9 @@ pub enum UpstreamError {
         /// Path of the field that failed, e.g. `data[0].id`.
         path: String,
     },
+    /// The response body is larger than [`MAX_RESPONSE_BODY_BYTES`].
+    #[error("upstream response body is larger than {MAX_RESPONSE_BODY_BYTES} bytes")]
+    BodyTooLarge,
     /// The request could not be built, sent, or its response read.
     #[error("upstream request failed")]
     Transport,
@@ -98,6 +102,7 @@ impl fmt::Debug for UpstreamError {
                 f.debug_struct("Upstream").field("status", status).finish()
             }
             Self::Decode { path } => f.debug_struct("Decode").field("path", path).finish(),
+            Self::BodyTooLarge => f.write_str("BodyTooLarge"),
             Self::Transport => f.write_str("Transport"),
             Self::GraphQl => f.write_str("GraphQl"),
             Self::CannotSchedule { .. } => f.debug_struct("CannotSchedule").finish_non_exhaustive(),
@@ -107,6 +112,10 @@ impl fmt::Debug for UpstreamError {
 
 /// Longest Peloton explanation kept in [`UpstreamError::CannotSchedule`].
 pub const MAX_CANNOT_SCHEDULE_MESSAGE: usize = 200;
+
+/// How far the window [`Peloton::scheduled_class`] lists to confirm a class
+/// reaches beyond the class's own start and end.
+pub const SCHEDULE_CONFIRM_MARGIN: time::Duration = time::Duration::minutes(1);
 
 /// Parameters of the workout list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -367,19 +376,65 @@ impl Peloton {
         Ok(items.your_schedule_items)
     }
 
-    /// `ScheduledClass`: one class on the member's schedule.
+    /// `ScheduledClass`: one class on the member's schedule, confirmed by
+    /// [`Self::schedule`] over the class's own window.
+    ///
+    /// Peloton rebuilds a class from its id, which encodes the ride and the
+    /// start time, so `ScheduledClass` still answers for a removed class, or
+    /// for the old id of a moved one; only the schedule list tells whether
+    /// the member still has it. The window runs from
+    /// [`SCHEDULE_CONFIRM_MARGIN`] before the class starts to as long after
+    /// it ends, so it holds the class whether Peloton bounds the list by
+    /// start time or by overlap, inclusively or not.
     ///
     /// # Errors
     ///
-    /// [`UpstreamError::NotFound`] when Peloton has no such scheduled class.
-    /// See [`UpstreamError`] for the others.
+    /// [`UpstreamError::NotFound`] when Peloton has no such scheduled class,
+    /// or its schedule lists no scheduled class with this id.
+    /// [`UpstreamError::Decode`] when the class comes under another id than
+    /// `id`, or without its start or end time, without which it cannot be
+    /// confirmed. [`UpstreamError::Transport`] when the confirm window runs
+    /// past the instants Peloton can be sent. See [`UpstreamError`] for the
+    /// others.
     pub async fn scheduled_class(
         &self,
         id: &ScheduledClassId,
     ) -> Result<ScheduledClass, UpstreamError> {
         let op = ops::SCHEDULED_CLASS;
         let result = self.gql(&op, &json!({ "id": id.as_str() })).await?;
-        scheduled(&op, result)
+        let class = scheduled(&op, result)?;
+        if class.id != *id {
+            // An answer for another class is no answer about this one.
+            return Err(decode_failure(&op, format!("data.{}.id", op.field)));
+        }
+        let Some(start) = class.scheduled_start_time else {
+            return Err(decode_failure(
+                &op,
+                format!("data.{}.scheduledStartTime", op.field),
+            ));
+        };
+        let Some(end) = class.scheduled_end_time else {
+            return Err(decode_failure(
+                &op,
+                format!("data.{}.scheduledEndTime", op.field),
+            ));
+        };
+        let from = start
+            .checked_sub(SCHEDULE_CONFIRM_MARGIN)
+            .ok_or(UpstreamError::Transport)?;
+        let to = end
+            .checked_add(SCHEDULE_CONFIRM_MARGIN)
+            .ok_or(UpstreamError::Transport)?;
+        let listed = self
+            .schedule(from, to)
+            .await?
+            .iter()
+            .any(|item| matches!(item, ScheduleItem::ScheduledClass(c) if c.id == *id));
+        if listed {
+            Ok(class)
+        } else {
+            Err(UpstreamError::NotFound)
+        }
     }
 
     /// `AddClassToSchedule`: schedules the on-demand class of `ride` to start
@@ -779,10 +834,7 @@ async fn interpret<T: DeserializeOwned>(response: reqwest::Response) -> Result<T
             });
         }
     }
-    let body = response.bytes().await.map_err(|err| {
-        tracing::warn!(timeout = err.is_timeout(), "reading upstream body failed");
-        UpstreamError::Transport
-    })?;
+    let body = read_body(response).await?;
     serde_path_to_error::deserialize(&mut serde_json::Deserializer::from_slice(&body)).map_err(
         |err| {
             // The inner error can quote body content; only the path is safe.
@@ -791,6 +843,23 @@ async fn interpret<T: DeserializeOwned>(response: reqwest::Response) -> Result<T
             UpstreamError::Decode { path }
         },
     )
+}
+
+/// The body of `response`, at most [`MAX_RESPONSE_BODY_BYTES`] long.
+async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, UpstreamError> {
+    read_limited(response).await.map_err(|err| match err {
+        BodyError::TooLarge => {
+            tracing::warn!(
+                limit = MAX_RESPONSE_BODY_BYTES,
+                "upstream response body exceeds the size limit"
+            );
+            UpstreamError::BodyTooLarge
+        }
+        BodyError::Transport { timeout } => {
+            tracing::warn!(timeout, "reading upstream body failed");
+            UpstreamError::Transport
+        }
+    })
 }
 
 #[cfg(test)]
