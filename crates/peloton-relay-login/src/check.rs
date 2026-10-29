@@ -2,6 +2,7 @@
 
 use peloton::endpoints;
 use peloton::ids::PelotonId;
+use peloton::oauth::TokenSet;
 use secrecy::ExposeSecret as _;
 use serde::Deserialize;
 use time::OffsetDateTime;
@@ -26,6 +27,15 @@ pub fn parse_me(body: &[u8]) -> Result<Me, String> {
     serde_json::from_slice(body).map_err(|_| "unexpected /me response shape".to_owned())
 }
 
+/// Whether `set` carries a non-empty refresh token.
+fn has_refresh_token(set: &TokenSet) -> bool {
+    !set.refresh_token.expose_secret().is_empty()
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
 /// Logs in, calls `/me`, refreshes once and calls `/me` with the new token.
 ///
 /// # Errors
@@ -37,16 +47,14 @@ pub fn run(session: &Session) -> Result<(), String> {
     let me = parse_me(&session.get(&first.access_token, &endpoints::me())?)?;
 
     let second = session.refresh(&first.refresh_token)?;
+    let issued = has_refresh_token(&first);
     let rotated = second.refresh_token.expose_secret() != first.refresh_token.expose_secret();
     parse_me(&session.get(&second.access_token, &endpoints::me())?)?;
 
     eprintln!("user id:                 {}", me.id);
     eprintln!("username:                {}", me.username);
-    eprintln!("refresh token issued:    yes");
-    eprintln!(
-        "refresh rotated it:      {}",
-        if rotated { "yes" } else { "no" }
-    );
+    eprintln!("refresh token issued:    {}", yes_no(issued));
+    eprintln!("refresh rotated it:      {}", yes_no(rotated));
     eprintln!("access token lifetime:   about {lifetime} seconds");
     eprintln!("/me with refreshed token: ok");
     Ok(())
@@ -54,7 +62,27 @@ pub fn run(session: &Session) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_me;
+    use peloton::oauth::TokenSet;
+    use secrecy::SecretString;
+    use time::OffsetDateTime;
+
+    use super::{has_refresh_token, parse_me, yes_no};
+
+    fn token_set(refresh: &str) -> TokenSet {
+        TokenSet {
+            access_token: SecretString::from("access".to_owned()),
+            refresh_token: SecretString::from(refresh.to_owned()),
+            expires_at: OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn refresh_token_issued_follows_the_token_set() {
+        assert!(has_refresh_token(&token_set("refresh")));
+        assert!(!has_refresh_token(&token_set("")));
+        assert_eq!(yes_no(true), "yes");
+        assert_eq!(yes_no(false), "no");
+    }
 
     #[test]
     fn parses_only_needed_fields() {

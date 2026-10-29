@@ -28,3 +28,7 @@ wry = "0.57"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+proptest = "1.12.0"
+tempfile.workspace = true

@@ -73,6 +73,8 @@ const SHIFT_RANGE: std::ops::RangeInclusive<i64> = -5 * 365 * 86_400..=-365 * 86
 const MIN_HEX_RUN: usize = 32;
 const MIN_TOKEN_RUN: usize = 40;
 const MIN_SENSITIVE_LEN: usize = 3;
+/// Characters from which a sensitive string is erased inside longer words too.
+const MIN_SUBSTRING_LEN: usize = 4;
 
 const REDACTED: &str = "redacted";
 const REDACTED_URL: &str = "https://example.invalid/redacted";
@@ -327,7 +329,7 @@ struct Scrubber {
     uuids: HashMap<String, String>,
     placeholders: HashMap<(String, String), String>,
     counters: HashMap<String, u32>,
-    /// ASCII-lowercased strings to erase, longest first.
+    /// Case-folded strings to erase, longest first.
     sensitive: Vec<String>,
     track_points: u32,
     /// Recomputed zone durations by original workout id.
@@ -407,13 +409,11 @@ impl Scrubber {
         for (key, child) in map {
             let Value::String(text) = child else { continue };
             if PERSON_WORDS.contains(&key.as_str()) {
-                self.sensitive.push(text.to_ascii_lowercase());
-                self.sensitive.extend(
-                    text.split(|c: char| !c.is_alphanumeric())
-                        .map(str::to_ascii_lowercase),
-                );
+                self.sensitive.push(fold_case(text));
+                self.sensitive
+                    .extend(text.split(|c: char| !c.is_alphanumeric()).map(fold_case));
             } else if PERSON_WHOLE.contains(&key.as_str()) {
-                self.sensitive.push(text.to_ascii_lowercase());
+                self.sensitive.push(fold_case(text));
             }
         }
     }
@@ -886,29 +886,52 @@ fn has_opaque_token(text: &str) -> bool {
         .any(|run| run.len() >= MIN_TOKEN_RUN && !run.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
-/// Replaces whole-word, ASCII-case-insensitive occurrences of each needle.
+/// Folds `text` for case-insensitive comparison: each character is
+/// lower-cased, upper-cased and lower-cased again, so "ß", "ẞ" and "SS", "ς"
+/// and "σ", "É" and "é" all agree.
+///
+/// This matches Unicode full case folding (`CaseFolding.txt`, statuses C and
+/// F) for the scripts that have case. It does not normalise, so a name
+/// written with combining accents (NFD) is not equal to its precomposed
+/// (NFC) form.
+fn fold_case(text: &str) -> String {
+    text.chars().flat_map(fold_char).collect()
+}
+
+fn fold_char(c: char) -> impl Iterator<Item = char> {
+    c.to_lowercase()
+        .flat_map(char::to_uppercase)
+        .flat_map(char::to_lowercase)
+}
+
+/// Replaces occurrences of each folded needle, ignoring case.
+///
+/// A needle of at least [`MIN_SUBSTRING_LEN`] characters matches anywhere, so
+/// compound forms (`MarieClaire`, `Jean-Luc`) are erased; a shorter one only
+/// matches as a whole word, so "ben" does not erase half of "benefits".
 fn erase_words(text: &str, needles: &[String]) -> String {
     let mut current = text.to_owned();
     for needle in needles {
-        let lower = current.to_ascii_lowercase();
-        if !lower.contains(needle.as_str()) {
-            continue;
-        }
+        let whole_word = needle.chars().count() < MIN_SUBSTRING_LEN;
+        let (folded, origins) = fold_with_origins(&current);
         let mut out = String::with_capacity(current.len());
         let mut last = 0;
-        for (start, _) in lower.match_indices(needle.as_str()) {
-            let end = start + needle.len();
-            if start < last {
+        for (start, matched) in folded.match_indices(needle.as_str()) {
+            let (from, _) = origins[start];
+            let (_, to) = origins[start + matched.len() - 1];
+            if from < last {
                 continue;
             }
-            let before = current[..start].chars().next_back();
-            let after = current[end..].chars().next();
-            let bounded = !before.is_some_and(char::is_alphanumeric)
-                && !after.is_some_and(char::is_alphanumeric);
+            let bounded = !whole_word || {
+                let before = current[..from].chars().next_back();
+                let after = current[to..].chars().next();
+                !before.is_some_and(char::is_alphanumeric)
+                    && !after.is_some_and(char::is_alphanumeric)
+            };
             if bounded {
-                out.push_str(&current[last..start]);
+                out.push_str(&current[last..from]);
                 out.push_str(REDACTED);
-                last = end;
+                last = to;
             }
         }
         out.push_str(&current[last..]);
@@ -917,9 +940,25 @@ fn erase_words(text: &str, needles: &[String]) -> String {
     current
 }
 
+/// Folds `text` like [`fold_case`] and records, for every byte of the result,
+/// the byte range of the character of `text` it came from.
+fn fold_with_origins(text: &str) -> (String, Vec<(usize, usize)>) {
+    let mut folded = String::with_capacity(text.len());
+    let mut origins = Vec::with_capacity(text.len());
+    for (start, c) in text.char_indices() {
+        let range = (start, start + c.len_utf8());
+        for f in fold_char(c) {
+            folded.push(f);
+            origins.extend(std::iter::repeat_n(range, f.len_utf8()));
+        }
+    }
+    (folded, origins)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{erase_words, has_opaque_token, is_month_buckets, is_uuid};
+    use super::{erase_words, fold_case, has_opaque_token, is_month_buckets, is_uuid};
+    use proptest::prelude::*;
     use serde_json::json;
 
     #[test]
@@ -929,6 +968,63 @@ mod tests {
             erase_words("Ride with Ben: benefits", &needles),
             "Ride with redacted: benefits"
         );
+    }
+
+    #[test]
+    fn erases_non_ascii_names_in_any_case() {
+        let needles = vec![fold_case("élodie")];
+        assert_eq!(
+            erase_words("ÉLODIE, Élodie and élodie", &needles),
+            "redacted, redacted and redacted"
+        );
+    }
+
+    #[test]
+    fn erases_names_across_special_case_folding() {
+        let needles = vec![fold_case("Groß"), fold_case("ΟΔΥΣΣΕΥΣ")];
+        assert_eq!(
+            erase_words("GROSS, groß, Gross and Οδυσσευς, ΟΔΥΣΣΕΥΣ", &needles),
+            "redacted, redacted, redacted and redacted, redacted"
+        );
+    }
+
+    #[test]
+    fn erases_names_inside_compound_forms() {
+        let needles = vec![fold_case("marie"), fold_case("jean-luc")];
+        assert_eq!(
+            erase_words("MarieClaire, Jean-Luc and the Marie-Louise ride", &needles),
+            "redactedClaire, redacted and the redacted-Louise ride"
+        );
+    }
+
+    #[test]
+    fn short_names_are_erased_as_whole_words_only() {
+        let needles = vec![fold_case("Léa")];
+        assert_eq!(
+            erase_words("Ride with LÉA: Léandre", &needles),
+            "Ride with redacted: Léandre"
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn scrubbed_text_never_contains_the_name_in_any_case(
+            name in "[a-zA-Zàâçéèêëîïôöûüñßẞœ]{4,12}",
+            before in "[ .,:;!-]{0,3}",
+            after in "[ .,:;!-]{0,3}",
+        ) {
+            let folded = fold_case(&name);
+            prop_assume!(!"redacted".contains(&folded));
+            let needles = vec![folded.clone()];
+            for variant in [name.to_lowercase(), name.to_uppercase(), name.clone()] {
+                let text = format!("{before}{variant}{after}x{variant}");
+                let scrubbed = erase_words(&text, &needles);
+                prop_assert!(
+                    !fold_case(&scrubbed).contains(&folded),
+                    "{scrubbed:?} still contains {name:?}"
+                );
+            }
+        }
     }
 
     #[test]
