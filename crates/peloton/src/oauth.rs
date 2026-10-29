@@ -32,6 +32,11 @@ fn random_token(len: usize) -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
+/// The PKCE S256 code challenge for `verifier`.
+fn s256_challenge(verifier: &SecretString) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.expose_secret().as_bytes()))
+}
+
 /// One authorization attempt: PKCE verifier and challenge plus state and nonce.
 #[derive(Debug)]
 pub struct AuthRequest {
@@ -49,20 +54,9 @@ impl AuthRequest {
     /// Generates a fresh verifier, challenge, state and nonce.
     #[must_use]
     pub fn generate() -> Self {
-        let mut request = Self::from_verifier(SecretString::from(random_token(VERIFIER_BYTES)));
-        request.state = random_token(STATE_BYTES);
-        request.nonce = random_token(STATE_BYTES);
-        request
-    }
-
-    /// Builds a request around a given verifier (S256 challenge derived from it).
-    ///
-    /// State and nonce are freshly random.
-    #[must_use]
-    pub fn from_verifier(verifier: SecretString) -> Self {
-        let digest = Sha256::digest(verifier.expose_secret().as_bytes());
+        let verifier = SecretString::from(random_token(VERIFIER_BYTES));
         Self {
-            challenge: URL_SAFE_NO_PAD.encode(digest),
+            challenge: s256_challenge(&verifier),
             verifier,
             state: random_token(STATE_BYTES),
             nonce: random_token(STATE_BYTES),
@@ -109,14 +103,21 @@ pub enum CallbackError {
         /// The `error` query parameter.
         error: String,
     },
+    /// A query parameter the callback relies on appears more than once.
+    #[error("redirect URL repeats the {name} parameter")]
+    DuplicateParameter {
+        /// Name of the repeated parameter.
+        name: &'static str,
+    },
 }
 
 /// Extracts the authorization code from the redirect URL the browser landed on.
 ///
 /// # Errors
 ///
-/// Returns a [`CallbackError`] when the URL is not the redirect URI, the state
-/// does not match, the provider reported an error, or no code is present.
+/// Returns a [`CallbackError`] when the URL is not the redirect URI, `code`,
+/// `state` or `error` appears more than once, the state does not match, the
+/// provider reported an error, or no code is present.
 pub fn parse_callback(url: &str, expected_state: &str) -> Result<SecretString, CallbackError> {
     let redirect = Url::parse(REDIRECT_URI).map_err(|_| CallbackError::NotRedirectUri)?;
     let parsed = Url::parse(url.trim()).map_err(|_| CallbackError::NotRedirectUri)?;
@@ -132,11 +133,15 @@ pub fn parse_callback(url: &str, expected_state: &str) -> Result<SecretString, C
     let mut state = None;
     let mut error = None;
     for (key, value) in parsed.query_pairs() {
-        match key.as_ref() {
-            "code" => code = Some(value.into_owned()),
-            "state" => state = Some(value.into_owned()),
-            "error" => error = Some(value.into_owned()),
-            _ => {}
+        let (slot, name) = match key.as_ref() {
+            "code" => (&mut code, "code"),
+            "state" => (&mut state, "state"),
+            "error" => (&mut error, "error"),
+            _ => continue,
+        };
+        // Refuse rather than pick one: which copy wins is parser-dependent.
+        if slot.replace(value.into_owned()).is_some() {
+            return Err(CallbackError::DuplicateParameter { name });
         }
     }
 
@@ -305,7 +310,7 @@ impl AuthClient {
         let parsed: TokenResponse = response.json().await.map_err(|_| AuthError::Decode)?;
         let refresh_token = match (parsed.refresh_token, previous_refresh) {
             (Some(new), _) => new,
-            (None, Some(old)) => SecretString::from(old.expose_secret().to_owned()),
+            (None, Some(old)) => old.clone(),
             (None, None) => return Err(AuthError::Decode),
         };
         let expires_at = OffsetDateTime::now_utc()
@@ -316,5 +321,22 @@ impl AuthClient {
             refresh_token,
             expires_at,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use secrecy::SecretString;
+
+    use super::s256_challenge;
+
+    #[test]
+    fn challenge_matches_rfc_7636_test_vector() {
+        // RFC 7636, appendix B.
+        let verifier = SecretString::from("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk".to_owned());
+        assert_eq!(
+            s256_challenge(&verifier),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
     }
 }
