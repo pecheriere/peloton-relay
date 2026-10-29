@@ -11,7 +11,7 @@ publish = false
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"] }
-base64 = "0.22"
+base64 = "0.23"
 rand = "0.9"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 secrecy = { version = "0.10", features = ["serde"] }
