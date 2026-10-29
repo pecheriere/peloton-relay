@@ -121,8 +121,9 @@ name is 1 to 16 lowercase ASCII letters, chosen by the deployment (for example
 Each request names its account in the `X-Peloton-Account` header. A request
 that names no configured account answers 403 `forbidden`, for every path but
 `/healthz`, `/readyz` and `/openapi.json` (unmatched paths included), before any
-parameter or body is validated and before Peloton is contacted. The header is set by the
-proxy in front of the relay, not by clients (see [Security model](#security-model)).
+parameter or body is validated and before Peloton is contacted. The header is
+set by the proxy in front of the relay, not by clients (see
+[Security model](#security-model)).
 
 The state directory holds one directory per account:
 
@@ -163,22 +164,38 @@ with `(no username)` in place of `<username>` when Peloton reports none, and the
 id shown as its last four hex digits. When `--rebind` changed the user, it
 first prints `account "alice": was bound to Peloton user id …<last 4 hex>`.
 
+To move a Peloton user to another account, delete the old account's
+`binding.json`, then seed the new account. The old account's `state.json` may
+stay: the server refuses it while the account is unbound, and `bind` refuses it
+while its user is bound to the new account.
+
 **Upgrading from 0.2.x.** Earlier releases kept a single `state.json` directly
-in the state directory, and the server refuses to start while that file is
-there. Move it into its account's directory and bind the account to the user of
-that state file. The account directory must belong to the container's user
-(65532 for the published image, or the `user:` your deployment sets), or `bind`
-and the server cannot open it:
+in the state directory, and 0.3.0 refuses to start while that file is there.
+Move it into its account's directory and bind the account to the user of that
+state file, in this order:
 
-```sh
-install -d -m 0700 -o <uid> -g <gid> <state dir>/alice
-mv <state dir>/state.json <state dir>/alice/state.json
-docker exec <container> /peloton-relay bind --account alice
-```
+1. Stop the 0.2.x container.
+2. Create the account directory, owned by the container's user (65532 for the
+   published image, or the `user:` your deployment sets; otherwise `bind` and
+   the server cannot open it), and move the state file into it. A `mv` within
+   one filesystem keeps the file's ownership, which must stay that user:
 
-The moved `state.json` must stay owned by that user; a `mv` within one
-filesystem keeps its ownership. Set
-`PELOTON_RELAY_ACCOUNTS` before starting 0.3.0; it has no default.
+   ```sh
+   install -d -m 0700 -o <uid> -g <gid> <state dir>/alice
+   mv <state dir>/state.json <state dir>/alice/state.json
+   ```
+
+3. Start 0.3.0 with `PELOTON_RELAY_ACCOUNTS` set (it has no default), e.g.
+   `PELOTON_RELAY_ACCOUNTS=alice`.
+4. Bind the account to the user of its state file:
+
+   ```sh
+   docker exec <container> /peloton-relay bind --account alice
+   ```
+
+Between steps 3 and 4 the account's `/v1` routes answer 503
+`not_authenticated` and the server logs `event="state_refused"` with
+`reason="unbound"`; both are expected and end once `bind` has run.
 
 ## Security model
 
@@ -252,8 +269,8 @@ Each account needs its own Peloton token set before the relay can answer for it
 (without one, its `/v1` routes answer 503 `not_authenticated`; `/readyz` only
 reports that the server is up). The login helper obtains one through the real
 Peloton web login (so passwords and 2FA are handled by Peloton's own page) and
-prints it as JSON on stdout. It is a macOS
-tool and is not part of the image. On a Mac:
+prints it as JSON on stdout. It is a macOS tool and is not part of the image.
+On a Mac:
 
 ```sh
 cargo run --release -p peloton-relay-login | \
@@ -262,14 +279,14 @@ cargo run --release -p peloton-relay-login | \
 
 `seed` reads the token set from stdin, verifies it with Peloton, binds the
 account to the credential's Peloton user and stores it in the account's
-directory. The tokens never touch a command line or a disk outside the
-state directory. `seed` and the server's token refresh take turns on a lock file
+directory. The tokens never touch a command line or a disk outside the state
+directory. `seed` and the server's token refresh take turns on a lock file
 (`.state.json.lock`, 0600, in the account's directory next to `state.json`), so
-neither overwrites the other: a seed that lands first is used by the refresh, and a seed that arrives
-during a refresh waits for it (up to a minute, then it fails and can be run
-again). Seed right after logging in: a token set whose access token has
-already expired fails the check against `/me`; run the login again. For a login
-that only reports non-secret facts, run
+neither overwrites the other: a seed that lands first is used by the refresh,
+and a seed that arrives during a refresh waits for it (up to a minute, then it
+fails and can be run again). Seed right after logging in: a token set whose
+access token has already expired fails the check against `/me`; run the login
+again. For a login that only reports non-secret facts, run
 `cargo run --release -p peloton-relay-login -- check`.
 
 To check the schedule and Stack operations against a real account (for example
@@ -299,17 +316,19 @@ traffic; repeat the bootstrap only if Peloton invalidates the refresh token.
 Logs are JSON lines on stdout. Every event about a credential or a write
 carries an `account` field with the account name; Peloton user ids appear only
 as their last four hex digits (`user="…00f2"`), and usernames never. A failed
-Peloton authentication is logged once per transition into the failed state as `event="peloton_auth_failed"`. When
-Peloton rejects an access token the relay has just refreshed after a 401, it
-logs `event="peloton_unauthorized_after_refresh"` once and forces at most one
+Peloton authentication is logged once per transition into the failed state as
+`event="peloton_auth_failed"`. When Peloton rejects an access token the relay
+has just refreshed after a 401, it logs
+`event="peloton_unauthorized_after_refresh"` once and forces at most one
 refresh per 10 minutes, rather than rotating the credential on every request.
 A failure to save refreshed tokens is logged once per streak as
 `event="state_save_failed"`, and the next successful save as
 `event="state_save_recovered"`. A state file that does not match its account's
-binding is refused with `event="state_refused"`; `event="account_rebound"` marks
-the server picking up a seed that moved an account to another Peloton user; a
-request that names no configured account logs `event="account_refused"` (the
-name only when it is a valid account name).
+binding is refused with `event="state_refused"`. When the running relay picks
+up a rebind (a seed with `--rebind` that moved an account to another Peloton
+user), it logs `event="account_rebound"`; the seed's own output goes to the
+operator's terminal, not to the log. A request that names no configured account
+logs `event="account_refused"` (the name only when it is a valid account name).
 Each write logs `event="peloton_write"` (see [Security model](#security-model)).
 A panic is logged as `event="panic"` with its source location only.
 Every request gets a fresh id, returned as the `x-request-id` header (an id sent
