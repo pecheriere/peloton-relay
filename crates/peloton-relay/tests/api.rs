@@ -1,11 +1,13 @@
 //! Tests for the HTTP API, driving the router against a mock Peloton.
 
+use std::sync::Arc;
+
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt as _;
 use peloton::upstream as wire;
-use peloton_relay::api::openapi;
+use peloton_relay::api::{AccountRegistry, openapi};
 use peloton_relay::model;
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -41,7 +43,7 @@ fn app(dir: &tempfile::TempDir, server: &MockServer, seeded: bool) -> Router {
 }
 
 async fn get(app: &Router, uri: &str) -> (StatusCode, axum::http::HeaderMap, String) {
-    send(app, Request::get(uri).body(Body::empty()).unwrap()).await
+    send(app, bare("GET", uri)).await
 }
 
 fn parse(body: &str) -> Value {
@@ -316,11 +318,7 @@ async fn unknown_route_and_method_are_json() {
     assert_eq!(headers[header::CONTENT_TYPE], "application/json");
     assert_error(&body, "not_found");
 
-    let response = app
-        .clone()
-        .oneshot(Request::post("/v1/me").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
+    let response = app.clone().oneshot(bare("POST", "/v1/me")).await.unwrap();
     assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
     let body = response.into_body().collect().await.unwrap().to_bytes();
@@ -419,20 +417,51 @@ async fn healthz_never_calls_upstream() {
 }
 
 #[tokio::test]
-async fn readyz_reflects_token_state() {
+async fn readyz_is_ready_without_credentials() {
     let server = MockServer::start().await;
-    let dir = tempfile::tempdir().unwrap();
-    let unseeded = app(&dir, &server, false);
-    let (status, _, body) = get(&unseeded, "/readyz").await;
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_error(&body, "not_authenticated");
-
-    let dir = tempfile::tempdir().unwrap();
-    let seeded = app(&dir, &server, true);
-    let (status, _, body) = get(&seeded, "/readyz").await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(!body.contains(ACCESS) && !body.contains(REFRESH));
+    for seeded in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let (status, _, body) = send(
+            &app(&dir, &server, seeded),
+            api_common::request_as(None, "GET", "/readyz", None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "seeded {seeded}: {body}");
+        assert_eq!(parse(&body), serde_json::json!({ "status": "ready" }));
+    }
     assert_eq!(upstream_hits(&server).await, 0);
+}
+
+#[test]
+fn openapi_documents_the_account_requirement() {
+    let document = serde_json::to_value(openapi()).unwrap();
+    let mut checked = 0;
+    for (route, item) in document["paths"].as_object().unwrap() {
+        for (verb, operation) in item.as_object().unwrap() {
+            let forbidden = &operation["responses"]["403"];
+            if route.starts_with("/v1/") {
+                let description = forbidden["description"].as_str().unwrap_or_default();
+                assert!(
+                    description.contains("`forbidden`"),
+                    "{verb} {route}: {forbidden}"
+                );
+                assert_eq!(
+                    forbidden["content"]["application/json"]["schema"]["$ref"],
+                    "#/components/schemas/ErrorBody",
+                    "{verb} {route}"
+                );
+                checked += 1;
+            } else {
+                assert!(forbidden.is_null(), "{verb} {route} has a 403");
+            }
+        }
+    }
+    assert_eq!(checked, api_common::V1_ROUTES.len());
+    for probe in ["/healthz", "/readyz"] {
+        assert!(document["paths"][probe]["get"].is_object(), "{probe}");
+    }
+    let description = document["info"]["description"].as_str().unwrap();
+    assert!(description.contains("X-Peloton-Account"), "{description}");
 }
 
 #[tokio::test]
@@ -678,13 +707,7 @@ fn openapi_documents_every_error_response() {
             "{route}: {not_found}"
         );
     }
-    let readyz = responses("/readyz");
-    assert!(
-        readyz["503"]["description"]
-            .as_str()
-            .unwrap()
-            .contains("not_authenticated")
-    );
+    assert!(responses("/readyz")["503"].is_null());
     // Unknown routes and wrong methods are documented once, for the whole API.
     let description = document["info"]["description"].as_str().unwrap();
     for text in [
@@ -790,7 +813,13 @@ async fn panic_log_and_500_carry_the_request_id_and_route() {
 
     // Installs the capture before anything logs.
     common::captured_logs();
-    let app = peloton_relay::api::request_handling(Router::new().route("/boom/{id}", get(boom)));
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let accounts = AccountRegistry::new(vec![api_common::alice(&dir, &server, true)]).unwrap();
+    let app = peloton_relay::api::request_handling(
+        Router::new().route("/boom/{id}", get(boom)),
+        Arc::new(accounts),
+    );
     let (status, headers, _) =
         get_with_span(&app, "/boom/zq7-sentinel?q=1", "panic_request_context").await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
@@ -815,10 +844,11 @@ async fn every_request_gets_its_own_request_id() {
     let app = app(&dir, &server, true);
     let mut ids = Vec::new();
     for uri in ["/healthz", "/healthz", "/nowhere"] {
-        let request = Request::get(uri)
-            .header("x-request-id", "client-chosen-id")
-            .body(Body::empty())
-            .unwrap();
+        let mut request = bare("GET", uri);
+        request.headers_mut().insert(
+            "x-request-id",
+            axum::http::HeaderValue::from_static("client-chosen-id"),
+        );
         let (_, headers, _) = send(&app, request).await;
         ids.push(request_id(&headers));
     }
@@ -881,7 +911,7 @@ async fn get_with_span(
     uri: &str,
     case: &str,
 ) -> (StatusCode, axum::http::HeaderMap, String) {
-    send(app, Request::get(uri).body(Body::empty()).unwrap())
+    send(app, bare("GET", uri))
         .instrument(tracing::info_span!("case", name = case))
         .await
 }

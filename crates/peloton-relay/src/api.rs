@@ -1,8 +1,12 @@
-//! The relay's HTTP API: reads of the account, its class library, schedule
+//! The relay's HTTP API: reads of an account, its class library, schedule
 //! and Stack, and validated, audit-logged writes to the schedule and Stack.
+//!
+//! Each request is served from the one account its `X-Peloton-Account`
+//! header names (see [`ACCOUNT_HEADER`]); any other is refused.
 
 use std::any::Any;
-use std::collections::HashSet;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, HashSet};
 use std::future;
 use std::sync::Arc;
 
@@ -19,10 +23,11 @@ use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime, UtcOffset};
 use tower_http::catch_panic::CatchPanicLayer;
 use tracing::Instrument as _;
-use utoipa::openapi::RefOr;
 use utoipa::openapi::schema::{ObjectBuilder, Schema, Type};
-use utoipa::{IntoParams, OpenApi, ToSchema};
+use utoipa::openapi::{ContentBuilder, Ref, RefOr, ResponseBuilder};
+use utoipa::{IntoParams, Modify, OpenApi, ToSchema};
 
+use crate::account::AccountName;
 use crate::error::{ApiError, ErrorBody};
 use crate::model::{
     ClassDetails, LIBRARY_DURATIONS_MIN, LibraryCategory, LibraryFilters, LibraryPage,
@@ -30,7 +35,6 @@ use crate::model::{
     WorkoutPage,
 };
 use crate::stack::StackService;
-use crate::tokens::TokenManager;
 use crate::upstream::{LibraryQuery, LibrarySort, Peloton, WorkoutQuery};
 
 const DEFAULT_LIMIT: u32 = 20;
@@ -69,15 +73,80 @@ impl Clock {
     }
 }
 
+/// Header naming the account a request is served from. The proxy in front of
+/// the relay sets it from the caller's identity.
+pub const ACCOUNT_HEADER: HeaderName = HeaderName::from_static("x-peloton-account");
+
+/// The only paths served without an account.
+const ACCOUNT_FREE_PATHS: [&str; 3] = ["/healthz", "/readyz", "/openapi.json"];
+
+/// Everything one account's requests are served with.
+///
+/// Each account has its own client, so its own limit on concurrent upstream
+/// requests, and its own Stack write path, so its Stack writes run one at a
+/// time without waiting for another account's.
+#[derive(Debug)]
+pub struct AccountContext {
+    /// The account.
+    pub name: AccountName,
+    /// The Peloton client, with the account's credential.
+    pub peloton: Arc<Peloton>,
+    /// The account's Stack write path, over the same client.
+    pub stack: Arc<StackService<Arc<Peloton>>>,
+}
+
+impl AccountContext {
+    /// The context of the account whose credential `peloton` uses.
+    #[must_use]
+    pub fn new(peloton: Arc<Peloton>) -> Self {
+        Self {
+            name: peloton.account().clone(),
+            stack: Arc::new(StackService::new(Arc::clone(&peloton))),
+            peloton,
+        }
+    }
+}
+
+/// Two contexts serve the same account.
+#[derive(Debug, thiserror::Error)]
+#[error("account configured twice")]
+pub struct DuplicateAccount;
+
+/// The accounts the relay serves, by name.
+#[derive(Debug)]
+pub struct AccountRegistry(BTreeMap<AccountName, Arc<AccountContext>>);
+
+impl AccountRegistry {
+    /// The registry of `contexts`.
+    ///
+    /// # Errors
+    ///
+    /// [`DuplicateAccount`] when two contexts serve the same account.
+    pub fn new(contexts: Vec<AccountContext>) -> Result<Self, DuplicateAccount> {
+        let mut accounts = BTreeMap::new();
+        for context in contexts {
+            match accounts.entry(context.name.clone()) {
+                Entry::Occupied(_) => return Err(DuplicateAccount),
+                Entry::Vacant(slot) => {
+                    slot.insert(Arc::new(context));
+                }
+            }
+        }
+        Ok(Self(accounts))
+    }
+
+    /// The context of account `name`, if the relay serves it.
+    #[must_use]
+    pub fn get(&self, name: &AccountName) -> Option<Arc<AccountContext>> {
+        self.0.get(name).cloned()
+    }
+}
+
 /// Shared state of every handler.
 #[derive(Clone)]
 pub struct AppState {
-    /// The Peloton client.
-    pub peloton: Arc<Peloton>,
-    /// The credential holder, for readiness.
-    pub tokens: Arc<TokenManager>,
-    /// The Stack's write path, over the same client.
-    pub stack: Arc<StackService<Arc<Peloton>>>,
+    /// The accounts requests are served from.
+    pub accounts: Arc<AccountRegistry>,
     /// The clock start times are checked against.
     pub clock: Clock,
 }
@@ -104,7 +173,7 @@ pub fn router(state: AppState) -> Router {
         .route("/readyz", get(readyz))
         .fallback(|| async { ApiError::NotFound })
         .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed });
-    request_handling(routes).with_state(state)
+    request_handling(routes, Arc::clone(&state.accounts)).with_state(state)
 }
 
 /// Wraps `routes` in the relay's request handling.
@@ -113,12 +182,18 @@ pub fn router(state: AppState) -> Router {
 /// the query string or the path's own ids) and is answered with an
 /// `x-request-id` header. A panicking handler is answered with 500 (see
 /// [`catch_panics`]) inside that span, so the panic's log line carries the
-/// request's id and route too.
+/// request's id and route too. Inside both, every request but those of the
+/// account-free paths must name an account of `accounts` (see
+/// [`require_account`]) before it reaches its route or a fallback.
 ///
 /// Public only so that the integration tests can wrap their own routes.
 #[doc(hidden)]
-pub fn request_handling<S: Clone + Send + Sync + 'static>(routes: Router<S>) -> Router<S> {
+pub fn request_handling<S: Clone + Send + Sync + 'static>(
+    routes: Router<S>,
+    accounts: Arc<AccountRegistry>,
+) -> Router<S> {
     routes
+        .layer(middleware::from_fn_with_state(accounts, require_account))
         .layer(catch_panics())
         .layer(middleware::from_fn(request_context))
 }
@@ -133,7 +208,8 @@ const UNMATCHED_ROUTE: &str = "unmatched";
 /// Gives the request a fresh id, returned as `x-request-id`, and runs it in a
 /// span with that id, its method and its matched route (the path template,
 /// e.g. `/v1/workouts/{id}`), so that every log line of the handler, such as
-/// an upstream failure, carries them.
+/// an upstream failure, carries them; [`require_account`] adds the account
+/// the request is served from.
 ///
 /// An id sent by the client is ignored. The span holds neither the query
 /// string nor the path's own ids.
@@ -150,12 +226,117 @@ async fn request_context(request: Request, next: Next) -> Response {
         method = %request.method(),
         route,
         request_id = id.as_ref().and_then(|id| id.to_str().ok()),
+        account = tracing::field::Empty,
     );
     let mut response = next.run(request).instrument(span).await;
     if let Some(id) = id {
         response.headers_mut().insert(REQUEST_ID_HEADER, id);
     }
     response
+}
+
+/// Why a request names no account the relay serves; logged as `reason`.
+enum Refusal {
+    /// No account header.
+    Missing,
+    /// More than one account header.
+    Ambiguous,
+    /// The header is not a valid account name.
+    Invalid,
+    /// A valid name the relay does not serve.
+    Unknown(AccountName),
+}
+
+impl Refusal {
+    /// Logs the `account_refused` event; the account only when it is a
+    /// valid name, so a log line never holds arbitrary header bytes.
+    fn log(&self) {
+        let reason = match self {
+            Self::Missing => "missing",
+            Self::Ambiguous => "ambiguous",
+            Self::Invalid => "invalid",
+            Self::Unknown(name) => {
+                tracing::warn!(
+                    event = "account_refused",
+                    reason = "unknown",
+                    account = %name,
+                    "request refused: the relay does not serve its account"
+                );
+                return;
+            }
+        };
+        tracing::warn!(
+            event = "account_refused",
+            reason,
+            "request refused: it names no valid account"
+        );
+    }
+}
+
+/// The context of the account `request` names: its one [`ACCOUNT_HEADER`]
+/// value, a valid name of an account of `accounts`.
+fn named_account(
+    request: &Request,
+    accounts: &AccountRegistry,
+) -> Result<Arc<AccountContext>, Refusal> {
+    let mut values = request.headers().get_all(ACCOUNT_HEADER).iter();
+    let value = values.next().ok_or(Refusal::Missing)?;
+    if values.next().is_some() {
+        return Err(Refusal::Ambiguous);
+    }
+    let name: AccountName = value
+        .to_str()
+        .ok()
+        .and_then(|text| text.parse().ok())
+        .ok_or(Refusal::Invalid)?;
+    accounts.get(&name).ok_or(Refusal::Unknown(name))
+}
+
+/// Lets through a request of an account-free path, or one naming an account
+/// of `accounts`, whose context it adds to the request's extensions (see
+/// [`Account`]) and whose name it records on the request span. Anything else
+/// is answered with 403 `forbidden` before routing, validation or any
+/// upstream call, and logged with the reason (see [`Refusal::log`]).
+async fn require_account(
+    State(accounts): State<Arc<AccountRegistry>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    if ACCOUNT_FREE_PATHS.contains(&request.uri().path()) {
+        return next.run(request).await;
+    }
+    match named_account(&request, &accounts) {
+        Ok(context) => {
+            tracing::Span::current().record("account", context.name.as_str());
+            request.extensions_mut().insert(context);
+            next.run(request).await
+        }
+        Err(refusal) => {
+            refusal.log();
+            ApiError::Forbidden.into_response()
+        }
+    }
+}
+
+/// The account a request is served from, added by [`require_account`].
+struct Account(Arc<AccountContext>);
+
+impl<S: Send + Sync> FromRequestParts<S> for Account {
+    type Rejection = ApiError;
+
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, ApiError>> + Send {
+        future::ready(
+            parts
+                .extensions
+                .get::<Arc<AccountContext>>()
+                .cloned()
+                .map(Self)
+                .ok_or(ApiError::Forbidden),
+        )
+    }
 }
 
 /// Answers a request whose handler panicked with 500 `internal_error`.
@@ -178,8 +359,9 @@ pub fn catch_panics() -> CatchPanicLayer<fn(Box<dyn Any + Send + 'static>) -> Re
 #[openapi(
     info(
         title = "Peloton relay",
-        description = "Relay of a Peloton account: its profile, workouts, metrics and classes, the on-demand class library, and the member's schedule and Stack, which it can also change.\n\nEvery error has an `ErrorBody`. Any path not listed here answers 404 `not_found`, any method a listed path does not list answers 405 `method_not_allowed`, and a request the relay fails to handle answers 500 `internal_error`. Writes (tag `peloton-write`) change the member's account; a proxy in front of the relay can authorise them separately from reads.\n\nExample: find a 20-min low-impact ride and schedule it Monday 08:00 Europe/Berlin.\n\n1. `GET /v1/library/filters?category=cycling` and take the `id` of the class type named \"Low Impact\".\n2. `GET /v1/library?category=cycling&class_type=<that id>&duration=20` and pick a class `id`.\n3. `POST /v1/schedule` with `{\"class_id\": \"<class id>\", \"start_time\": \"2026-11-02T08:00:00+01:00\"}`: 08:00 on Monday 2 November 2026 in Europe/Berlin, whose offset that day is +01:00 (always send the offset in effect on that day). The answer holds the class's `scheduled_id`.\n4. `GET /v1/schedule` lists it; `PATCH /v1/schedule/{scheduled_id}` moves it (and gives it a new `scheduled_id`), `DELETE` removes it."
+        description = "Relay of a Peloton account: its profile, workouts, metrics and classes, the on-demand class library, and the member's schedule and Stack, which it can also change.\n\nEvery error has an `ErrorBody`. Any path not listed here answers 404 `not_found`, any method a listed path does not list answers 405 `method_not_allowed`, and a request the relay fails to handle answers 500 `internal_error`. Writes (tag `peloton-write`) change the member's account; a proxy in front of the relay can authorise them separately from reads.\n\nExample: find a 20-min low-impact ride and schedule it Monday 08:00 Europe/Berlin.\n\n1. `GET /v1/library/filters?category=cycling` and take the `id` of the class type named \"Low Impact\".\n2. `GET /v1/library?category=cycling&class_type=<that id>&duration=20` and pick a class `id`.\n3. `POST /v1/schedule` with `{\"class_id\": \"<class id>\", \"start_time\": \"2026-11-02T08:00:00+01:00\"}`: 08:00 on Monday 2 November 2026 in Europe/Berlin, whose offset that day is +01:00 (always send the offset in effect on that day). The answer holds the class's `scheduled_id`.\n4. `GET /v1/schedule` lists it; `PATCH /v1/schedule/{scheduled_id}` moves it (and gives it a new `scheduled_id`), `DELETE` removes it.\n\nEvery route except `/healthz` and `/readyz` serves one Peloton account, named by the `X-Peloton-Account` request header. The proxy in front of the relay sets that header from the caller's identity; clients cannot choose it. A request without a configured account answers 403 `forbidden`."
     ),
+    modifiers(&AccountRequirement),
     paths(
         me,
         workouts,
@@ -224,6 +406,48 @@ pub fn catch_panics() -> CatchPanicLayer<fn(Box<dyn Any + Send + 'static>) -> Re
     ))
 )]
 struct ApiDoc;
+
+/// Documents the 403 `forbidden` answer of every operation under `/v1/`.
+struct AccountRequirement;
+
+impl Modify for AccountRequirement {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        let forbidden = ResponseBuilder::new()
+            .description("`forbidden`: the request does not name an account this relay serves.")
+            .content(
+                "application/json",
+                ContentBuilder::new()
+                    .schema(Some(Ref::from_schema_name("ErrorBody")))
+                    .build(),
+            )
+            .build();
+        for (route, item) in &mut openapi.paths.paths {
+            if !route.starts_with("/v1/") {
+                continue;
+            }
+            let operations = [
+                &mut item.get,
+                &mut item.put,
+                &mut item.post,
+                &mut item.delete,
+                &mut item.options,
+                &mut item.head,
+                &mut item.patch,
+                &mut item.trace,
+                &mut item.query,
+            ]
+            .into_iter()
+            .filter_map(Option::as_mut)
+            .chain(item.additional_operations.values_mut());
+            for operation in operations {
+                operation
+                    .responses
+                    .responses
+                    .insert("403".to_owned(), RefOr::T(forbidden.clone()));
+            }
+        }
+    }
+}
 
 /// The generated `OpenAPI` document.
 #[must_use]
@@ -345,9 +569,9 @@ impl StartTime {
 }
 
 /// One write to the member's account, for the audit log.
-#[derive(Default)]
 struct Write {
     op: &'static str,
+    account: AccountName,
     class_id: Option<PelotonId>,
     class_ids: Option<String>,
     scheduled_id: Option<String>,
@@ -355,10 +579,14 @@ struct Write {
 }
 
 impl Write {
-    fn new(op: &'static str) -> Self {
+    fn new(op: &'static str, account: &AccountName) -> Self {
         Self {
             op,
-            ..Self::default()
+            account: account.clone(),
+            class_id: None,
+            class_ids: None,
+            scheduled_id: None,
+            start_time: None,
         }
     }
 
@@ -372,6 +600,7 @@ impl Write {
         };
         tracing::info!(
             event = "peloton_write",
+            account = %self.account,
             op = self.op,
             class_id = self.class_id.as_ref().map(tracing::field::display),
             class_ids = self.class_ids.as_deref().map(tracing::field::display),
@@ -665,10 +894,10 @@ struct Status {
     )
 )]
 async fn me(
-    State(state): State<AppState>,
+    Account(account): Account,
     Params(NoParams {}): Params<NoParams>,
 ) -> Result<Json<Profile>, ApiError> {
-    let me = state.peloton.me().await?;
+    let me = account.peloton.me().await?;
     Ok(Json(Profile::from_upstream(&me)))
 }
 
@@ -687,10 +916,10 @@ async fn me(
     )
 )]
 async fn workouts(
-    State(state): State<AppState>,
+    Account(account): Account,
     Params(params): Params<WorkoutsParams>,
 ) -> Result<Json<WorkoutPage>, ApiError> {
-    let page = state.peloton.workouts(&params.into_query()?).await?;
+    let page = account.peloton.workouts(&params.into_query()?).await?;
     Ok(Json(WorkoutPage::from_upstream(&page)))
 }
 
@@ -710,11 +939,11 @@ async fn workouts(
     )
 )]
 async fn workout(
-    State(state): State<AppState>,
+    Account(account): Account,
     Id(id): Id,
     Params(NoParams {}): Params<NoParams>,
 ) -> Result<Json<WorkoutDetail>, ApiError> {
-    let workout = state.peloton.workout(&id).await?;
+    let workout = account.peloton.workout(&id).await?;
     Ok(Json(WorkoutDetail::from_upstream(&workout)))
 }
 
@@ -737,7 +966,7 @@ async fn workout(
     )
 )]
 async fn metrics(
-    State(state): State<AppState>,
+    Account(account): Account,
     Id(id): Id,
     Params(params): Params<MetricsParams>,
 ) -> Result<Json<Metrics>, ApiError> {
@@ -745,7 +974,7 @@ async fn metrics(
     if !(1..=MAX_EVERY_N).contains(&every_n) {
         return Err(ApiError::InvalidInput);
     }
-    let graph = state.peloton.performance_graph(&id, every_n).await?;
+    let graph = account.peloton.performance_graph(&id, every_n).await?;
     Ok(Json(Metrics::from_upstream(&graph)))
 }
 
@@ -765,11 +994,11 @@ async fn metrics(
     )
 )]
 async fn class(
-    State(state): State<AppState>,
+    Account(account): Account,
     Id(id): Id,
     Params(NoParams {}): Params<NoParams>,
 ) -> Result<Json<ClassDetails>, ApiError> {
-    let details = state.peloton.ride_details(&id).await?;
+    let details = account.peloton.ride_details(&id).await?;
     Ok(Json(ClassDetails::from_upstream(&details)))
 }
 
@@ -788,10 +1017,10 @@ async fn class(
     )
 )]
 async fn library(
-    State(state): State<AppState>,
+    Account(account): Account,
     Params(params): Params<LibraryParams>,
 ) -> Result<Json<LibraryPage>, ApiError> {
-    let page = state.peloton.library(&params.into_query()?).await?;
+    let page = account.peloton.library(&params.into_query()?).await?;
     Ok(Json(LibraryPage::from_upstream(&page)))
 }
 
@@ -811,13 +1040,13 @@ async fn library(
     )
 )]
 async fn library_filters(
-    State(state): State<AppState>,
+    Account(account): Account,
     Params(params): Params<FiltersParams>,
 ) -> Result<Json<LibraryFilters>, ApiError> {
     let category = params.category.as_str();
     let (filters, categories) = tokio::try_join!(
-        state.peloton.ride_filters(category),
-        state.peloton.browse_categories()
+        account.peloton.ride_filters(category),
+        account.peloton.browse_categories()
     )?;
     Ok(Json(LibraryFilters::from_upstream(
         category,
@@ -841,11 +1070,12 @@ async fn library_filters(
     )
 )]
 async fn schedule(
+    Account(account): Account,
     State(state): State<AppState>,
     Params(params): Params<ScheduleParams>,
 ) -> Result<Json<ScheduleList>, ApiError> {
     let (from, to) = params.window(state.clock.now())?;
-    let items = state.peloton.schedule(from, to).await?;
+    let items = account.peloton.schedule(from, to).await?;
     Ok(Json(ScheduleList::from_upstream(&items)))
 }
 
@@ -868,11 +1098,11 @@ async fn schedule(
     )
 )]
 async fn scheduled(
-    State(state): State<AppState>,
+    Account(account): Account,
     ScheduledId(id): ScheduledId,
     Params(NoParams {}): Params<NoParams>,
 ) -> Result<Json<ScheduledClassView>, ApiError> {
-    let class = state.peloton.scheduled_class(&id).await?;
+    let class = account.peloton.scheduled_class(&id).await?;
     Ok(Json(ScheduledClassView::from_upstream(&class)))
 }
 
@@ -899,6 +1129,7 @@ async fn scheduled(
     )
 )]
 async fn schedule_add(
+    Account(account): Account,
     State(state): State<AppState>,
     Params(NoParams {}): Params<NoParams>,
     Body(request): Body<ScheduleRequest>,
@@ -907,9 +1138,9 @@ async fn schedule_add(
     let write = Write {
         class_id: Some(request.class_id.clone()),
         start_time: Some(start.utc),
-        ..Write::new("schedule_add")
+        ..Write::new("schedule_add", &account.name)
     };
-    let result = state
+    let result = account
         .peloton
         .add_to_schedule(&request.class_id, start.at)
         .await
@@ -948,6 +1179,7 @@ async fn schedule_add(
     )
 )]
 async fn schedule_move(
+    Account(account): Account,
     State(state): State<AppState>,
     ScheduledId(id): ScheduledId,
     Params(NoParams {}): Params<NoParams>,
@@ -957,9 +1189,9 @@ async fn schedule_move(
     let write = Write {
         scheduled_id: Some(id.url_safe().to_owned()),
         start_time: Some(start.utc),
-        ..Write::new("schedule_move")
+        ..Write::new("schedule_move", &account.name)
     };
-    let result = state
+    let result = account
         .peloton
         .reschedule(&id, start.at)
         .await
@@ -989,15 +1221,15 @@ async fn schedule_move(
     )
 )]
 async fn schedule_remove(
-    State(state): State<AppState>,
+    Account(account): Account,
     ScheduledId(id): ScheduledId,
     Params(NoParams {}): Params<NoParams>,
 ) -> Result<StatusCode, ApiError> {
     let write = Write {
         scheduled_id: Some(id.url_safe().to_owned()),
-        ..Write::new("schedule_remove")
+        ..Write::new("schedule_remove", &account.name)
     };
-    let result = state
+    let result = account
         .peloton
         .remove_from_schedule(&id)
         .await
@@ -1021,10 +1253,10 @@ async fn schedule_remove(
     )
 )]
 async fn stack(
-    State(state): State<AppState>,
+    Account(account): Account,
     Params(NoParams {}): Params<NoParams>,
 ) -> Result<Json<StackView>, ApiError> {
-    let stack = state.peloton.stack().await?;
+    let stack = account.peloton.stack().await?;
     Ok(Json(StackView::from_upstream(&stack)))
 }
 
@@ -1049,22 +1281,22 @@ async fn stack(
     )
 )]
 async fn stack_add(
-    State(state): State<AppState>,
+    Account(account): Account,
     Params(NoParams {}): Params<NoParams>,
     Body(request): Body<StackAddRequest>,
 ) -> Result<StackWritten, ApiError> {
     let write = Write {
         class_id: Some(request.class_id.clone()),
-        ..Write::new("stack_add")
+        ..Write::new("stack_add", &account.name)
     };
-    let result = state
+    let result = account
         .stack
         .add(&request.class_id)
         .await
         .map_err(ApiError::from);
     write.log(result.as_ref().map(|()| None));
     result?;
-    Ok(read_back(&state.peloton).await)
+    Ok(read_back(&account.peloton).await)
 }
 
 /// Removes a class from the Stack, keeping the others in order.
@@ -1088,18 +1320,18 @@ async fn stack_add(
     )
 )]
 async fn stack_remove(
-    State(state): State<AppState>,
+    Account(account): Account,
     Id(id): Id,
     Params(NoParams {}): Params<NoParams>,
 ) -> Result<StackWritten, ApiError> {
     let write = Write {
         class_id: Some(id.clone()),
-        ..Write::new("stack_remove")
+        ..Write::new("stack_remove", &account.name)
     };
-    let result = state.stack.remove(&id).await.map_err(ApiError::from);
+    let result = account.stack.remove(&id).await.map_err(ApiError::from);
     write.log(result.as_ref().map(|()| None));
     result?;
-    Ok(read_back(&state.peloton).await)
+    Ok(read_back(&account.peloton).await)
 }
 
 /// Replaces the whole Stack: its classes and their order.
@@ -1122,7 +1354,7 @@ async fn stack_remove(
     )
 )]
 async fn stack_replace(
-    State(state): State<AppState>,
+    Account(account): Account,
     Params(NoParams {}): Params<NoParams>,
     Body(request): Body<StackReplaceRequest>,
 ) -> Result<StackWritten, ApiError> {
@@ -1135,16 +1367,16 @@ async fn stack_replace(
     let ids: Vec<String> = request.class_ids.iter().map(ToString::to_string).collect();
     let write = Write {
         class_ids: Some(ids.join(",")),
-        ..Write::new("stack_replace")
+        ..Write::new("stack_replace", &account.name)
     };
-    let result = state
+    let result = account
         .stack
         .replace(&request.class_ids)
         .await
         .map_err(ApiError::from);
     write.log(result.as_ref().map(|()| None));
     result?;
-    Ok(read_back(&state.peloton).await)
+    Ok(read_back(&account.peloton).await)
 }
 
 /// Liveness: the process is up. Never calls Peloton.
@@ -1157,23 +1389,14 @@ async fn healthz() -> Json<Status> {
     Json(Status { status: "ok" })
 }
 
-/// Readiness: a usable Peloton credential is held. Never exposes it.
+/// Readiness: the server is up. Account credentials are reported in the logs, not here.
 #[utoipa::path(
     get,
     path = "/readyz",
-    responses(
-        (status = 200, description = "A usable Peloton credential is held.", body = Status),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential.", body = ErrorBody)
-    )
+    responses((status = 200, description = "The server is up.", body = Status))
 )]
-async fn readyz(State(state): State<AppState>) -> Result<Json<Status>, ApiError> {
-    // `bearer` rather than `is_ready`: the latter is false until first use.
-    state
-        .tokens
-        .bearer()
-        .await
-        .map_err(|_| ApiError::NotAuthenticated)?;
-    Ok(Json(Status { status: "ready" }))
+async fn readyz() -> Json<Status> {
+    Json(Status { status: "ready" })
 }
 
 /// The `OpenAPI` document.

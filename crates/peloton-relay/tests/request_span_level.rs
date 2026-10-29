@@ -2,8 +2,6 @@
 //!
 //! In a binary of its own: the subscriber is global, with its own filter.
 
-use axum::body::Body;
-use axum::http::Request;
 use time::macros::datetime;
 use tracing_subscriber::EnvFilter;
 use wiremock::matchers::method;
@@ -36,8 +34,7 @@ async fn warning_carries_the_request_span_under_a_warn_filter() {
         .await;
     let dir = tempfile::tempdir().unwrap();
     let app = api_common::relay(&dir, &server, true, datetime!(2030-01-01 00:00 UTC));
-    let (_, headers, _) =
-        api_common::send(&app, Request::get("/v1/me").body(Body::empty()).unwrap()).await;
+    let (_, headers, _) = api_common::send(&app, api_common::bare("GET", "/v1/me")).await;
     let id = headers["x-request-id"].to_str().unwrap();
 
     let contents = logs.contents();
