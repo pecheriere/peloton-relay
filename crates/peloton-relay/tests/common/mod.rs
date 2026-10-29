@@ -3,6 +3,7 @@
 use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration as StdDuration;
 
 use peloton::ids::PelotonId;
 use peloton::oauth::TokenSet;
@@ -14,6 +15,9 @@ use tracing_subscriber::fmt::MakeWriter;
 
 /// The credential owner: the member the scrubbed fixtures belong to.
 pub const USER: &str = "000000000000000000000000000000f2";
+
+/// How long a test waits for the state file lock.
+pub const LOCK_WAIT: StdDuration = StdDuration::from_secs(5);
 
 pub fn user() -> PelotonId {
     USER.parse().unwrap()

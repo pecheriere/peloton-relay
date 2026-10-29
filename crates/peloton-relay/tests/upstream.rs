@@ -21,7 +21,7 @@ mod common;
 mod gated;
 mod raw_http;
 
-use common::{captured_logs, http, state, state_file};
+use common::{LOCK_WAIT, captured_logs, http, state, state_file};
 use gated::GatedServer;
 
 const WORKOUT: &str = "fedcba9876543210fedcba9876543210";
@@ -55,7 +55,7 @@ fn client(dir: &tempfile::TempDir, server: &MockServer, access: Option<&str>) ->
 fn client_at(dir: &tempfile::TempDir, uri: &str, access: Option<&str>) -> Peloton {
     if let Some(access) = access {
         state_file(dir.path())
-            .save(&state(access, "refresh-1", Duration::hours(48)))
+            .save(&state(access, "refresh-1", Duration::hours(48)), LOCK_WAIT)
             .unwrap();
     }
     let auth = peloton::oauth::AuthClient::new(http(), Url::parse(uri).unwrap());

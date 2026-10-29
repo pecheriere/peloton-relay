@@ -16,7 +16,7 @@ use time::{Duration, OffsetDateTime};
 use tower::ServiceExt as _;
 use url::Url;
 
-use crate::common::{http, state, state_file};
+use crate::common::{LOCK_WAIT, http, state, state_file};
 
 /// The access token the relay under test holds.
 pub const ACCESS: &str = "access-secret-1";
@@ -43,7 +43,7 @@ pub fn relay(
 ) -> Router {
     if seeded {
         state_file(dir.path())
-            .save(&state(ACCESS, REFRESH, Duration::hours(48)))
+            .save(&state(ACCESS, REFRESH, Duration::hours(48)), LOCK_WAIT)
             .unwrap();
     }
     let auth = peloton::oauth::AuthClient::new(http(), Url::parse(&server.uri()).unwrap());

@@ -34,7 +34,7 @@ mod common;
 mod gated;
 mod raw_http;
 
-use common::{captured_logs, http, state, state_file};
+use common::{LOCK_WAIT, captured_logs, http, state, state_file};
 use gated::GatedServer;
 
 /// The ride of every scrubbed schedule and Stack fixture.
@@ -83,7 +83,7 @@ fn client_with(dir: &tempfile::TempDir, server: &MockServer, http: reqwest::Clie
 /// As [`client_with`], with every endpoint on the server at `uri`.
 fn client_at(dir: &tempfile::TempDir, uri: &str, http: reqwest::Client) -> Peloton {
     state_file(dir.path())
-        .save(&state("tok-1", "refresh-1", Duration::hours(48)))
+        .save(&state("tok-1", "refresh-1", Duration::hours(48)), LOCK_WAIT)
         .unwrap();
     let auth = peloton::oauth::AuthClient::new(common::http(), Url::parse(uri).unwrap());
     let tokens = TokenManager::new(state_file(dir.path()), auth, StdDuration::from_secs(3600));

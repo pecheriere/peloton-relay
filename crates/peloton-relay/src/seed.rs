@@ -1,6 +1,7 @@
 //! `peloton-relay seed`: validates a token set against Peloton and stores it.
 
-use std::io::Read;
+use std::io::{self, Read};
+use std::time::Duration;
 
 use peloton::body::read_limited;
 use peloton::endpoints::PLATFORM_HEADER;
@@ -36,14 +37,29 @@ pub enum SeedError {
         /// HTTP status code.
         status: u16,
     },
+    /// The running relay kept the state file locked for the whole wait.
+    #[error("the relay kept the state file locked (a token refresh in flight); seed again")]
+    Busy,
     /// The state file could not be written.
     #[error("could not write the state file")]
-    Store(#[from] StoreError),
+    Store(#[source] StoreError),
+}
+
+impl From<StoreError> for SeedError {
+    fn from(err: StoreError) -> Self {
+        match err {
+            StoreError::Locked => Self::Busy,
+            other => Self::Store(other),
+        }
+    }
 }
 
 /// Reads a [`TokenSet`] from `input`, looks up its owner with `GET /me` on
 /// `api_base`, and saves both to `state`. Returns the owner's username (or id
 /// when Peloton reports none). Nothing is written unless `/me` succeeded.
+///
+/// The save waits up to `lock_wait` for a refresh the relay has in flight
+/// (see [`StateFile::lock`]), so the two never overwrite each other.
 ///
 /// # Errors
 ///
@@ -53,14 +69,24 @@ pub async fn run_seed(
     state: &StateFile,
     http: &reqwest::Client,
     api_base: &Url,
+    lock_wait: Duration,
 ) -> Result<String, SeedError> {
     let tokens = read_tokens(input)?;
     let me = fetch_me(http, api_base, &tokens).await?;
     let label = me.username.unwrap_or_else(|| me.id.to_string());
-    state.save(&State {
+    let store = state.clone();
+    let seeded = State {
         tokens,
         user_id: me.id,
-    })?;
+    };
+    // Waiting for the lock blocks a thread; keep it off the async workers.
+    tokio::task::spawn_blocking(move || store.save(&seeded, lock_wait))
+        .await
+        .map_err(|_| {
+            SeedError::Store(StoreError::Io(io::Error::other(
+                "state file task did not complete",
+            )))
+        })??;
     Ok(label)
 }
 
