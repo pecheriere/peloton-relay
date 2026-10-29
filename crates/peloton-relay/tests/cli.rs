@@ -104,6 +104,31 @@ fn bind_binds_the_state_files_user() {
     );
 }
 
+#[test]
+fn bind_reports_why_another_binding_is_unreadable() {
+    let dir = tempfile::tempdir().unwrap();
+    let account = dir.path().join("alice");
+    std::fs::create_dir(&account).unwrap();
+    std::fs::write(
+        account.join("state.json"),
+        r#"{"tokens":{"access_token":"a","refresh_token":"r","expires_at":"2030-01-01T00:00:00Z"},"user_id":"000000000000000000000000000000f2"}"#,
+    )
+    .unwrap();
+    let other = dir.path().join("bob");
+    std::fs::create_dir(&other).unwrap();
+    std::fs::write(other.join("binding.json"), "{").unwrap();
+
+    let output = relay(dir.path(), &["bind", "--account", "alice"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        stderr(&output),
+        "error: cannot read the binding of account \"bob\": \
+         state or binding file is empty or corrupt\n"
+    );
+    assert!(!account.join("binding.json").exists());
+}
+
 /// A running `peloton-relay serve` on a free loopback port.
 struct Server {
     child: std::process::Child,

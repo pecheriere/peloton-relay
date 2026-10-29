@@ -221,7 +221,7 @@ async fn seed(account: &AccountName, rebind: bool) -> Result<(), String> {
         SEED_LOCK_WAIT,
     )
     .await
-    .map_err(|err| err.to_string())?;
+    .map_err(|err| error_chain(&err))?;
     eprintln!("{seeded}");
     Ok(())
 }
@@ -233,9 +233,23 @@ async fn bind(account: AccountName) -> Result<(), String> {
         tokio::task::spawn_blocking(move || run_bind(&config.accounts, &account, SEED_LOCK_WAIT))
             .await
             .map_err(|_| "the bind task did not complete".to_owned())?
-            .map_err(|err| err.to_string())?;
+            .map_err(|err| error_chain(&err))?;
     eprintln!("{bound}");
     Ok(())
+}
+
+/// `err` and each of its causes, joined by `: `, so that the operator sees
+/// why (e.g. permission denied rather than corrupt). Seed and bind errors and
+/// their causes never carry tokens, usernames or file contents.
+fn error_chain(err: &dyn std::error::Error) -> String {
+    let mut shown = err.to_string();
+    let mut cause = err.source();
+    while let Some(err) = cause {
+        shown.push_str(": ");
+        shown.push_str(&err.to_string());
+        cause = err.source();
+    }
+    shown
 }
 
 async fn healthcheck() -> Result<(), String> {

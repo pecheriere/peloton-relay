@@ -8,7 +8,7 @@ mod common;
 
 use std::fs;
 use std::io::{self, Read};
-use std::os::unix::fs::MetadataExt as _;
+use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -148,7 +148,7 @@ fn is_account(err: &SeedError) -> Option<&AccountName> {
         SeedError::UnknownAccount { account }
         | SeedError::BoundToAnotherUser { account }
         | SeedError::UserBoundElsewhere { account }
-        | SeedError::BindingUnreadable { account }
+        | SeedError::BindingUnreadable { account, .. }
         | SeedError::NoState { account } => Some(account),
         _ => None,
     }
@@ -408,6 +408,69 @@ async fn seed_refuses_when_its_own_binding_is_unreadable() {
     }
 }
 
+/// The store error behind an unreadable-binding refusal.
+fn binding_cause(err: &SeedError) -> &StoreError {
+    assert!(
+        matches!(err, SeedError::BindingUnreadable { .. }),
+        "{err:?}"
+    );
+    std::error::Error::source(err)
+        .and_then(|source| source.downcast_ref::<StoreError>())
+        .unwrap_or_else(|| panic!("no store error behind {err:?}"))
+}
+
+#[tokio::test]
+async fn unreadable_binding_refusal_keeps_its_cause() {
+    let server = me_server(common::USER).await;
+
+    // Another account's binding does not parse.
+    let dir = tempfile::tempdir().unwrap();
+    accounts(dir.path()).ensure_dir(&bob()).unwrap();
+    fs::write(state_file(dir.path(), &bob()).binding_path(), "{").unwrap();
+    let err = seed(dir.path(), &server, &alice(), false)
+        .await
+        .unwrap_err();
+    assert_eq!(is_account(&err), Some(&bob()));
+    assert!(
+        matches!(binding_cause(&err), StoreError::Corrupt),
+        "{err:?}"
+    );
+
+    // The account's own binding does not parse.
+    let dir = tempfile::tempdir().unwrap();
+    accounts(dir.path()).ensure_dir(&alice()).unwrap();
+    fs::write(state_file(dir.path(), &alice()).binding_path(), "{").unwrap();
+    let err = seed(dir.path(), &server, &alice(), true).await.unwrap_err();
+    assert_eq!(is_account(&err), Some(&alice()));
+    assert!(
+        matches!(binding_cause(&err), StoreError::Corrupt),
+        "{err:?}"
+    );
+
+    // Another account's directory cannot be searched.
+    let dir = tempfile::tempdir().unwrap();
+    accounts(dir.path()).ensure_dir(&bob()).unwrap();
+    let bob_dir = dir.path().join("bob");
+    fs::set_permissions(&bob_dir, fs::Permissions::from_mode(0o000)).unwrap();
+    let enforced = fs::read_dir(&bob_dir).is_err();
+    let result = seed(dir.path(), &server, &alice(), false).await;
+    fs::set_permissions(&bob_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    if !enforced {
+        eprintln!("skipped the permission case: directory permissions are not enforced (root)");
+        return;
+    }
+    let err = result.unwrap_err();
+    assert_eq!(is_account(&err), Some(&bob()));
+    assert!(
+        matches!(
+            binding_cause(&err),
+            StoreError::Io(cause) if cause.kind() == io::ErrorKind::PermissionDenied
+        ),
+        "{err:?}"
+    );
+    assert!(!state_file(dir.path(), &alice()).path.exists());
+}
+
 /// An input that fails the test when read.
 struct PanicsOnRead;
 
@@ -606,7 +669,7 @@ async fn seed_gives_up_clearly_when_the_lock_stays_held() {
     assert!(matches!(err, SeedError::Busy), "{err:?}");
     assert_eq!(
         err.to_string(),
-        "the relay kept the state file locked (a token refresh in flight); seed again"
+        "another seed, bind or token refresh holds the lock; try again"
     );
     assert!(!store.path.exists());
 }
@@ -736,7 +799,7 @@ fn bind_refuses_when_another_binding_is_unreadable() {
     let err = run_bind(&accounts(dir.path()), &alice(), common::LOCK_WAIT).unwrap_err();
 
     assert!(
-        matches!(err, SeedError::BindingUnreadable { .. }),
+        matches!(binding_cause(&err), StoreError::Corrupt),
         "{err:?}"
     );
     assert_eq!(is_account(&err), Some(&bob()));

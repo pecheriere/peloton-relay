@@ -33,10 +33,10 @@ pub enum StoreError {
     #[error("state or binding file is empty or corrupt")]
     Corrupt,
     /// The file system refused the operation.
-    #[error("state or binding file I/O failed")]
+    #[error("state, binding or lock file I/O failed")]
     Io(#[source] io::Error),
     /// Another writer held the lock for the whole wait.
-    #[error("state or binding lock is held by another writer")]
+    #[error("state or bindings lock file is held by another writer")]
     Locked,
 }
 

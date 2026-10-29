@@ -94,3 +94,19 @@ fn bindings_lock_excludes_a_second_holder() {
     drop(held);
     accounts.lock_bindings(WAIT).unwrap();
 }
+
+#[test]
+fn store_errors_name_the_files_they_cover() {
+    assert_eq!(
+        StoreError::Corrupt.to_string(),
+        "state or binding file is empty or corrupt"
+    );
+    assert_eq!(
+        StoreError::Io(std::io::Error::other("cause")).to_string(),
+        "state, binding or lock file I/O failed"
+    );
+    assert_eq!(
+        StoreError::Locked.to_string(),
+        "state or bindings lock file is held by another writer"
+    );
+}

@@ -50,6 +50,9 @@ pub enum SeedError {
     BindingUnreadable {
         /// The account whose binding is unreadable.
         account: AccountName,
+        /// Why: corrupt, or which I/O failure.
+        #[source]
+        source: StoreError,
     },
     /// `bind` found no state file in the account.
     #[error("account \"{account}\" has no state file to bind")]
@@ -75,11 +78,12 @@ pub enum SeedError {
         /// HTTP status code.
         status: u16,
     },
-    /// The running relay kept the state file locked for the whole wait.
-    #[error("the relay kept the state file locked (a token refresh in flight); seed again")]
+    /// Another writer (a seed or bind, or the relay's token refresh) kept a
+    /// lock for the whole wait.
+    #[error("another seed, bind or token refresh holds the lock; try again")]
     Busy,
-    /// The state or binding file could not be read or written.
-    #[error("could not read or write the state or binding file")]
+    /// The state, binding or lock file could not be read or written.
+    #[error("could not read or write the state, binding or lock file")]
     Store(#[source] StoreError),
 }
 
@@ -309,9 +313,10 @@ fn check_others(
                 });
             }
             Ok(_) => {}
-            Err(_) => {
+            Err(source) => {
                 return Err(SeedError::BindingUnreadable {
                     account: other.clone(),
+                    source,
                 });
             }
         }
@@ -324,8 +329,9 @@ fn check_others(
 fn own_binding(lock: &StateLock, account: &AccountName) -> Result<Option<PelotonId>, SeedError> {
     lock.binding()
         .map(|binding| binding.map(|binding| binding.user_id))
-        .map_err(|_| SeedError::BindingUnreadable {
+        .map_err(|source| SeedError::BindingUnreadable {
             account: account.clone(),
+            source,
         })
 }
 
