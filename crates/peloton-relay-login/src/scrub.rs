@@ -19,7 +19,8 @@
 //!     "þ", "œ", "æ" as "th", "oe", "ae"), so "Élodie" also erases "ELODIE"
 //!     and "ｅｌｏｄｉｅ", and "Łukasz" erases "Lukasz";
 //!   - a string of fewer than 3 characters is never erased; one of 3 only as
-//!     a whole word (so "ben" leaves "benefits" alone); one of 4 or more also
+//!     a whole word or glued to digits ("Ben123", "`ben_2024`"; "ben" leaves
+//!     "benefits" and "Bento" alone, and hex ids alone); one of 4 or more also
 //!     inside a longer word when both its ends are boundaries: the edge of
 //!     the text or a character that is neither a letter nor a digit
 //!     ("Jean-Luc", "`coach_elodie`"); a digit on either side ("Elodie123",
@@ -37,6 +38,9 @@
 //!     schema: `max_value` and `power_zone` stay for names "Max" and "Zone";
 //!     keys of one object that would end up equal ("Max" and "MAX") get
 //!     distinct suffixes ("redacted", "redacted-2"), so no value is lost;
+//!   - a string with percent-encoded UTF-8 is also matched decoded, and a
+//!     match erases the whole encoded span ("%C3%89lodie",
+//!     "elodie%40example.com");
 //!   - text outside the erased spans is left byte for byte as it was;
 //! - URLs, opaque tokens, locations, e-mails, device serials, time zones,
 //!   birthdays, heights and weights are replaced with fixed values; lists of
@@ -647,7 +651,10 @@ impl Scrubber {
             return replaced;
         }
         let mapped = self.ids_in(key);
-        if self.sensitive.contains(&fold_case(&mapped)) {
+        let decoded = PercentDecoded::new(&mapped).map(|d| fold_case(&d.text));
+        if self.sensitive.contains(&fold_case(&mapped))
+            || decoded.is_some_and(|d| self.sensitive.contains(&d))
+        {
             REDACTED.to_owned()
         } else {
             mapped
@@ -1022,25 +1029,19 @@ fn spell_out(c: char) -> [Option<char>; 2] {
 /// following a match are erased with it.
 ///
 /// A needle of fewer than [`MIN_SUBSTRING_LEN`] characters only matches as a
-/// whole word, so "ben" does not erase half of "benefits". A longer one also
-/// matches inside longer words where [`FoldedText::counts`] accepts it.
+/// word of its own or glued to digits, so "ben" does not erase half of
+/// "benefits". A longer one also matches inside longer words where
+/// [`FoldedText::counts`] accepts it. A text with percent-encoded UTF-8
+/// (`%C3%89lodie`) is also matched in its decoded form, and a match there
+/// erases the whole encoded span. Each form is folded once.
 fn erase_words(text: &str, needles: &[String]) -> String {
-    let folded = FoldedText::new(text);
-    let mut spans: Vec<(usize, usize)> = Vec::new();
-    for needle in needles.iter().filter(|n| !n.is_empty()) {
-        let short = needle.chars().count() < MIN_SUBSTRING_LEN;
-        let mut at = 0;
-        while let Some(found) = folded.folded[at..].find(needle.as_str()) {
-            let start = at + found;
-            at = start
-                + folded.folded[start..]
-                    .chars()
-                    .next()
-                    .map_or(1, char::len_utf8);
-            if let Some(span) = folded.span(start, needle.len(), short) {
-                spans.push(span);
-            }
-        }
+    let mut spans = match_spans(text, needles);
+    if let Some(decoded) = PercentDecoded::new(text) {
+        spans.extend(
+            match_spans(&decoded.text, needles)
+                .into_iter()
+                .filter_map(|(from, to)| decoded.original(from, to)),
+        );
     }
     spans.sort_unstable();
     let mut out = String::with_capacity(text.len());
@@ -1056,6 +1057,109 @@ fn erase_words(text: &str, needles: &[String]) -> String {
     }
     out.push_str(&text[last..]);
     out
+}
+
+/// The byte ranges of `text` matched by `needles` (see [`erase_words`]),
+/// unsorted and possibly overlapping.
+fn match_spans(text: &str, needles: &[String]) -> Vec<(usize, usize)> {
+    let folded = FoldedText::new(text);
+    let mut spans = Vec::new();
+    for needle in needles.iter().filter(|n| !n.is_empty()) {
+        let short = needle.chars().count() < MIN_SUBSTRING_LEN;
+        let mut at = 0;
+        while let Some(found) = folded.folded[at..].find(needle.as_str()) {
+            let start = at + found;
+            at = start
+                + folded.folded[start..]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
+            if let Some(span) = folded.span(start, needle.len(), short) {
+                spans.push(span);
+            }
+        }
+    }
+    spans
+}
+
+/// A text with its percent-encoded UTF-8 decoded, and the way back to the
+/// original. Sequences that are not valid UTF-8 are kept as they were.
+#[derive(Debug)]
+struct PercentDecoded {
+    text: String,
+    original_len: usize,
+    /// For every character of `text`: its byte offset there, and the byte
+    /// range in the original it came from.
+    chars: Vec<(usize, usize, usize)>,
+}
+
+impl PercentDecoded {
+    /// `None` when `text` has no `%XX` sequence that decodes to UTF-8.
+    fn new(text: &str) -> Option<Self> {
+        let mut decoded = String::with_capacity(text.len());
+        let mut chars = Vec::new();
+        let mut changed = false;
+        let mut at = 0;
+        while at < text.len() {
+            let mut run = Vec::new();
+            while let Some(byte) = encoded_byte(text, at + 3 * run.len()) {
+                run.push(byte);
+            }
+            if run.is_empty() {
+                let c = text[at..].chars().next()?;
+                chars.push((decoded.len(), at, at + c.len_utf8()));
+                decoded.push(c);
+                at += c.len_utf8();
+                continue;
+            }
+            for chunk in run.utf8_chunks() {
+                for c in chunk.valid().chars() {
+                    let end = at + 3 * c.len_utf8();
+                    chars.push((decoded.len(), at, end));
+                    decoded.push(c);
+                    at = end;
+                    changed = true;
+                }
+                let kept = at + 3 * chunk.invalid().len();
+                for (offset, c) in text[at..kept].char_indices() {
+                    chars.push((decoded.len(), at + offset, at + offset + 1));
+                    decoded.push(c);
+                }
+                at = kept;
+            }
+        }
+        changed.then_some(Self {
+            text: decoded,
+            original_len: text.len(),
+            chars,
+        })
+    }
+
+    /// The byte range of the original that the decoded range `from..to`
+    /// came from, both ends on character boundaries.
+    fn original(&self, from: usize, to: usize) -> Option<(usize, usize)> {
+        Some((self.original_offset(from)?, self.original_offset(to)?))
+    }
+
+    fn original_offset(&self, offset: usize) -> Option<usize> {
+        if offset == self.text.len() {
+            return Some(self.original_len);
+        }
+        let index = self
+            .chars
+            .binary_search_by_key(&offset, |(decoded, _, _)| *decoded)
+            .ok()?;
+        self.chars.get(index).map(|(_, start, _)| *start)
+    }
+}
+
+/// The byte encoded by a `%XX` sequence at byte `at` of `text`, if any.
+fn encoded_byte(text: &str, at: usize) -> Option<u8> {
+    let digits = text.get(at..at + 3)?.strip_prefix('%')?;
+    if !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    u8::from_str_radix(digits, 16).ok()
 }
 
 /// A text folded once for matching (see [`fold_case`]), with the way back
@@ -1075,6 +1179,9 @@ struct FoldedText<'a> {
     origins: Vec<usize>,
     /// For every cut, whether it is a word boundary (see [`is_boundary`]).
     cuts: Vec<bool>,
+    /// For every cut, whether it is a hard boundary (see
+    /// [`is_hard_boundary`]).
+    hard_cuts: Vec<bool>,
     /// Runs of letters and digits.
     words: Stretches,
     /// Stretches between word boundaries.
@@ -1106,6 +1213,9 @@ impl<'a> FoldedText<'a> {
         let cuts: Vec<bool> = (0..cut_count)
             .map(|at| is_boundary(at.checked_sub(1).and_then(char_at), char_at(at)))
             .collect();
+        let hard_cuts: Vec<bool> = (0..cut_count)
+            .map(|at| is_hard_boundary(at.checked_sub(1).and_then(char_at), char_at(at)))
+            .collect();
         let alphanumeric = |at: usize| char_at(at).is_some_and(char::is_alphanumeric);
         let in_word: Vec<bool> = (0..cut_count)
             .map(|at| at > 0 && alphanumeric(at - 1) && alphanumeric(at))
@@ -1126,6 +1236,7 @@ impl<'a> FoldedText<'a> {
             bases,
             origins,
             cuts,
+            hard_cuts,
             words: Stretches::new(&in_word),
             segments: Stretches::new(&in_segment),
             lowercase_before,
@@ -1146,20 +1257,21 @@ impl<'a> FoldedText<'a> {
 
     /// Whether a match of the base characters `start..end` is erased.
     ///
-    /// A `short` needle must be a whole word: a maximal run of letters and
-    /// digits. A longer one must not lie inside a word that looks like a hex
-    /// id (see [`Self::is_hex_id`]), and must start and end at a boundary
+    /// No match may lie inside a word (a run of letters and digits) that
+    /// looks like a hex id (see [`Self::is_hex_id`]). A `short` needle must
+    /// start and end at a hard boundary (see [`is_hard_boundary`]: "Ben",
+    /// "Ben123", not "benefits"). A longer one must start and end at a boundary
     /// (see [`is_boundary`]; after the match an upper to lower case change
     /// also counts, as in "`ELODIEmartin`"). Inside a stretch between
     /// boundaries that has no lowercase letter (`JEANLUC`, `KINGDOM`), case
     /// marks no boundary, so a boundary at either end is enough.
     fn counts(&self, start: usize, end: usize, short: bool) -> bool {
         let word = self.words.around(start, end);
-        if short {
-            return word == (start, end);
-        }
         if word != (start, end) && self.is_hex_id(word) {
             return false;
+        }
+        if short {
+            return self.hard_cuts[start] && self.hard_cuts[end];
         }
         let opens = self.cuts[start];
         let closes = self.cuts[end]
@@ -1272,22 +1384,33 @@ impl CharKind {
     }
 }
 
-/// Whether a word boundary lies between `before` and `after` (`None` is the
-/// edge of the text): next to a separator, between a digit and a letter, on
-/// a lower to upper case change, or between a cased and an uncased letter.
-fn is_boundary(before: Option<char>, after: Option<char>) -> bool {
+/// Whether a hard boundary lies between `before` and `after` (`None` is
+/// the edge of the text): next to a separator, or between a digit and a
+/// letter. These also end a short name.
+fn is_hard_boundary(before: Option<char>, after: Option<char>) -> bool {
     let (Some(before), Some(after)) = (before, after) else {
         return true;
     };
     match (CharKind::of(before), CharKind::of(after)) {
         (CharKind::Digit, other) | (other, CharKind::Digit) => other != CharKind::Digit,
-        (CharKind::Separator, _)
-        | (_, CharKind::Separator)
-        | (CharKind::Lower, CharKind::Upper)
-        | (CharKind::Uncased, CharKind::Lower | CharKind::Upper)
-        | (CharKind::Lower | CharKind::Upper, CharKind::Uncased) => true,
+        (CharKind::Separator, _) | (_, CharKind::Separator) => true,
         _ => false,
     }
+}
+
+/// Whether a word boundary lies between `before` and `after` (`None` is the
+/// edge of the text): a hard boundary (see [`is_hard_boundary`]), a lower to
+/// upper case change, or a change between a cased and an uncased letter.
+fn is_boundary(before: Option<char>, after: Option<char>) -> bool {
+    is_hard_boundary(before, after)
+        || before.zip(after).is_some_and(|(before, after)| {
+            matches!(
+                (CharKind::of(before), CharKind::of(after)),
+                (CharKind::Lower, CharKind::Upper)
+                    | (CharKind::Uncased, CharKind::Lower | CharKind::Upper)
+                    | (CharKind::Lower | CharKind::Upper, CharKind::Uncased)
+            )
+        })
 }
 
 #[cfg(test)]
@@ -1298,6 +1421,7 @@ mod tests {
     };
     use proptest::prelude::*;
     use serde_json::json;
+    use std::fmt::Write as _;
     use unicode_normalization::UnicodeNormalization as _;
     use unicode_normalization::char::is_combining_mark;
 
@@ -1609,6 +1733,49 @@ mod tests {
     }
 
     #[test]
+    fn short_names_glued_to_digits_are_erased() {
+        let needles = vec![fold_case("Ben")];
+        assert_eq!(
+            erase_words(
+                "Ben123, 123ben, ben_2024, benefits, Bento, abc1ben2",
+                &needles
+            ),
+            "redacted123, 123redacted, redacted_2024, benefits, Bento, abc1redacted2"
+        );
+    }
+
+    #[test]
+    fn short_names_are_not_erased_inside_hex_ids() {
+        let needles = vec![fold_case("Bed"), fold_case("Ace")];
+        assert_eq!(
+            erase_words("0123bed456, ace12345, bed1", &needles),
+            "0123bed456, ace12345, redacted1"
+        );
+    }
+
+    #[test]
+    fn percent_encoded_names_are_erased() {
+        let needles = vec![fold_case("\u{c9}lodie")];
+        assert_eq!(
+            erase_words(
+                "%C3%89lodie, elodie%40example.com, E%CC%81lodie, %c3%a9LODIE x, \
+                 %45%4c%4f%44%49%45, u/%C3%89lodie?x=1",
+                &needles
+            ),
+            "redacted, redacted%40example.com, redacted, redacted x, redacted, u/redacted?x=1"
+        );
+    }
+
+    #[test]
+    fn invalid_percent_sequences_are_left_alone() {
+        let needles = vec![fold_case("\u{c9}lodie")];
+        assert_eq!(
+            erase_words("%C3lodie %ZZ %C3%89 100%", &needles),
+            "%C3lodie %ZZ %C3%89 100%"
+        );
+    }
+
+    #[test]
     fn decomposed_names_are_split_into_whole_words() {
         let files = vec![(
             "me.json".to_owned(),
@@ -1704,7 +1871,7 @@ mod tests {
         (
             "Ben123 BEN\u{65e5}\u{672c} Ben\u{3055}\u{3093}",
             &["Ben"],
-            "Ben123 BEN\u{65e5}\u{672c} Ben\u{3055}\u{3093}",
+            "redacted123 BEN\u{65e5}\u{672c} Ben\u{3055}\u{3093}",
         ),
         ("Jo jo", &["Jo"], "Jo jo"),
         (
@@ -1888,6 +2055,47 @@ mod tests {
             .collect()
     }
 
+    /// `text` percent-encoded: every byte when `all`, else only the bytes of
+    /// non-ASCII characters.
+    fn percent_encode(text: &str, all: bool) -> String {
+        let mut out = String::new();
+        for c in text.chars() {
+            if all || !c.is_ascii() {
+                let mut buffer = [0; 4];
+                for byte in c.encode_utf8(&mut buffer).bytes() {
+                    write!(out, "%{byte:02X}").expect("write to a String");
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    /// `text` with every `%XX` decoded, invalid UTF-8 replaced.
+    fn percent_decode(text: &str) -> String {
+        let bytes = text.as_bytes();
+        let mut out = Vec::new();
+        let mut at = 0;
+        while at < bytes.len() {
+            let hex = bytes
+                .get(at + 1..at + 3)
+                .and_then(|h| std::str::from_utf8(h).ok())
+                .and_then(|h| u8::from_str_radix(h, 16).ok());
+            match (bytes[at], hex) {
+                (b'%', Some(byte)) => {
+                    out.push(byte);
+                    at += 3;
+                }
+                (byte, _) => {
+                    out.push(byte);
+                    at += 1;
+                }
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
     proptest! {
         #[test]
         fn scrubbed_text_never_contains_the_name_in_any_spelling(
@@ -1911,17 +2119,23 @@ mod tests {
                 .map(|v| v.nfd().filter(|c| !is_combining_mark(*c)).collect())
                 .collect();
             let plain: Vec<String> = stripped.iter().map(|v| spelled_out(v)).collect();
-            for variant in forms
+            let spellings: Vec<String> = forms
                 .iter()
                 .cloned()
                 .chain(decomposed)
                 .chain(stripped)
                 .chain(plain)
-            {
+                .collect();
+            let encoded = spellings
+                .iter()
+                .flat_map(|v| [percent_encode(v, true), percent_encode(v, false)]);
+            let variants: Vec<String> = spellings.iter().cloned().chain(encoded).collect();
+            for variant in variants {
                 let text = format!("{before}{variant}{after} {variant}");
                 let scrubbed = erase_words(&text, &needles);
                 prop_assert!(
-                    !fold_case(&scrubbed).contains(&folded),
+                    !fold_case(&scrubbed).contains(&folded)
+                        && !fold_case(&percent_decode(&scrubbed)).contains(&folded),
                     "{scrubbed:?} still contains {name:?}"
                 );
             }
