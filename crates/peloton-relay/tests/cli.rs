@@ -134,6 +134,11 @@ impl Server {
 
     /// The status of `GET path`, or `None` while the server is unreachable.
     fn status(&self, path: &str) -> Option<u16> {
+        self.status_with(path, &[])
+    }
+
+    /// Like [`Self::status`], sending the extra `headers`.
+    fn status_with(&self, path: &str, headers: &[(&str, &str)]) -> Option<u16> {
         use std::io::{Read as _, Write as _};
 
         let mut stream = std::net::TcpStream::connect(("127.0.0.1", self.port)).ok()?;
@@ -142,9 +147,13 @@ impl Server {
             .ok()?;
         write!(
             stream,
-            "GET {path} HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+            "GET {path} HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n"
         )
         .ok()?;
+        for (name, value) in headers {
+            write!(stream, "{name}: {value}\r\n").ok()?;
+        }
+        write!(stream, "\r\n").ok()?;
         let mut response = String::new();
         stream.read_to_string(&mut response).ok()?;
         response.split(' ').nth(1)?.parse().ok()
@@ -166,13 +175,42 @@ impl Server {
     }
 
     /// Sends SIGTERM and returns the output once the server has exited.
-    fn terminate(self) -> Output {
+    fn terminate(mut self) -> Output {
+        use std::io::Read as _;
+
         let signalled = Command::new("kill")
             .args(["-TERM", &self.child.id().to_string()])
             .status()
             .unwrap();
         assert!(signalled.success());
-        self.child.wait_with_output().unwrap()
+        let status = self.child.wait().unwrap();
+        let mut stdout = Vec::new();
+        self.child
+            .stdout
+            .take()
+            .unwrap()
+            .read_to_end(&mut stdout)
+            .unwrap();
+        let mut stderr = Vec::new();
+        self.child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_end(&mut stderr)
+            .unwrap();
+        Output {
+            status,
+            stdout,
+            stderr,
+        }
+    }
+}
+
+impl Drop for Server {
+    /// Never leaves the server running when a test fails.
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
@@ -250,6 +288,24 @@ fn serve_creates_private_account_directories() {
 }
 
 #[test]
+fn serve_registers_every_configured_account() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut server = Server::start(dir.path(), "alice,bob,dave");
+    server.wait_until_serving();
+    for name in ["alice", "bob", "dave"] {
+        assert_eq!(
+            server.status_with("/v1/me", &[("X-Peloton-Account", name)]),
+            Some(503),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        server.status_with("/v1/me", &[("X-Peloton-Account", "carol")]),
+        Some(403)
+    );
+}
+
+#[test]
 fn serve_runs_with_one_unusable_account_dir() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("bob"), "not a directory").unwrap();
@@ -261,7 +317,8 @@ fn serve_runs_with_one_unusable_account_dir() {
     assert!(
         logged
             .lines()
-            .any(|line| line.contains(r#""level":"ERROR""#) && line.contains(r#""account":"bob""#)),
+            .any(|line| line.contains(r#""event":"account_dir_unusable""#)
+                && line.contains(r#""account":"bob""#)),
         "{logged}"
     );
     assert!(dir.path().join("alice").is_dir());
