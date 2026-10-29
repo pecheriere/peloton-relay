@@ -7,20 +7,32 @@
 //!   replaced by a fake of the same shape; the all-zero id is kept;
 //! - objects describing a person (they carry `username`, `first_name` or
 //!   `last_name`: the member and instructors) have every free-text field
-//!   that is not a bare id replaced by a `<key>-<n>` placeholder, and their names, usernames and
-//!   locations are additionally erased from every other string in the run,
-//!   whatever the case, accents (a name written "Élodie" is also erased as
-//!   "Elodie" or "ELODIE"), Unicode normalization form, and "œ"/"oe" spelling.
-//!   A string of fewer than 3 characters is never erased; one of 3 characters
-//!   is erased as a whole word only (so "ben" leaves "benefits" alone); one of
-//!   4 or more is also erased inside a longer word where it starts at a word
-//!   boundary or a lower to upper case change and ends at a word boundary, a
-//!   digit or a case change ("`MarieClaire`", "Jean-Luc"; not "walking" for a
-//!   name "King", nor inside a hexadecimal id). In a word with no lowercase
-//!   letter, where case marks no boundary, it is erased where it starts at the
-//!   word's start or ends at the word's end ("JEANLUC", "MARIECLAIRE", and
-//!   "KINGDOM" for a name "King"; "Kingdom" is kept). Text outside the erased spans
-//!   is left byte for byte as it was;
+//!   that is not a bare id replaced by a `<key>-<n>` placeholder, and their
+//!   names (and each word of them), usernames, e-mails and locations are
+//!   additionally erased from every other string of the run:
+//!   - matching ignores case, accents and normalization form: both sides are
+//!     decomposed (NFD), stripped of combining marks and case-folded, and the
+//!     letters NFD does not split are spelled out ("ł", "ø", "đ", "ð", "ħ",
+//!     "ŧ" as "l", "o", "d", "d", "h", "t"; "þ", "œ", "æ" as "th", "oe",
+//!     "ae"), so "Élodie" also erases "ELODIE" and "Łukasz" erases "Lukasz";
+//!   - a string of fewer than 3 characters is never erased; one of 3 only as
+//!     a whole word (so "ben" leaves "benefits" alone); one of 4 or more also
+//!     inside a longer word when both its ends are boundaries: the edge of
+//!     the text or a character that is neither a letter nor a digit
+//!     ("Jean-Luc", "`coach_elodie`"); a digit on either side ("Elodie123",
+//!     "rides4elodie"), except inside a word that looks like a hex id (only
+//!     hex digits, at least one decimal digit, 8 or more long), which is
+//!     never erased into; a lower to upper case change ("`MarieClaire`",
+//!     "`elodieMartin`"), and after the match also an upper to lower one
+//!     ("`ELODIEmartin`"); a change between a cased and an uncased letter
+//!     ("Elodieさん", "日本Elodie"). Where the stretch between boundaries has
+//!     no lowercase letter, case marks no boundary, so one boundary at
+//!     either end is enough ("JEANLUC", "MARIECLAIRE", and "KINGDOM" for a
+//!     name "King"). Ordinary words are kept ("walking", "glove", "Kingdom",
+//!     "XKINGX" for "King" or "Love"); "iPhone" for a name "Phone" is erased;
+//!   - an object key is erased only when it is the whole string, as keys are
+//!     schema: `max_value` and `power_zone` stay for names "Max" and "Zone";
+//!   - text outside the erased spans is left byte for byte as it was;
 //! - URLs, opaque tokens, locations, e-mails, device serials, time zones,
 //!   birthdays, heights and weights are replaced with fixed values; lists of
 //!   devices, contracts, social links and Q&As are emptied;
@@ -88,6 +100,8 @@ const MIN_TOKEN_RUN: usize = 40;
 const MIN_SENSITIVE_LEN: usize = 3;
 /// Characters from which a sensitive string is erased inside longer words too.
 const MIN_SUBSTRING_LEN: usize = 4;
+/// Length from which a word of hex digits (with a decimal digit) is an id.
+const MIN_HEX_WORD: usize = 8;
 
 const REDACTED: &str = "redacted";
 const REDACTED_URL: &str = "https://example.invalid/redacted";
@@ -485,7 +499,7 @@ impl Scrubber {
             self.in_class |= key == CLASS_KEY;
             let scrubbed = self.key_rule(&key, child, person);
             self.in_class = outer;
-            out.insert(self.string(&key), scrubbed);
+            out.insert(self.key(&key), scrubbed);
         }
         let slug = out.get("slug").and_then(Value::as_str).map(str::to_owned);
         if let Some(slug) = slug {
@@ -603,17 +617,37 @@ impl Scrubber {
     }
 
     fn string(&mut self, text: &str) -> String {
+        match self.opaque(text) {
+            Some(replaced) => replaced,
+            None => erase_words(&self.ids_in(text), &self.sensitive),
+        }
+    }
+
+    /// An object key, scrubbed like a string except that a sensitive string
+    /// is erased only when it is the whole key: other keys are schema
+    /// (`max_value`, `power_zone`), not personal data.
+    fn key(&mut self, key: &str) -> String {
+        if let Some(replaced) = self.opaque(key) {
+            return replaced;
+        }
+        let mapped = self.ids_in(key);
+        if self.sensitive.contains(&fold_case(&mapped)) {
+            REDACTED.to_owned()
+        } else {
+            mapped
+        }
+    }
+
+    /// The replacement of a URL, a class id or an opaque token; `None` for
+    /// any other text.
+    fn opaque(&mut self, text: &str) -> Option<String> {
         if text.contains("://") {
-            return REDACTED_URL.to_owned();
+            return Some(REDACTED_URL.to_owned());
         }
         if let Some(id) = self.class_id(text) {
-            return id;
+            return Some(id);
         }
-        if has_opaque_token(text) {
-            return REDACTED.to_owned();
-        }
-        let mapped = self.ids_in(text);
-        erase_words(&mapped, &self.sensitive)
+        has_opaque_token(text).then(|| REDACTED.to_owned())
     }
 
     /// Re-encodes a Peloton class id with its ids mapped and its scheduled
@@ -899,18 +933,22 @@ fn has_opaque_token(text: &str) -> bool {
         .any(|run| run.len() >= MIN_TOKEN_RUN && !run.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
-/// Folds `text` for comparison: each character is decomposed (NFD), stripped
-/// of its combining marks (accents, so "É", "é", "E" and "e" plus an accent
-/// all agree, and Turkish "İ" becomes "i"), then lower-cased, upper-cased and
-/// lower-cased again, so "ß", "ẞ" and "SS", "ς" and "σ" agree, and finally
-/// "œ" and "æ" become "oe" and "ae".
+/// Folds `text` for comparison: combining marks are dropped, and every other
+/// character is decomposed (NFD) and stripped of its combining marks (accents,
+/// so "É", "é", "E" and "e" plus an accent all agree, and Turkish "İ" becomes
+/// "i"), then lower-cased, upper-cased and lower-cased again, so "ß", "ẞ" and
+/// "SS", "ς" and "σ", "ı" and "i" agree, and finally the letters NFD does not
+/// split are spelled out (see [`spell_out`]).
 ///
 /// The case part matches Unicode full case folding (`CaseFolding.txt`,
 /// statuses C and F) for the scripts that have case. Dropping every
 /// `General_Category=Mark` character also drops spacing marks of some scripts,
 /// which only makes matching stricter on both sides.
 fn fold_case(text: &str) -> String {
-    text.chars().flat_map(fold_char).collect()
+    text.chars()
+        .filter(|c| !is_combining_mark(*c))
+        .flat_map(fold_char)
+        .collect()
 }
 
 fn fold_char(c: char) -> impl Iterator<Item = char> {
@@ -919,53 +957,49 @@ fn fold_char(c: char) -> impl Iterator<Item = char> {
         .flat_map(char::to_lowercase)
         .flat_map(char::to_uppercase)
         .flat_map(char::to_lowercase)
-        .flat_map(|f| match f {
-            'œ' => ['o', 'e'].into_iter().take(2),
-            'æ' => ['a', 'e'].into_iter().take(2),
-            other => [other, other].into_iter().take(1),
-        })
+        .flat_map(|f| spell_out(f).into_iter().flatten())
+}
+
+/// The plain spelling of a lower-case letter that NFD does not split into a
+/// base letter and a mark ("ł" is "l", "þ" is "th", "œ" is "oe"), or the
+/// letter itself.
+fn spell_out(c: char) -> [Option<char>; 2] {
+    match c {
+        'ł' => [Some('l'), None],
+        'ø' => [Some('o'), None],
+        'đ' | 'ð' => [Some('d'), None],
+        'ħ' => [Some('h'), None],
+        'ŧ' => [Some('t'), None],
+        'þ' => [Some('t'), Some('h')],
+        'œ' => [Some('o'), Some('e')],
+        'æ' => [Some('a'), Some('e')],
+        other => [Some(other), None],
+    }
 }
 
 /// Erases every occurrence of each folded needle (see [`fold_case`]) from
 /// `text`, ignoring case, accents and normalization form. Text outside the
-/// erased spans is left byte for byte as it was.
+/// erased spans is left byte for byte as it was, and the combining marks
+/// following a match are erased with it.
 ///
-/// A needle of at least [`MIN_SUBSTRING_LEN`] characters also matches inside
-/// longer words, but only where it starts at a word boundary or a lower to
-/// upper case change and ends at a word boundary, a digit or a case change,
-/// so compound forms (`MarieClaire`, `Jean-Luc`) are erased and "walking" and
-/// hexadecimal ids are not. In a word without lowercase letters it also
-/// matches at the word's start or end (see [`touches_caps_word_edge`]). A shorter needle only matches as a whole word, so
-/// "ben" does not erase half of "benefits".
+/// A needle of fewer than [`MIN_SUBSTRING_LEN`] characters only matches as a
+/// whole word, so "ben" does not erase half of "benefits". A longer one also
+/// matches inside longer words where [`FoldedText::counts`] accepts it.
 fn erase_words(text: &str, needles: &[String]) -> String {
-    let (folded, origins) = fold_with_origins(text);
+    let folded = FoldedText::new(text);
     let mut spans: Vec<(usize, usize)> = Vec::new();
     for needle in needles.iter().filter(|n| !n.is_empty()) {
-        let whole_word = needle.chars().count() < MIN_SUBSTRING_LEN;
+        let short = needle.chars().count() < MIN_SUBSTRING_LEN;
         let mut at = 0;
-        while let Some(found) = folded[at..].find(needle.as_str()) {
+        while let Some(found) = folded.folded[at..].find(needle.as_str()) {
             let start = at + found;
-            at = start + folded[start..].chars().next().map_or(1, char::len_utf8);
-            let (from, _) = origins[start];
-            let (last_from, core_end) = origins[start + needle.len() - 1];
-            let to = skip_marks(text, core_end);
-            let (Some(first), Some(last)) = (
-                text[from..].chars().next(),
-                text[last_from..].chars().next(),
-            ) else {
-                continue;
-            };
-            let before = text[..from].chars().rev().find(|c| !is_combining_mark(*c));
-            let after = text[to..].chars().next();
-            let bounded = if whole_word {
-                !before.is_some_and(char::is_alphanumeric)
-                    && !after.is_some_and(char::is_alphanumeric)
-            } else {
-                (starts_word(before, first) && ends_word(last, after))
-                    || touches_caps_word_edge(text, from, to)
-            };
-            if bounded {
-                spans.push((from, to));
+            at = start
+                + folded.folded[start..]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
+            if let Some(span) = folded.span(start, needle.len(), short) {
+                spans.push(span);
             }
         }
     }
@@ -974,9 +1008,7 @@ fn erase_words(text: &str, needles: &[String]) -> String {
     let mut last = 0;
     for (from, to) in spans {
         if from < last {
-            if to > last {
-                last = to;
-            }
+            last = last.max(to);
             continue;
         }
         out.push_str(&text[last..from]);
@@ -987,76 +1019,200 @@ fn erase_words(text: &str, needles: &[String]) -> String {
     out
 }
 
-/// Whether a match starting with `first`, preceded by `before`, starts a word:
-/// after a non-alphanumeric character, or on a lower to upper case change.
-fn starts_word(before: Option<char>, first: char) -> bool {
-    before.is_none_or(|b| !b.is_alphanumeric() || (b.is_lowercase() && first.is_uppercase()))
+/// A text folded once for matching (see [`fold_case`]), with the way back
+/// from the folded form to the original.
+///
+/// Positions are counted in base characters: every character of the text
+/// but combining marks, which belong to the base character before them.
+#[derive(Debug)]
+struct FoldedText<'a> {
+    text: &'a str,
+    folded: String,
+    /// Byte offset in `text` and value of every base character.
+    bases: Vec<(usize, char)>,
+    /// For every byte of `folded`, the base character it came from.
+    origins: Vec<usize>,
 }
 
-/// Whether a match ending with `last`, followed by `after`, ends a word: before
-/// a non-alphanumeric character or a digit, or on a case change.
-fn ends_word(last: char, after: Option<char>) -> bool {
-    after.is_none_or(|a| {
-        !a.is_alphanumeric()
-            || a.is_numeric()
-            || (last.is_lowercase() && a.is_uppercase())
-            || (last.is_uppercase() && a.is_lowercase())
-    })
-}
-
-/// Whether the match `from..to` lies in a word without lowercase letters
-/// (`JEANLUC`, `KINGDOM`) and starts at the word's start or ends at its end.
-/// Case gives no boundary inside such a word, so the edges are used instead.
-fn touches_caps_word_edge(text: &str, from: usize, to: usize) -> bool {
-    let in_word = |c: &char| c.is_alphanumeric() || is_combining_mark(*c);
-    let word_start = from
-        - text[..from]
-            .chars()
-            .rev()
-            .take_while(in_word)
-            .map(char::len_utf8)
-            .sum::<usize>();
-    let word_end = to
-        + text[to..]
-            .chars()
-            .take_while(in_word)
-            .map(char::len_utf8)
-            .sum::<usize>();
-    !text[word_start..word_end].chars().any(char::is_lowercase)
-        && (word_start == from || word_end == to)
-}
-
-/// `end`, moved past the combining marks that follow it.
-fn skip_marks(text: &str, end: usize) -> usize {
-    end + text[end..]
-        .chars()
-        .take_while(|c| is_combining_mark(*c))
-        .map(char::len_utf8)
-        .sum::<usize>()
-}
-
-/// Folds `text` like [`fold_case`] and records, for every byte of the result,
-/// the byte range of the character of `text` it came from.
-fn fold_with_origins(text: &str) -> (String, Vec<(usize, usize)>) {
-    let mut folded = String::with_capacity(text.len());
-    let mut origins = Vec::with_capacity(text.len());
-    for (start, c) in text.char_indices() {
-        let range = (start, start + c.len_utf8());
-        for f in fold_char(c) {
-            folded.push(f);
-            origins.extend(std::iter::repeat_n(range, f.len_utf8()));
+impl<'a> FoldedText<'a> {
+    fn new(text: &'a str) -> Self {
+        let mut folded = String::with_capacity(text.len());
+        let mut bases = Vec::with_capacity(text.len());
+        let mut origins = Vec::with_capacity(text.len());
+        for (offset, c) in text.char_indices().filter(|(_, c)| !is_combining_mark(*c)) {
+            let base = bases.len();
+            bases.push((offset, c));
+            for f in fold_char(c) {
+                folded.push(f);
+                origins.extend(std::iter::repeat_n(base, f.len_utf8()));
+            }
+        }
+        Self {
+            text,
+            folded,
+            bases,
+            origins,
         }
     }
-    (folded, origins)
+
+    /// The byte range of `text` to erase for the needle of `len` bytes found
+    /// at byte `start` of the folded text, or `None` when that match does not
+    /// count. The range ends past the combining marks of its last character.
+    fn span(&self, start: usize, len: usize, short: bool) -> Option<(usize, usize)> {
+        let first = *self.origins.get(start)?;
+        let end = self.origins.get(start + len.checked_sub(1)?)? + 1;
+        self.counts(first, end, short)
+            .then(|| (self.offset(first), self.offset(end)))
+    }
+
+    /// Whether a match of the base characters `start..end` is erased.
+    ///
+    /// A `short` needle must be a whole word: a maximal run of letters and
+    /// digits. A longer one must not lie inside a word that looks like a hex
+    /// id (see [`looks_like_hex_id`]), and must start and end at a boundary
+    /// (see [`is_boundary`]; after the match an upper to lower case change
+    /// also counts, as in "`ELODIEmartin`"). Inside a stretch between
+    /// boundaries that has no lowercase letter (`JEANLUC`, `KINGDOM`), case
+    /// marks no boundary, so a boundary at either end is enough.
+    fn counts(&self, start: usize, end: usize, short: bool) -> bool {
+        let word = self.widen(start, end, |at| {
+            self.is_alphanumeric(at - 1) && self.is_alphanumeric(at)
+        });
+        if short {
+            return word == (start, end);
+        }
+        if word != (start, end)
+            && looks_like_hex_id(&self.text[self.offset(word.0)..self.offset(word.1)])
+        {
+            return false;
+        }
+        let opens = self.cut(start);
+        let closes = self.cut(end)
+            || matches!(
+                (self.kind(end - 1), self.kind(end)),
+                (Some(CharKind::Upper), Some(CharKind::Lower))
+            );
+        if opens && closes {
+            return true;
+        }
+        let (from, to) = self.widen(start, end, |at| !self.cut(at));
+        (opens || closes) && !self.bases[from..to].iter().any(|(_, c)| c.is_lowercase())
+    }
+
+    /// `start..end` widened while `joined(at)` holds for the cut between
+    /// base characters `at - 1` and `at`.
+    fn widen(&self, start: usize, end: usize, joined: impl Fn(usize) -> bool) -> (usize, usize) {
+        let mut from = start;
+        while from > 0 && joined(from) {
+            from -= 1;
+        }
+        let mut to = end;
+        while to < self.bases.len() && joined(to) {
+            to += 1;
+        }
+        (from, to)
+    }
+
+    /// Whether there is a word boundary between base characters `at - 1`
+    /// and `at`.
+    fn cut(&self, at: usize) -> bool {
+        is_boundary(
+            at.checked_sub(1).and_then(|before| self.char_at(before)),
+            self.char_at(at),
+        )
+    }
+
+    fn char_at(&self, at: usize) -> Option<char> {
+        self.bases.get(at).map(|(_, c)| *c)
+    }
+
+    fn kind(&self, at: usize) -> Option<CharKind> {
+        self.char_at(at).map(CharKind::of)
+    }
+
+    fn is_alphanumeric(&self, at: usize) -> bool {
+        self.char_at(at).is_some_and(char::is_alphanumeric)
+    }
+
+    /// Byte offset of base character `at`, or the end of the text.
+    fn offset(&self, at: usize) -> usize {
+        self.bases
+            .get(at)
+            .map_or(self.text.len(), |(offset, _)| *offset)
+    }
+}
+
+/// What a character is for word boundaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CharKind {
+    /// Neither a letter nor a digit: space, punctuation, `_`, `@`, …
+    Separator,
+    Digit,
+    Lower,
+    /// An upper-case or title-case letter.
+    Upper,
+    /// A letter without case, such as CJK or kana.
+    Uncased,
+}
+
+impl CharKind {
+    fn of(c: char) -> Self {
+        if c.is_numeric() {
+            Self::Digit
+        } else if !c.is_alphabetic() {
+            Self::Separator
+        } else if c.is_lowercase() {
+            Self::Lower
+        } else if c.is_uppercase() || !c.to_lowercase().eq([c]) {
+            Self::Upper
+        } else {
+            Self::Uncased
+        }
+    }
+}
+
+/// Whether a word boundary lies between `before` and `after` (`None` is the
+/// edge of the text): next to a separator, between a digit and a letter, on
+/// a lower to upper case change, or between a cased and an uncased letter.
+fn is_boundary(before: Option<char>, after: Option<char>) -> bool {
+    let (Some(before), Some(after)) = (before, after) else {
+        return true;
+    };
+    match (CharKind::of(before), CharKind::of(after)) {
+        (CharKind::Digit, other) | (other, CharKind::Digit) => other != CharKind::Digit,
+        (CharKind::Separator, _)
+        | (_, CharKind::Separator)
+        | (CharKind::Lower, CharKind::Upper)
+        | (CharKind::Uncased, CharKind::Lower | CharKind::Upper)
+        | (CharKind::Lower | CharKind::Upper, CharKind::Uncased) => true,
+        _ => false,
+    }
+}
+
+/// Whether `word` looks like a hex id: only hex digits, at least one of them
+/// a decimal digit, and at least [`MIN_HEX_WORD`] long. Names are never
+/// erased from inside such a word.
+fn looks_like_hex_id(word: &str) -> bool {
+    word.len() >= MIN_HEX_WORD
+        && word.bytes().all(|b| b.is_ascii_hexdigit())
+        && word.bytes().any(|b| b.is_ascii_digit())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{erase_words, fold_case, has_opaque_token, is_month_buckets, is_uuid};
+    use super::{
+        ScrubParams, erase_words, fold_case, has_opaque_token, is_boundary, is_month_buckets,
+        is_uuid, looks_like_hex_id, scrub_files,
+    };
     use proptest::prelude::*;
     use serde_json::json;
     use unicode_normalization::UnicodeNormalization as _;
     use unicode_normalization::char::is_combining_mark;
+
+    const PARAMS: ScrubParams = ScrubParams {
+        time_shift_s: 0,
+        calorie_factor: 1.0,
+    };
 
     #[test]
     fn erases_whole_words_only() {
@@ -1196,22 +1352,266 @@ mod tests {
         );
     }
 
+    #[test]
+    fn boundaries_lie_at_separators_digits_case_and_script_changes() {
+        let cases = [
+            (None, Some('a'), true),
+            (Some('a'), None, true),
+            (Some('a'), Some(' '), true),
+            (Some('_'), Some('a'), true),
+            (Some('\u{2019}'), Some('s'), true),
+            (Some('4'), Some('e'), true),
+            (Some('e'), Some('1'), true),
+            (Some('1'), Some('2'), false),
+            (Some('e'), Some('M'), true),
+            (Some('\u{1c5}'), Some('a'), false),
+            (Some('a'), Some('\u{1c5}'), true),
+            (Some('E'), Some('m'), false),
+            (Some('E'), Some('M'), false),
+            (Some('e'), Some('m'), false),
+            (Some('e'), Some('\u{3055}'), true),
+            (Some('\u{65e5}'), Some('E'), true),
+            (Some('\u{65e5}'), Some('\u{672c}'), false),
+            (Some('\u{65e5}'), Some('1'), true),
+        ];
+        for (before, after, expected) in cases {
+            assert_eq!(is_boundary(before, after), expected, "{before:?} {after:?}");
+        }
+    }
+
+    #[test]
+    fn hex_id_words_need_a_digit_and_eight_hex_characters() {
+        assert!(looks_like_hex_id("0123facedade89"));
+        assert!(looks_like_hex_id("0123FACE"));
+        assert!(!looks_like_hex_id("face89"));
+        assert!(!looks_like_hex_id("facedade"));
+        assert!(!looks_like_hex_id("0123facx"));
+    }
+
+    #[test]
+    fn turkish_dotted_and_dotless_i_match_plain_i() {
+        let needles = vec![fold_case("T\u{131}lvor"), fold_case("\u{130}rem")];
+        assert_eq!(
+            erase_words("TILVOR, tilvor, T\u{131}lvor, irem, \u{130}REM", &needles),
+            "redacted, redacted, redacted, redacted, redacted"
+        );
+    }
+
+    #[test]
+    fn letters_nfd_does_not_split_match_their_plain_spelling() {
+        let needles = vec![
+            fold_case("\u{141}ukasz"),
+            fold_case("Bj\u{f8}rn"),
+            fold_case("\u{110}or\u{111}e"),
+            fold_case("I\u{f0}unn"),
+            fold_case("\u{126}adrel"),
+            fold_case("\u{166}arvo"),
+            fold_case("\u{de}orvin"),
+            fold_case("\u{c6}gir"),
+            fold_case("Coeurval"),
+        ];
+        assert_eq!(
+            erase_words(
+                "Lukasz, BJORN, Dorde, IDUNN, hadrel, Tarvo, THORVIN, Aegir, C\u{152}URVAL",
+                &needles
+            ),
+            "redacted, redacted, redacted, redacted, redacted, redacted, redacted, redacted, \
+             redacted"
+        );
+    }
+
+    #[test]
+    fn digits_next_to_a_name_are_boundaries() {
+        let needles = vec![fold_case("\u{c9}lodie")];
+        assert_eq!(
+            erase_words("Elodie123, 123Elodie, rides4elodie, 2024elodie", &needles),
+            "redacted123, 123redacted, rides4redacted, 2024redacted"
+        );
+    }
+
+    #[test]
+    fn names_are_not_erased_inside_words_that_look_like_hex_ids() {
+        let needles = vec![fold_case("Face"), fold_case("Dade")];
+        assert_eq!(
+            erase_words("0123FACE, face0123, 12dade34", &needles),
+            "0123FACE, face0123, 12dade34"
+        );
+    }
+
+    #[test]
+    fn lower_to_upper_case_changes_are_boundaries() {
+        let needles = vec![fold_case("\u{c9}lodie"), fold_case("Claire")];
+        assert_eq!(
+            erase_words("elodieMartin, MarieClaire", &needles),
+            "redactedMartin, Marieredacted"
+        );
+    }
+
+    #[test]
+    fn an_upper_to_lower_change_after_a_name_ends_it() {
+        let needles = vec![fold_case("\u{c9}lodie")];
+        assert_eq!(
+            erase_words("ELODIEmartin, XELODIEmartin", &needles),
+            "redactedmartin, XELODIEmartin"
+        );
+    }
+
+    #[test]
+    fn a_change_between_cased_and_uncased_letters_is_a_boundary() {
+        let needles = vec![fold_case("\u{c9}lodie")];
+        assert_eq!(
+            erase_words(
+                "Elodie\u{3055}\u{3093}, \u{65e5}\u{672c}Elodie, ELODIE\u{65e5}\u{672c}",
+                &needles
+            ),
+            "redacted\u{3055}\u{3093}, \u{65e5}\u{672c}redacted, redacted\u{65e5}\u{672c}"
+        );
+    }
+
+    #[test]
+    fn apostrophes_and_underscores_are_boundaries() {
+        let needles = vec![fold_case("\u{c9}lodie")];
+        assert_eq!(
+            erase_words(
+                "Elodie's, Elodie\u{2019}s, coach_elodie, elodie.x@y",
+                &needles
+            ),
+            "redacted's, redacted\u{2019}s, coach_redacted, redacted.x@y"
+        );
+    }
+
+    #[test]
+    fn case_changes_inside_product_names_are_accepted_collateral() {
+        let needles = vec![fold_case("Phone"), fold_case("Book")];
+        assert_eq!(
+            erase_words("iPhone, MacBook", &needles),
+            "iredacted, Macredacted"
+        );
+    }
+
+    #[test]
+    fn overlapping_matches_are_erased_as_one_span() {
+        let needles = vec![
+            fold_case("Marie-Claire"),
+            fold_case("Marie"),
+            fold_case("Claire"),
+        ];
+        assert_eq!(
+            erase_words("Ride with Marie-Claire.", &needles),
+            "Ride with redacted."
+        );
+    }
+
+    #[test]
+    fn a_leading_combining_mark_does_not_panic() {
+        let needles = vec![fold_case("\u{c9}lodie")];
+        assert_eq!(
+            erase_words("\u{301}Elodie\u{301}\u{302}", &needles),
+            "\u{301}redacted"
+        );
+    }
+
+    #[test]
+    fn names_shorter_than_three_characters_are_never_erased() {
+        let files = vec![(
+            "ride.json".to_owned(),
+            json!({
+                "instructor": {"first_name": "Al", "last_name": "Zorvic"},
+                "description": "Al rides with Zorvic"
+            }),
+        )];
+        let output = scrub_files(files, PARAMS);
+        assert_eq!(output[0].1["description"], "Al rides with redacted");
+    }
+
+    #[test]
+    fn object_keys_are_erased_only_when_they_are_the_whole_name() {
+        let files = vec![(
+            "ride.json".to_owned(),
+            json!({
+                "instructor": {"first_name": "Max", "last_name": "Zone"},
+                "metrics": {
+                    "max_value": 1,
+                    "power_zone": 2,
+                    "default_max_heart_rate": 0,
+                    "MAX": 3,
+                    "note": "Max_power"
+                }
+            }),
+        )];
+        let output = scrub_files(files, PARAMS);
+        let metrics = output[0].1["metrics"].as_object().expect("object");
+        let mut keys: Vec<&str> = metrics.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "default_max_heart_rate",
+                "max_value",
+                "note",
+                "power_zone",
+                "redacted"
+            ]
+        );
+        assert_eq!(metrics["note"], "redacted_power");
+    }
+
+    /// `text` with the letters NFD does not split replaced by their plain
+    /// spelling, keeping case.
+    fn spelled_out(text: &str) -> String {
+        text.chars()
+            .map(|c| match c {
+                '\u{141}' => "L".to_owned(),
+                '\u{142}' => "l".to_owned(),
+                '\u{d8}' => "O".to_owned(),
+                '\u{f8}' => "o".to_owned(),
+                '\u{110}' | '\u{d0}' => "D".to_owned(),
+                '\u{111}' | '\u{f0}' => "d".to_owned(),
+                '\u{126}' => "H".to_owned(),
+                '\u{127}' => "h".to_owned(),
+                '\u{166}' => "T".to_owned(),
+                '\u{167}' => "t".to_owned(),
+                '\u{de}' => "TH".to_owned(),
+                '\u{fe}' => "th".to_owned(),
+                '\u{152}' => "OE".to_owned(),
+                '\u{153}' => "oe".to_owned(),
+                '\u{c6}' => "AE".to_owned(),
+                '\u{e6}' => "ae".to_owned(),
+                other => other.to_string(),
+            })
+            .collect()
+    }
+
     proptest! {
         #[test]
         fn scrubbed_text_never_contains_the_name_in_any_spelling(
-            name in "[a-zA-Z\u{e0}\u{e2}\u{e7}\u{e9}\u{e8}\u{ea}\u{eb}\u{ee}\u{ef}\u{f4}\u{f6}\u{fb}\u{fc}\u{f1}\u{df}\u{1e9e}\u{153}\u{130}]{4,12}",
-            before in "[ .,:;!-]{0,3}",
-            after in "[ .,:;!-]{0,3}",
+            name in "[a-zA-Z\u{e0}\u{e2}\u{e7}\u{e9}\u{e8}\u{ea}\u{eb}\u{ee}\u{ef}\u{f4}\u{f6}\u{fb}\u{fc}\u{f1}\u{df}\u{1e9e}\u{153}\u{152}\u{130}\u{131}\u{141}\u{142}\u{d8}\u{f8}\u{110}\u{111}\u{d0}\u{f0}\u{126}\u{127}\u{166}\u{167}\u{de}\u{fe}\u{c6}\u{e6}]{4,12}",
+            before in "[ .,:;!_@'\u{2019}0-9\u{65e5}\u{672c}\u{3055}-]{0,3}",
+            after in "[ .,:;!_@'\u{2019}0-9\u{65e5}\u{672c}\u{3093}-]{0,3}",
         ) {
             let folded = fold_case(&name);
             prop_assume!(!"redacted".contains(&folded));
+            // A name spelled with hex letters only, glued to a digit, may make
+            // a word that looks like a hex id, which is kept on purpose.
+            let hex_letters = folded.chars().all(|c| c.is_ascii_hexdigit());
+            let glued_to_digit = before.ends_with(|c: char| c.is_ascii_digit())
+                || after.starts_with(|c: char| c.is_ascii_digit());
+            prop_assume!(!(hex_letters && glued_to_digit));
             let needles = vec![folded.clone()];
             let forms = [name.to_lowercase(), name.to_uppercase(), name.clone()];
             let decomposed = forms.iter().map(|v| v.nfd().collect::<String>());
-            let stripped = forms
+            let stripped: Vec<String> = forms
                 .iter()
-                .map(|v| v.nfd().filter(|c| !is_combining_mark(*c)).collect::<String>());
-            for variant in forms.iter().cloned().chain(decomposed).chain(stripped) {
+                .map(|v| v.nfd().filter(|c| !is_combining_mark(*c)).collect())
+                .collect();
+            let plain: Vec<String> = stripped.iter().map(|v| spelled_out(v)).collect();
+            for variant in forms
+                .iter()
+                .cloned()
+                .chain(decomposed)
+                .chain(stripped)
+                .chain(plain)
+            {
                 let text = format!("{before}{variant}{after} {variant}");
                 let scrubbed = erase_words(&text, &needles);
                 prop_assert!(
