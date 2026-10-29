@@ -2449,3 +2449,31 @@ async fn binding_that_cannot_be_checked_fails_closed() {
     assert_eq!(unreadable.len(), 1, "{output}");
     assert_eq!(unreadable[0]["account"], ACCOUNT);
 }
+
+#[test]
+fn temp_cleanup_failures_name_the_account_directory() {
+    let logs = captured_logs();
+    let root = tempfile::tempdir().unwrap();
+    let file = account_state_file(root.path(), "bob", &user());
+    // A stale directory with a temp file's name: removing it as a file fails.
+    let stuck = root.path().join("bob").join(".state.json.123.0.tmp");
+    fs::create_dir(&stuck).unwrap();
+    fs::File::open(&stuck)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - StdDuration::from_secs(600))
+        .unwrap();
+
+    tracing::info_span!("case", name = "stuck_temp").in_scope(|| {
+        file.save(&state("access", "refresh", Duration::hours(48)), LOCK_WAIT)
+            .unwrap();
+    });
+
+    let output = logs.contents();
+    let failures: Vec<serde_json::Value> = output
+        .lines()
+        .filter(|line| line.contains("stuck_temp") && line.contains("state_temp_cleanup_failed"))
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(failures.len(), 1, "{output}");
+    assert_eq!(failures[0]["directory"], "bob");
+}

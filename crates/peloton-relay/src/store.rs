@@ -546,12 +546,14 @@ fn is_temp_name(name: &OsStr, candidate: &OsStr) -> bool {
 ///
 /// Young temp files may belong to a live writer in another process (`seed`)
 /// and are left alone. Failures only leave clutter in a private directory, so
-/// they are logged, not returned.
+/// they are logged, not returned, with the name of `dir`: an account's state
+/// directory is named after the account.
 fn remove_stale_temps(dir: &Path, name: &OsStr) {
+    let directory = || dir.file_name().unwrap_or_default().to_string_lossy();
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(err) => {
-            tracing::warn!(event = "state_temp_cleanup_failed", cause = ?err.kind(), "cannot list the state directory");
+            tracing::warn!(event = "state_temp_cleanup_failed", directory = %directory(), cause = ?err.kind(), "cannot list the state directory");
             return;
         }
     };
@@ -568,7 +570,7 @@ fn remove_stale_temps(dir: &Path, name: &OsStr) {
                     .is_ok_and(|age| age >= STALE_TEMP_AGE)
             });
         if stale && let Err(err) = fs::remove_file(entry.path()) {
-            tracing::warn!(event = "state_temp_cleanup_failed", cause = ?err.kind(), "cannot remove a stale temp file");
+            tracing::warn!(event = "state_temp_cleanup_failed", directory = %directory(), cause = ?err.kind(), "cannot remove a stale temp file");
         }
     }
 }
