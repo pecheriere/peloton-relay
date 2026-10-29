@@ -16,7 +16,10 @@
 //!   4 or more is also erased inside a longer word where it starts at a word
 //!   boundary or a lower to upper case change and ends at a word boundary, a
 //!   digit or a case change ("`MarieClaire`", "Jean-Luc"; not "walking" for a
-//!   name "King", nor inside a hexadecimal id). Text outside the erased spans
+//!   name "King", nor inside a hexadecimal id). In a word with no lowercase
+//!   letter, where case marks no boundary, it is erased where it starts at the
+//!   word's start or ends at the word's end ("JEANLUC", "MARIECLAIRE", and
+//!   "KINGDOM" for a name "King"; "Kingdom" is kept). Text outside the erased spans
 //!   is left byte for byte as it was;
 //! - URLs, opaque tokens, locations, e-mails, device serials, time zones,
 //!   birthdays, heights and weights are replaced with fixed values; lists of
@@ -931,7 +934,8 @@ fn fold_char(c: char) -> impl Iterator<Item = char> {
 /// longer words, but only where it starts at a word boundary or a lower to
 /// upper case change and ends at a word boundary, a digit or a case change,
 /// so compound forms (`MarieClaire`, `Jean-Luc`) are erased and "walking" and
-/// hexadecimal ids are not. A shorter needle only matches as a whole word, so
+/// hexadecimal ids are not. In a word without lowercase letters it also
+/// matches at the word's start or end (see [`touches_caps_word_edge`]). A shorter needle only matches as a whole word, so
 /// "ben" does not erase half of "benefits".
 fn erase_words(text: &str, needles: &[String]) -> String {
     let (folded, origins) = fold_with_origins(text);
@@ -957,7 +961,8 @@ fn erase_words(text: &str, needles: &[String]) -> String {
                 !before.is_some_and(char::is_alphanumeric)
                     && !after.is_some_and(char::is_alphanumeric)
             } else {
-                starts_word(before, first) && ends_word(last, after)
+                (starts_word(before, first) && ends_word(last, after))
+                    || touches_caps_word_edge(text, from, to)
             };
             if bounded {
                 spans.push((from, to));
@@ -997,6 +1002,28 @@ fn ends_word(last: char, after: Option<char>) -> bool {
             || (last.is_lowercase() && a.is_uppercase())
             || (last.is_uppercase() && a.is_lowercase())
     })
+}
+
+/// Whether the match `from..to` lies in a word without lowercase letters
+/// (`JEANLUC`, `KINGDOM`) and starts at the word's start or ends at its end.
+/// Case gives no boundary inside such a word, so the edges are used instead.
+fn touches_caps_word_edge(text: &str, from: usize, to: usize) -> bool {
+    let in_word = |c: &char| c.is_alphanumeric() || is_combining_mark(*c);
+    let word_start = from
+        - text[..from]
+            .chars()
+            .rev()
+            .take_while(in_word)
+            .map(char::len_utf8)
+            .sum::<usize>();
+    let word_end = to
+        + text[to..]
+            .chars()
+            .take_while(in_word)
+            .map(char::len_utf8)
+            .sum::<usize>();
+    !text[word_start..word_end].chars().any(char::is_lowercase)
+        && (word_start == from || word_end == to)
 }
 
 /// `end`, moved past the combining marks that follow it.
@@ -1139,6 +1166,15 @@ mod tests {
         assert_eq!(
             erase_words("walking, glove, KING, LoveKing, Kingdom", &needles),
             "walking, glove, redacted, redactedredacted, Kingdom"
+        );
+    }
+
+    #[test]
+    fn names_are_erased_at_the_edges_of_all_caps_words() {
+        let needles = vec![fold_case("Jean"), fold_case("Claire"), fold_case("King")];
+        assert_eq!(
+            erase_words("JEANLUC, MARIECLAIRE, KINGDOM, Kingdom, XKINGX", &needles),
+            "redactedLUC, MARIEredacted, redactedDOM, Kingdom, XKINGX"
         );
     }
 
