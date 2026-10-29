@@ -10,7 +10,7 @@ publish.workspace = true
 [dependencies]
 base64.workspace = true
 clap.workspace = true
-peloton = { path = "../peloton", version = "0.2.0" }
+peloton.workspace = true
 rand.workspace = true
 reqwest.workspace = true
 secrecy.workspace = true
@@ -22,9 +22,9 @@ tokio.workspace = true
 url.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-muda = { version = "0.21", default-features = false }
-tao = "0.37"
-wry = "0.57"
+muda.workspace = true
+tao.workspace = true
+wry.workspace = true
 
 [lints]
 workspace = true

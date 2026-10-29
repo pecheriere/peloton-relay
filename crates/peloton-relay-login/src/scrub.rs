@@ -58,7 +58,7 @@ use std::path::Path;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use peloton::ids::{OnDemandClassId, ScheduledClassId};
-use rand::Rng as _;
+use rand::RngExt as _;
 use serde_json::{Map, Value, json};
 use time::OffsetDateTime;
 use time::format_description::BorrowedFormatItem;
