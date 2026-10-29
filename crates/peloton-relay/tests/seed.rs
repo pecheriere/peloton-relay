@@ -254,6 +254,31 @@ async fn seed_output_never_carries_control_characters() {
 }
 
 #[tokio::test]
+async fn seed_output_never_carries_bidi_or_format_characters() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": common::USER,
+            "username": "rider\u{202e}gnp.exe\u{2066}\u{200f}\u{061c}\u{feff}\u{2028}\u{e0041}x"
+        })))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+
+    let shown = seed(dir.path(), &server, &alice(), false)
+        .await
+        .unwrap()
+        .to_string();
+
+    assert_eq!(
+        shown,
+        "account \"alice\": bound to Peloton user \
+         rider\u{fffd}gnp.exe\u{fffd}\u{fffd}\u{fffd}\u{fffd}\u{fffd}\u{fffd}x (id \u{2026}00f2)"
+    );
+}
+
+#[tokio::test]
 async fn reseed_of_the_same_user_replaces_the_tokens() {
     let server = MockServer::start().await;
     me_mock(common::USER).expect(2).mount(&server).await;
