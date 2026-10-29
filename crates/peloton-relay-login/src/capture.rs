@@ -3,7 +3,7 @@
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::Write as _;
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use peloton::endpoints;
 use peloton::ids::PelotonId;
@@ -29,12 +29,10 @@ pub enum StoreError {
     /// The directory could not be made absolute or canonical.
     #[error("bad --dir")]
     Resolve(#[source] std::io::Error),
-    /// The directory has no usable path components.
+    /// The directory has no usable path components, for example a `..` in the
+    /// part that does not exist yet.
     #[error("bad --dir")]
     Unresolvable,
-    /// A component that does not exist yet is `..`.
-    #[error("--dir must not contain '..' in components that do not exist")]
-    ParentComponent,
     /// The directory could not be created.
     #[error("could not create {}", .path.display())]
     Create {
@@ -156,12 +154,6 @@ pub fn resolve_dir(dir: &Path) -> Result<PathBuf, StoreError> {
     }
     let mut resolved = existing.canonicalize().map_err(StoreError::Resolve)?;
     for name in rest.into_iter().rev() {
-        if Path::new(name)
-            .components()
-            .any(|c| c == Component::ParentDir)
-        {
-            return Err(StoreError::ParentComponent);
-        }
         resolved.push(name);
     }
     Ok(resolved)
