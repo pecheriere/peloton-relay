@@ -40,18 +40,18 @@ use tracing::instrument::WithSubscriber as _;
 use crate::store::{FileId, Snapshot, State, StateFile, StateLock, StoreError};
 
 /// Refresh this long before the access token expires.
-pub const DEFAULT_REFRESH_MARGIN: Duration = Duration::from_secs(60 * 60);
+pub const DEFAULT_REFRESH_MARGIN: Duration = Duration::from_hours(1);
 
 /// Wait after the first transient refresh failure.
 const INITIAL_BACKOFF: Duration = Duration::from_secs(5);
 /// Upper bound for the wait between transient refresh failures.
-const MAX_BACKOFF: Duration = Duration::from_secs(5 * 60);
+const MAX_BACKOFF: Duration = Duration::from_mins(5);
 
 /// Minimum time between two refreshes forced by 401 responses.
-pub const REACTIVE_REFRESH_COOLDOWN: Duration = Duration::from_secs(10 * 60);
+pub const REACTIVE_REFRESH_COOLDOWN: Duration = Duration::from_mins(10);
 
 /// How often [`TokenManager::keep_fresh`] checks the credential.
-pub const BACKGROUND_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+pub const BACKGROUND_REFRESH_INTERVAL: Duration = Duration::from_mins(15);
 
 /// How long a refresh waits for the state file lock by default; `seed`
 /// holds it only while it writes the file.
@@ -221,7 +221,9 @@ fn is_terminal(err: AuthError) -> bool {
     match err {
         AuthError::InvalidGrant => true,
         AuthError::Rejected { status } => (400..500).contains(&status) && status != 429,
-        AuthError::Transport | AuthError::Decode => false,
+        // Transport and decode failures, and any failure added later, are
+        // retried with backoff: only a proven rejection gives up on the token.
+        _ => false,
     }
 }
 
@@ -741,6 +743,7 @@ mod tests {
         }
         assert!(!is_terminal(AuthError::Transport));
         assert!(!is_terminal(AuthError::Decode));
+        assert!(!is_terminal(AuthError::BodyTooLarge));
     }
 
     #[test]

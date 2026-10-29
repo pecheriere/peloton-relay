@@ -8,6 +8,7 @@ mod common;
 
 use std::time::Duration;
 
+use peloton::body::MAX_RESPONSE_BODY_BYTES;
 use peloton_relay::seed::{SeedError, run_seed};
 use secrecy::ExposeSecret as _;
 use url::Url;
@@ -215,5 +216,60 @@ async fn seed_gives_up_clearly_when_the_lock_stays_held() {
         err.to_string(),
         "the relay kept the state file locked (a token refresh in flight); seed again"
     );
+    assert!(!store.path.exists());
+}
+
+/// A `/me` answer padded with trailing whitespace to `len` bytes.
+fn me_of_len(len: usize) -> String {
+    let me = format!(r#"{{"id":"{}","username":"rider"}}"#, common::USER);
+    format!("{me}{}", " ".repeat(len - me.len()))
+}
+
+async fn me_answering(body: String) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+        .mount(&server)
+        .await;
+    server
+}
+
+#[tokio::test]
+async fn seed_reads_a_profile_at_the_size_limit() {
+    let server = me_answering(me_of_len(MAX_RESPONSE_BODY_BYTES)).await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::state_file(dir.path());
+
+    let username = run_seed(
+        TOKENS.as_bytes(),
+        &store,
+        &common::http(),
+        &base(&server),
+        common::LOCK_WAIT,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(username, "rider");
+}
+
+#[tokio::test]
+async fn seed_rejects_a_profile_over_the_size_limit() {
+    let server = me_answering(me_of_len(MAX_RESPONSE_BODY_BYTES + 1)).await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::state_file(dir.path());
+
+    let err = run_seed(
+        TOKENS.as_bytes(),
+        &store,
+        &common::http(),
+        &base(&server),
+        common::LOCK_WAIT,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(err, SeedError::Upstream));
     assert!(!store.path.exists());
 }

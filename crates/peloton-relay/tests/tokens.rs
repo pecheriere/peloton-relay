@@ -1029,7 +1029,7 @@ async fn forced_refresh_waits_out_the_cooldown() {
         "{output}"
     );
     assert_eq!(
-        logged(&output, "cooldown_expiry", "retry_in_s=600"),
+        logged(&output, "cooldown_expiry", r#""retry_in_s":600"#),
         1,
         "{output}"
     );

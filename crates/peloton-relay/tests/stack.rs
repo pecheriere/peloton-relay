@@ -1,5 +1,6 @@
 //! Tests for the Stack service, against an in-memory backend.
 
+use std::future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -198,7 +199,7 @@ async fn replace_rejects_duplicates() {
         .await
         .unwrap_err();
     assert!(matches!(err, StackError::Duplicate), "{err:?}");
-    assert!(log.calls().is_empty());
+    assert!(log.calls().is_empty(), "no upstream call was made");
 }
 
 #[tokio::test]
@@ -245,18 +246,29 @@ async fn stack_write_refuses_undecodable_item() {
 async fn upstream_failure_is_reported() {
     struct Down;
 
+    /// A future for a call that must not happen.
+    fn never<T>(why: &str) -> future::Ready<T> {
+        unreachable!("{why}")
+    }
+
     impl StackBackend for Down {
-        async fn view(&self) -> Result<Vec<StackEntry>, UpstreamError> {
-            Err(UpstreamError::RateLimited { retry_after: None })
+        fn view(&self) -> impl Future<Output = Result<Vec<StackEntry>, UpstreamError>> + Send {
+            future::ready(Err(UpstreamError::RateLimited { retry_after: None }))
         }
-        async fn class_in_stack(&self, _: &PelotonId) -> Result<bool, UpstreamError> {
-            Err(UpstreamError::NotAuthenticated)
+        fn class_in_stack(
+            &self,
+            _: &PelotonId,
+        ) -> impl Future<Output = Result<bool, UpstreamError>> + Send {
+            future::ready(Err(UpstreamError::NotAuthenticated))
         }
-        async fn add(&self, _: &PelotonId) -> Result<(), UpstreamError> {
-            unreachable!("the check failed first")
+        fn add(&self, _: &PelotonId) -> impl Future<Output = Result<(), UpstreamError>> + Send {
+            never("the check failed first")
         }
-        async fn modify(&self, _: &[OnDemandClassId]) -> Result<(), UpstreamError> {
-            unreachable!("the read failed first")
+        fn modify(
+            &self,
+            _: &[OnDemandClassId],
+        ) -> impl Future<Output = Result<(), UpstreamError>> + Send {
+            never("the read failed first")
         }
     }
 

@@ -10,6 +10,8 @@ use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 use url::Url;
 
+use crate::body::{BodyError, read_limited};
+
 /// Auth0 tenant domain.
 pub const AUTH_DOMAIN: &str = "auth.onepeloton.com";
 /// Public OAuth client id of Peloton's web app.
@@ -32,6 +34,11 @@ fn random_token(len: usize) -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
+/// The PKCE S256 code challenge for `verifier`.
+fn s256_challenge(verifier: &SecretString) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.expose_secret().as_bytes()))
+}
+
 /// One authorization attempt: PKCE verifier and challenge plus state and nonce.
 #[derive(Debug)]
 pub struct AuthRequest {
@@ -49,20 +56,9 @@ impl AuthRequest {
     /// Generates a fresh verifier, challenge, state and nonce.
     #[must_use]
     pub fn generate() -> Self {
-        let mut request = Self::from_verifier(SecretString::from(random_token(VERIFIER_BYTES)));
-        request.state = random_token(STATE_BYTES);
-        request.nonce = random_token(STATE_BYTES);
-        request
-    }
-
-    /// Builds a request around a given verifier (S256 challenge derived from it).
-    ///
-    /// State and nonce are freshly random.
-    #[must_use]
-    pub fn from_verifier(verifier: SecretString) -> Self {
-        let digest = Sha256::digest(verifier.expose_secret().as_bytes());
+        let verifier = SecretString::from(random_token(VERIFIER_BYTES));
         Self {
-            challenge: URL_SAFE_NO_PAD.encode(digest),
+            challenge: s256_challenge(&verifier),
             verifier,
             state: random_token(STATE_BYTES),
             nonce: random_token(STATE_BYTES),
@@ -93,6 +89,7 @@ impl AuthRequest {
 
 /// Why a redirect URL could not be turned into an authorization code.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum CallbackError {
     /// The URL is not the registered redirect URI.
     #[error("URL is not the expected redirect URI")]
@@ -109,14 +106,21 @@ pub enum CallbackError {
         /// The `error` query parameter.
         error: String,
     },
+    /// A query parameter the callback relies on appears more than once.
+    #[error("redirect URL repeats the {name} parameter")]
+    DuplicateParameter {
+        /// Name of the repeated parameter.
+        name: &'static str,
+    },
 }
 
 /// Extracts the authorization code from the redirect URL the browser landed on.
 ///
 /// # Errors
 ///
-/// Returns a [`CallbackError`] when the URL is not the redirect URI, the state
-/// does not match, the provider reported an error, or no code is present.
+/// Returns a [`CallbackError`] when the URL is not the redirect URI, `code`,
+/// `state` or `error` appears more than once, the state does not match, the
+/// provider reported an error, or no code is present.
 pub fn parse_callback(url: &str, expected_state: &str) -> Result<SecretString, CallbackError> {
     let redirect = Url::parse(REDIRECT_URI).map_err(|_| CallbackError::NotRedirectUri)?;
     let parsed = Url::parse(url.trim()).map_err(|_| CallbackError::NotRedirectUri)?;
@@ -132,11 +136,15 @@ pub fn parse_callback(url: &str, expected_state: &str) -> Result<SecretString, C
     let mut state = None;
     let mut error = None;
     for (key, value) in parsed.query_pairs() {
-        match key.as_ref() {
-            "code" => code = Some(value.into_owned()),
-            "state" => state = Some(value.into_owned()),
-            "error" => error = Some(value.into_owned()),
-            _ => {}
+        let (slot, name) = match key.as_ref() {
+            "code" => (&mut code, "code"),
+            "state" => (&mut state, "state"),
+            "error" => (&mut error, "error"),
+            _ => continue,
+        };
+        // Refuse rather than pick one: which copy wins is parser-dependent.
+        if slot.replace(value.into_owned()).is_some() {
+            return Err(CallbackError::DuplicateParameter { name });
         }
     }
 
@@ -178,6 +186,7 @@ pub struct TokenSet {
 
 /// A failed token request. Never carries upstream bodies, URLs or tokens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum AuthError {
     /// The code or refresh token is invalid, expired or revoked.
     #[error("grant is invalid or expired")]
@@ -194,6 +203,10 @@ pub enum AuthError {
     /// The token endpoint's answer could not be understood.
     #[error("token endpoint response could not be decoded")]
     Decode,
+    /// The token endpoint's answer is larger than
+    /// [`MAX_RESPONSE_BODY_BYTES`](crate::body::MAX_RESPONSE_BODY_BYTES).
+    #[error("token endpoint response is too large")]
+    BodyTooLarge,
 }
 
 #[derive(Deserialize)]
@@ -289,10 +302,11 @@ impl AuthClient {
         let status = response.status();
         if !status.is_success() {
             let invalid_grant = matches!(status, StatusCode::FORBIDDEN | StatusCode::BAD_REQUEST)
-                && response
-                    .json::<ErrorResponse>()
+                && read_limited(response)
                     .await
-                    .is_ok_and(|body| body.error == "invalid_grant");
+                    .ok()
+                    .and_then(|body| serde_json::from_slice::<ErrorResponse>(&body).ok())
+                    .is_some_and(|body| body.error == "invalid_grant");
             return Err(if invalid_grant {
                 AuthError::InvalidGrant
             } else {
@@ -302,10 +316,14 @@ impl AuthClient {
             });
         }
 
-        let parsed: TokenResponse = response.json().await.map_err(|_| AuthError::Decode)?;
+        let body = read_limited(response).await.map_err(|err| match err {
+            BodyError::TooLarge => AuthError::BodyTooLarge,
+            BodyError::Transport { .. } => AuthError::Transport,
+        })?;
+        let parsed: TokenResponse = serde_json::from_slice(&body).map_err(|_| AuthError::Decode)?;
         let refresh_token = match (parsed.refresh_token, previous_refresh) {
             (Some(new), _) => new,
-            (None, Some(old)) => SecretString::from(old.expose_secret().to_owned()),
+            (None, Some(old)) => old.clone(),
             (None, None) => return Err(AuthError::Decode),
         };
         let expires_at = OffsetDateTime::now_utc()
@@ -316,5 +334,22 @@ impl AuthClient {
             refresh_token,
             expires_at,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use secrecy::SecretString;
+
+    use super::s256_challenge;
+
+    #[test]
+    fn challenge_matches_rfc_7636_test_vector() {
+        // RFC 7636, appendix B.
+        let verifier = SecretString::from("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk".to_owned());
+        assert_eq!(
+            s256_challenge(&verifier),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
     }
 }

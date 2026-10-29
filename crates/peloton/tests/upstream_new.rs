@@ -162,7 +162,7 @@ fn library_page_decodes() {
             page.instructors.iter().any(|i| &i.id == instructor),
             "joins an instructor"
         );
-        assert!(!class.class_type_ids.is_empty());
+        assert_ne!(class.class_type_ids, Vec::new());
         for class_type in &class.class_type_ids {
             assert!(
                 page.class_types.iter().any(|t| &t.id == class_type),

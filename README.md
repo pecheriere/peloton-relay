@@ -69,6 +69,9 @@ anything is sent to Peloton.
 - `GET /v1/schedule` lists every item Peloton reports in the window, each with a
   `kind`: `on_demand` for a scheduled class, otherwise Peloton's own type name
   (such items carry no class details).
+- `GET /v1/schedule/{scheduled_id}` answers only for a class still on the
+  schedule: after a remove, and for the old id after a move, it answers 404
+  `not_found`.
 
 ### Library filters
 
@@ -219,6 +222,12 @@ A failure to save refreshed tokens is logged once per streak as
 `event="state_save_recovered"`.
 Each write logs `event="peloton_write"` (see [Security model](#security-model)).
 A panic is logged as `event="panic"` with its source location only.
+Every request gets a fresh id, returned as the `x-request-id` header (an id sent
+by the client is ignored), and its log lines carry the id, the method and the
+matched route template (never the query string or the path's own ids) in their
+`span` field. Responses from Peloton and its token endpoint are read up to
+8 MiB; a larger one fails the request with 502 `upstream_error` (or the token
+refresh or seed with an error).
 
 ## Building
 
