@@ -3,6 +3,7 @@
 
 use std::any::Any;
 use std::collections::HashSet;
+use std::future;
 use std::sync::Arc;
 
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request, State};
@@ -195,13 +196,18 @@ impl<S: Send + Sync> FromRequestParts<S> for Id {
 /// A query string deserialised into `T`; rejection is the JSON error.
 struct Params<T>(T);
 
-impl<S: Send + Sync, T: serde::de::DeserializeOwned> FromRequestParts<S> for Params<T> {
+impl<S: Send + Sync, T: serde::de::DeserializeOwned + Send> FromRequestParts<S> for Params<T> {
     type Rejection = ApiError;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, ApiError> {
-        Query::<T>::try_from_uri(&parts.uri)
-            .map(|Query(value)| Self(value))
-            .map_err(|_| ApiError::InvalidInput)
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, ApiError>> + Send {
+        future::ready(
+            Query::<T>::try_from_uri(&parts.uri)
+                .map(|Query(value)| Self(value))
+                .map_err(|_| ApiError::InvalidInput),
+        )
     }
 }
 

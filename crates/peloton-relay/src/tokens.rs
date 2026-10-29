@@ -32,18 +32,18 @@ use tracing::instrument::WithSubscriber as _;
 use crate::store::{FileId, Snapshot, State, StateFile, StoreError};
 
 /// Refresh this long before the access token expires.
-pub const DEFAULT_REFRESH_MARGIN: Duration = Duration::from_secs(60 * 60);
+pub const DEFAULT_REFRESH_MARGIN: Duration = Duration::from_hours(1);
 
 /// Wait after the first transient refresh failure.
 const INITIAL_BACKOFF: Duration = Duration::from_secs(5);
 /// Upper bound for the wait between transient refresh failures.
-const MAX_BACKOFF: Duration = Duration::from_secs(5 * 60);
+const MAX_BACKOFF: Duration = Duration::from_mins(5);
 
 /// Minimum time between two refreshes forced by 401 responses.
-pub const REACTIVE_REFRESH_COOLDOWN: Duration = Duration::from_secs(10 * 60);
+pub const REACTIVE_REFRESH_COOLDOWN: Duration = Duration::from_mins(10);
 
 /// How often [`TokenManager::keep_fresh`] checks the credential.
-pub const BACKGROUND_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+pub const BACKGROUND_REFRESH_INTERVAL: Duration = Duration::from_mins(15);
 
 /// No usable Peloton credential: not seeded yet, unreadable, rejected, or
 /// expired while the token endpoint is unavailable.

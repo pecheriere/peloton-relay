@@ -1084,7 +1084,7 @@ async fn rejected_inputs_are_not_writes() {
     .instrument(tracing::info_span!("case", name = case))
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(audit_events(case).is_empty());
+    assert!(audit_events(case).is_empty(), "no audit event");
 }
 
 #[tokio::test]
@@ -1107,6 +1107,6 @@ async fn duplicate_stack_replace_is_rejected_before_any_write() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_error(&body, "invalid_input");
-    assert!(audit_events(case).is_empty());
+    assert!(audit_events(case).is_empty(), "no audit event");
     assert_eq!(upstream_hits(&server).await, 0);
 }
