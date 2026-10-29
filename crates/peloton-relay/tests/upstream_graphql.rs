@@ -2,8 +2,9 @@
 //! scrubbed fixtures and synthetic answers.
 
 use std::fs;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration as StdDuration, Instant};
+use std::io::Write as _;
+use std::sync::Arc;
+use std::time::Duration as StdDuration;
 
 use peloton::graphql::{
     ADD_CLASS_TO_SCHEDULE, ADD_CLASS_TO_STACK, CHECK_CLASS_IN_STACK, MODIFY_STACK,
@@ -15,22 +16,25 @@ use peloton::upstream::ScheduleItem;
 use peloton_relay::error::ApiError;
 use peloton_relay::stack::{StackError, StackService, Undecodable};
 use peloton_relay::tokens::TokenManager;
-use peloton_relay::upstream::{Peloton, UpstreamError};
+use peloton_relay::upstream::{MAX_RESPONSE_BODY_BYTES, Peloton, UpstreamError};
 use serde_json::{Value, json};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 use tracing::Instrument as _;
 use url::Url;
 use wiremock::matchers::{body_json, header, method, path, query_param};
-use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[allow(
     dead_code,
     reason = "shared by several test crates, each using a subset of the helpers"
 )]
 mod common;
+mod gated;
+mod raw_http;
 
 use common::{captured_logs, http, state, state_file};
+use gated::GatedServer;
 
 /// The ride of every scrubbed schedule and Stack fixture.
 const FIXTURE_RIDE: &str = "00000000000000000000000000000f1d";
@@ -72,13 +76,18 @@ fn scheduled_id() -> ScheduledClassId {
 /// A client using `http`, whose token manager holds `tok-1`, with every
 /// endpoint on `server`.
 fn client_with(dir: &tempfile::TempDir, server: &MockServer, http: reqwest::Client) -> Peloton {
+    client_at(dir, &server.uri(), http)
+}
+
+/// As [`client_with`], with every endpoint on the server at `uri`.
+fn client_at(dir: &tempfile::TempDir, uri: &str, http: reqwest::Client) -> Peloton {
     state_file(dir.path())
         .save(&state("tok-1", "refresh-1", Duration::hours(48)))
         .unwrap();
-    let auth = peloton::oauth::AuthClient::new(common::http(), Url::parse(&server.uri()).unwrap());
+    let auth = peloton::oauth::AuthClient::new(common::http(), Url::parse(uri).unwrap());
     let tokens = TokenManager::new(state_file(dir.path()), auth, StdDuration::from_secs(3600));
-    let api = Url::parse(&format!("{}/api", server.uri())).unwrap();
-    let graphql = Url::parse(&format!("{}/graphql", server.uri())).unwrap();
+    let api = Url::parse(&format!("{uri}/api")).unwrap();
+    let graphql = Url::parse(&format!("{uri}/graphql")).unwrap();
     Peloton::new(http, api, Arc::new(tokens), 4).with_graphql_url(graphql)
 }
 
@@ -1076,58 +1085,127 @@ async fn stack_service_replace_reports_a_failed_modify_once() {
     );
 }
 
-/// Records when each request arrives, then answers after a fixed delay.
-struct Slow {
-    delay: StdDuration,
-    arrivals: Arc<Mutex<Vec<Instant>>>,
-}
-
-impl Respond for Slow {
-    fn respond(&self, _: &Request) -> ResponseTemplate {
-        self.arrivals.lock().unwrap().push(Instant::now());
-        answer(&json!({ "data": { "checkDoesClassExistInUserStack": true } })).set_delay(self.delay)
-    }
-}
-
 #[tokio::test]
 async fn gql_respects_in_flight_cap() {
-    let delay = StdDuration::from_millis(400);
-    let arrivals = Arc::new(Mutex::new(Vec::new()));
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/graphql"))
-        .respond_with(Slow {
-            delay,
-            arrivals: Arc::clone(&arrivals),
-        })
-        .mount(&server)
-        .await;
+    let server = GatedServer::start(
+        json!({ "data": { "checkDoesClassExistInUserStack": true } }).to_string(),
+    )
+    .await;
     let dir = tempfile::tempdir().unwrap();
-    let peloton = Arc::new(client(&dir, &server));
+    let peloton = Arc::new(client_at(&dir, &server.uri(), http()));
     let calls: Vec<_> = (0..10)
         .map(|_| {
             let peloton = Arc::clone(&peloton);
             tokio::spawn(async move { peloton.class_in_stack(&ride(1)).await })
         })
         .collect();
+    // The cap lets four requests reach Peloton and holds the other six back.
+    server.wait_for_arrivals(4).await;
+    assert!(server.stays_quiet().await, "a fifth request got through");
+    server.release();
     for call in calls {
         assert!(call.await.unwrap().unwrap());
     }
-    let mut arrivals = arrivals.lock().unwrap().clone();
-    arrivals.sort();
-    assert_eq!(arrivals.len(), 10);
-    // Requests are in flight for `delay` after they arrive, so the number
-    // arriving within one delay of any arrival bounds the concurrency.
-    let window = delay.mul_f32(0.9);
-    let peak = arrivals
-        .iter()
-        .map(|start| {
-            arrivals
-                .iter()
-                .filter(|t| *t >= start && t.duration_since(*start) < window)
-                .count()
-        })
-        .max()
-        .unwrap();
-    assert_eq!(peak, 4);
+    assert_eq!(server.peak(), 4);
+}
+
+/// A `class_in_stack` answer padded with trailing whitespace to `len` bytes.
+fn answer_of_len(len: usize) -> String {
+    let answer = json!({ "data": { "checkDoesClassExistInUserStack": true } }).to_string();
+    format!("{answer}{}", " ".repeat(len - answer.len()))
+}
+
+#[tokio::test]
+async fn gql_body_over_the_size_limit_is_rejected() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            answer_of_len(MAX_RESPONSE_BODY_BYTES + 1),
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let err = client(&dir, &server)
+        .class_in_stack(&ride(1))
+        .await
+        .unwrap_err();
+    assert_eq!(err, UpstreamError::BodyTooLarge);
+}
+
+#[tokio::test]
+async fn gql_body_at_the_size_limit_is_read() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(answer_of_len(MAX_RESPONSE_BODY_BYTES), "application/json"),
+        )
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    assert!(
+        client(&dir, &server)
+            .class_in_stack(&ride(1))
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn gql_streamed_body_over_the_size_limit_is_cut_off() {
+    // No `Content-Length`: the limit can only be enforced while reading.
+    let uri = raw_http::serve_once(|mut stream| {
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n",
+            )
+            .unwrap();
+        let chunk = format!("{:x}\r\n{}\r\n", 64 * 1024, " ".repeat(64 * 1024));
+        // Twice the limit at most; the client stops reading well before.
+        for _ in 0..(2 * MAX_RESPONSE_BODY_BYTES / (64 * 1024)) {
+            if stream.write_all(chunk.as_bytes()).is_err() {
+                return;
+            }
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let err = client_at(&dir, &uri, http())
+        .class_in_stack(&ride(1))
+        .await
+        .unwrap_err();
+    assert_eq!(err, UpstreamError::BodyTooLarge);
+}
+
+#[tokio::test]
+async fn gql_redirect_is_not_followed() {
+    // The shared client must report the redirect, not resend the operation and
+    // the bearer token to wherever it points.
+    let target = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(answer(
+            &json!({ "data": { "checkDoesClassExistInUserStack": true } }),
+        ))
+        .expect(0)
+        .mount(&target)
+        .await;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(
+            ResponseTemplate::new(307)
+                .insert_header("Location", format!("{}/graphql", target.uri()).as_str()),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let err = client(&dir, &server)
+        .class_in_stack(&ride(1))
+        .await
+        .unwrap_err();
+    assert_eq!(err, UpstreamError::Upstream { status: 307 });
+    assert!(target.received_requests().await.unwrap().is_empty());
 }

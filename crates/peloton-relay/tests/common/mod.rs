@@ -3,13 +3,13 @@
 use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration as StdDuration;
 
 use peloton::ids::PelotonId;
 use peloton::oauth::TokenSet;
 use peloton_relay::store::{State, StateFile};
 use secrecy::SecretString;
 use time::{Duration, OffsetDateTime};
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::MakeWriter;
 
 /// The credential owner: the member the scrubbed fixtures belong to.
@@ -36,15 +36,10 @@ pub fn state_file(dir: &Path) -> StateFile {
     }
 }
 
-/// An HTTP client configured as production must configure it: no redirects,
-/// bounded timeouts.
+/// The HTTP client the relay uses in production: no redirects, bounded
+/// timeouts.
 pub fn http() -> reqwest::Client {
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(StdDuration::from_secs(5))
-        .timeout(StdDuration::from_secs(10))
-        .build()
-        .unwrap()
+    peloton_relay::config::http_client().unwrap()
 }
 
 /// Collects formatted tracing output in memory.
@@ -76,7 +71,7 @@ impl<'a> MakeWriter<'a> for LogBuffer {
     }
 }
 
-/// Process-wide log capture.
+/// Process-wide log capture, in the production JSON layout.
 ///
 /// A global subscriber rather than a thread-local one: tracing caches callsite
 /// interest across threads, so a scoped subscriber misses events when other
@@ -86,7 +81,7 @@ pub fn captured_logs() -> &'static LogBuffer {
     static LOGS: OnceLock<LogBuffer> = OnceLock::new();
     LOGS.get_or_init(|| {
         let logs = LogBuffer::default();
-        let subscriber = tracing_subscriber::fmt().with_writer(logs.clone()).finish();
+        let subscriber = peloton_relay::logging::subscriber(logs.clone(), EnvFilter::new("info"));
         tracing::subscriber::set_global_default(subscriber).unwrap();
         logs
     })

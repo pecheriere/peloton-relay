@@ -941,11 +941,11 @@ async fn writes_log_peloton_write_event() {
                 &json!({ "class_id": RIDE, "start_time": "2030-01-07T12:00:00.5Z" }),
             ),
             vec![
-                "op=\"schedule_add\"".to_owned(),
-                format!("class_id={RIDE}"),
-                format!("start_time={start}"),
-                "outcome=\"ok\"".to_owned(),
-                format!("new_scheduled_id={url_safe}"),
+                ("op", "schedule_add".to_owned()),
+                ("class_id", RIDE.to_owned()),
+                ("start_time", start.to_owned()),
+                ("outcome", "ok".to_owned()),
+                ("new_scheduled_id", url_safe.clone()),
             ],
         ),
         (
@@ -956,38 +956,38 @@ async fn writes_log_peloton_write_event() {
                 &json!({ "start_time": start }),
             ),
             vec![
-                "op=\"schedule_move\"".to_owned(),
-                format!("scheduled_id={url_safe}"),
-                format!("start_time={start}"),
-                format!("new_scheduled_id={moved}"),
-                "outcome=\"ok\"".to_owned(),
+                ("op", "schedule_move".to_owned()),
+                ("scheduled_id", url_safe.clone()),
+                ("start_time", start.to_owned()),
+                ("new_scheduled_id", moved.clone()),
+                ("outcome", "ok".to_owned()),
             ],
         ),
         (
             "write_schedule_remove",
             bare("DELETE", &format!("/v1/schedule/{url_safe}")),
             vec![
-                "op=\"schedule_remove\"".to_owned(),
-                format!("scheduled_id={url_safe}"),
-                "outcome=\"ok\"".to_owned(),
+                ("op", "schedule_remove".to_owned()),
+                ("scheduled_id", url_safe.clone()),
+                ("outcome", "ok".to_owned()),
             ],
         ),
         (
             "write_stack_add",
             with_json("POST", "/v1/stack", &json!({ "class_id": RIDE })),
             vec![
-                "op=\"stack_add\"".to_owned(),
-                format!("class_id={RIDE}"),
-                "outcome=\"ok\"".to_owned(),
+                ("op", "stack_add".to_owned()),
+                ("class_id", RIDE.to_owned()),
+                ("outcome", "ok".to_owned()),
             ],
         ),
         (
             "write_stack_remove_missing",
             bare("DELETE", &format!("/v1/stack/{}", ride(9))),
             vec![
-                "op=\"stack_remove\"".to_owned(),
-                format!("class_id={}", ride(9)),
-                "outcome=\"not_found\"".to_owned(),
+                ("op", "stack_remove".to_owned()),
+                ("class_id", ride(9).to_string()),
+                ("outcome", "not_found".to_owned()),
             ],
         ),
         (
@@ -998,9 +998,9 @@ async fn writes_log_peloton_write_event() {
                 &json!({ "class_ids": [RIDE, ride(2).to_string()] }),
             ),
             vec![
-                "op=\"stack_replace\"".to_owned(),
-                format!("class_ids={RIDE},{}", ride(2)),
-                "outcome=\"ok\"".to_owned(),
+                ("op", "stack_replace".to_owned()),
+                ("class_ids", format!("{RIDE},{}", ride(2))),
+                ("outcome", "ok".to_owned()),
             ],
         ),
     ];
@@ -1011,10 +1011,10 @@ async fn writes_log_peloton_write_event() {
         assert!(status.as_u16() < 500, "{case}: {status} {body}");
         let events = audit_events(case);
         assert_eq!(events.len(), 1, "{case}: {events:?}");
-        let event = &events[0];
-        assert!(event.contains(" INFO "), "{case}: {event}");
-        for field in fields {
-            assert!(event.contains(&field), "{case} lacks {field}: {event}");
+        let event: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+        assert_eq!(event["level"], "INFO", "{case}: {event}");
+        for (name, value) in fields {
+            assert_eq!(event[name], value, "{case} lacks {name}: {event}");
         }
     }
     let all = logs.contents();
@@ -1055,7 +1055,7 @@ async fn refused_writes_log_their_code_only() {
     let events = audit_events(case);
     assert_eq!(events.len(), 1, "{events:?}");
     assert!(
-        events[0].contains("outcome=\"cannot_schedule\""),
+        events[0].contains("\"outcome\":\"cannot_schedule\""),
         "{events:?}"
     );
     let ours: String = captured_logs()

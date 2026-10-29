@@ -5,9 +5,10 @@ use std::any::Any;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request, State};
+use axum::extract::{FromRequest, FromRequestParts, MatchedPath, Path, Query, Request, State};
 use axum::http::request::Parts;
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderName, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get};
 use axum::{Json, Router};
@@ -16,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime, UtcOffset};
 use tower_http::catch_panic::CatchPanicLayer;
+use tower_http::request_id::{MakeRequestId as _, MakeRequestUuid, RequestId};
+use tracing::Instrument as _;
 use utoipa::openapi::RefOr;
 use utoipa::openapi::schema::{ObjectBuilder, Schema, Type};
 use utoipa::{IntoParams, OpenApi, ToSchema};
@@ -102,7 +105,43 @@ pub fn router(state: AppState) -> Router {
         .fallback(|| async { ApiError::NotFound })
         .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
         .layer(catch_panics())
+        .layer(middleware::from_fn(request_context))
         .with_state(state)
+}
+
+/// Header carrying the id the relay gives each request.
+const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
+
+/// The `route` logged for a request that matched no route, so that a log line
+/// never holds the path of an arbitrary request.
+const UNMATCHED_ROUTE: &str = "unmatched";
+
+/// Gives the request a fresh id, returned as `x-request-id`, and runs it in a
+/// span with that id, its method and its matched route (the path template,
+/// e.g. `/v1/workouts/{id}`), so that every log line of the handler, such as
+/// an upstream failure, carries them.
+///
+/// An id sent by the client is ignored. The span holds neither the query
+/// string nor the path's own ids.
+async fn request_context(request: Request, next: Next) -> Response {
+    let id = MakeRequestUuid
+        .make_request_id(&request)
+        .map(RequestId::into_header_value);
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or(UNMATCHED_ROUTE, MatchedPath::as_str);
+    let span = tracing::info_span!(
+        "request",
+        method = %request.method(),
+        route,
+        request_id = id.as_ref().and_then(|id| id.to_str().ok()),
+    );
+    let mut response = next.run(request).instrument(span).await;
+    if let Some(id) = id {
+        response.headers_mut().insert(REQUEST_ID_HEADER, id);
+    }
+    response
 }
 
 /// Answers a request whose handler panicked with 500 `internal_error`.
