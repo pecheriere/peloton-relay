@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 150" role="img" aria-label="Pacer with a bandaged ear">
+        <ellipse cx="60" cy="142" rx="28" ry="4" fill="#E4E5EE"/>
+        <rect x="41" y="4" width="14" height="48" rx="7" fill="#E9E3FF" transform="rotate(-10 48 52)"/>
+        <rect x="45" y="11" width="6" height="34" rx="3" fill="#FFB3C1" transform="rotate(-10 48 52)"/>
+        <rect x="40" y="22" width="16" height="7" rx="2" fill="#FFFFFF" stroke="#D9DAE6" stroke-width="1.5" transform="rotate(-10 48 52)"/>
+        <rect x="65" y="24" width="14" height="28" rx="7" fill="#E9E3FF" transform="rotate(12 72 52)"/>
+        <rect x="70" y="10" width="14" height="22" rx="7" fill="#E9E3FF" transform="rotate(70 77 28)"/>
+        <circle cx="83" cy="114" r="7" fill="#FFFFFF"/>
+        <path d="M42 96 Q34 104 36 113" stroke="#D9D0FF" stroke-width="7" fill="none" stroke-linecap="round"/>
+        <path d="M78 96 Q80 84 72 80" stroke="#D9D0FF" stroke-width="7" fill="none" stroke-linecap="round"/>
+        <rect x="40" y="84" width="40" height="42" rx="18" fill="#E9E3FF"/>
+        <path d="M40 92 H80 V108 A18 18 0 0 1 62 126 H58 A18 18 0 0 1 40 108 Z" fill="#FF5C6B"/>
+        <rect x="35" y="124" width="23" height="11" rx="5.5" fill="#FFFFFF" stroke="#BFC2D4" stroke-width="1.5"/><rect x="35" y="131.5" width="23" height="3.5" rx="1.75" fill="#15161F"/><circle cx="49.26" cy="128.62" r="1.6" fill="#FF7A59"/>
+        <rect x="62" y="124" width="23" height="11" rx="5.5" fill="#FFFFFF" stroke="#BFC2D4" stroke-width="1.5"/><rect x="62" y="131.5" width="23" height="3.5" rx="1.75" fill="#15161F"/><circle cx="76.26" cy="128.62" r="1.6" fill="#FF7A59"/>
+        <circle cx="60" cy="63" r="25" fill="#E9E3FF"/>
+        <rect x="36" y="49" width="48" height="8" rx="4" fill="#FF7A59"/>
+        <path d="M46 62 L54 59.5 M66 59.5 L74 62" stroke="#15161F" stroke-width="2.2" stroke-linecap="round"/>
+        <circle cx="51" cy="67" r="2.8" fill="#15161F"/><circle cx="69" cy="67" r="2.8" fill="#15161F"/>
+        <circle cx="44" cy="73" r="3.6" fill="#FFB3C1"/><circle cx="76" cy="73" r="3.6" fill="#FFB3C1"/>
+        <ellipse cx="60" cy="73" rx="3" ry="2.2" fill="#FF8FA3"/>
+        <path d="M56 79 Q60 76 64 79" stroke="#15161F" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <path d="M95 40 Q101 50 95 54 Q89 50 95 40 Z" fill="#4C9BFF"/>
+</svg>

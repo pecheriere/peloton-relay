@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Renew sign-in</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#B3A3FF}a:hover{color:#D2C8FF}
+</style>
+</head>
+<body>
+<div style="width: 390px; height: 844px; box-sizing: border-box; padding: 56px 20px 28px; background: #0E0F15; color: #F3F3F8; font-family: 'Plus Jakarta Sans', system-ui, sans-serif; display: flex; flex-direction: column; gap: 18px">
+  <a href="PhoneAccountDark.html" style="align-self: flex-start; height: 44px; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: #B3A3FF; font-weight: 700; font-size: 16px">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#B3A3FF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+    bob
+  </a>
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <h1 style="margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -0.02em">Renew sign-in</h1>
+    <div style="font-size: 15px; line-height: 1.5; color: #A3A6BB">Signing in happens on your Mac, in Peloton’s own page. The relay never sees the password.</div>
+  </div>
+
+  <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px">
+    <li style="background: #181A23; border: 1px solid #2A2D3A; border-radius: 20px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; gap: 12px; align-items: center"><span style="width: 28px; height: 28px; border-radius: 99px; background: #8C73FF; color: #0E0F15; font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 14px">1</span><span style="font-weight: 700; font-size: 16px">Copy the command</span></div>
+      <div style="background: #08090D; border: 1px solid #2A2D3A; border-radius: 14px; padding: 12px">
+        <code style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.6; color: #E6E6F0; white-space: pre-wrap; word-break: break-all">peloton-relay-login --account bob --post-to https://relay.example.ts.net/admin/seed --code 7KQ2-M4XD</code>
+      </div>
+      <button type="button" style="height: 48px; border: 0; border-radius: 999px; background: #8C73FF; color: #0E0F15; font: 800 16px 'Plus Jakarta Sans', sans-serif; display: flex; align-items: center; justify-content: center; gap: 8px">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0E0F15" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a1 1 0 0 1 1-1h10"></path></svg>
+        Copy command
+      </button>
+    </li>
+    <li style="background: #181A23; border: 1px solid #2A2D3A; border-radius: 20px; padding: 16px; display: flex; gap: 12px; align-items: flex-start">
+      <span style="flex: none; width: 28px; height: 28px; border-radius: 99px; background: #2A2D3A; color: #F3F3F8; font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 14px">2</span>
+      <div style="display: flex; flex-direction: column; gap: 4px"><span style="font-weight: 700; font-size: 16px">Run it in Terminal on your Mac</span><span style="font-size: 14px; line-height: 1.5; color: #A3A6BB">A sign-in window opens. The person who owns this Peloton account signs in.</span></div>
+    </li>
+    <li style="background: #181A23; border: 1px solid #2A2D3A; border-radius: 20px; padding: 16px; display: flex; gap: 12px; align-items: center">
+      <span style="flex: none; width: 28px; height: 28px; border-radius: 99px; background: #2A2D3A; color: #F3F3F8; font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 14px">3</span>
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 4px"><span style="font-weight: 700; font-size: 16px">Waiting for the relay</span><span style="font-size: 14px; color: #A3A6BB">This page updates by itself.</span></div>
+      <span style="width: 22px; height: 22px; border-radius: 99px; border: 3px solid #2A2D3A; border-top-color: #8C73FF" aria-label="Waiting"></span>
+    </li>
+  </ol>
+  <div style="flex: 1"></div>
+  <div style="font-size: 13px; line-height: 1.5; color: #A3A6BB; text-align: center">The command holds a one-time code that expires in 10 minutes. It only works for “bob”, and only for the Peloton user bound to it.</div>
+</div>
+</body>
+</html>
