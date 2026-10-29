@@ -1081,3 +1081,18 @@ fn scrub_shifts_unknown_times_inside_a_class() {
         );
     }
 }
+
+#[test]
+fn scrub_erases_non_ascii_names_in_other_casing_and_compound_forms() {
+    let input = vec![(
+        "ride.json".to_owned(),
+        json!({
+            "instructor": {"first_name": "Élodie", "last_name": "Groß", "username": "coach_x"},
+            "description": "Avec ÉLODIE, élodie-Marie, GROSS et ÉlodieGROẞ.",
+        }),
+    )];
+    let output = render(&scrub_files(input, PARAMS)).to_lowercase();
+    for word in ["élodie", "groß", "gross"] {
+        assert!(!output.contains(word), "{word} survived: {output}");
+    }
+}

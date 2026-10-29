@@ -13,12 +13,14 @@ clap.workspace = true
 peloton.workspace = true
 rand.workspace = true
 reqwest.workspace = true
+rustix.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 time = { workspace = true, features = ["macros"] }
 tokio.workspace = true
+unicode-normalization.workspace = true
 url.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -27,6 +29,7 @@ tao.workspace = true
 wry.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 tempfile.workspace = true
 
 [lints]

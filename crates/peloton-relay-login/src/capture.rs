@@ -1,12 +1,13 @@
 //! `capture`: save raw Peloton responses to disk for fixture building.
 
-use std::fs::{self, DirBuilder, OpenOptions};
+use std::fs::{self, DirBuilder};
 use std::io::Write as _;
-use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
+use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 
 use peloton::endpoints;
 use peloton::ids::PelotonId;
+use rustix::fs::{Mode, OFlags};
 use secrecy::SecretString;
 use serde::Deserialize;
 
@@ -50,6 +51,14 @@ pub enum StoreError {
         /// The underlying failure.
         #[source]
         source: std::io::Error,
+    },
+    /// The file to write is not a regular file with a single link (a
+    /// symbolic link, a hard link, a FIFO, …), so it could redirect the
+    /// capture or have another file truncated.
+    #[error("refusing to write {}: not a regular file with a single link", .path.display())]
+    NotPrivate {
+        /// The file.
+        path: PathBuf,
     },
     /// Permissions could not be restricted to the owner.
     #[error("could not secure {}", .path.display())]
@@ -101,16 +110,29 @@ struct WorkoutRef {
     id: String,
 }
 
+/// The workout ids of a workouts-list response.
+#[derive(Debug, PartialEq, Eq)]
+pub struct WorkoutIds {
+    /// The valid ids, in list order.
+    pub valid: Vec<PelotonId>,
+    /// How many entries were skipped because their id is not a valid
+    /// [`PelotonId`].
+    pub skipped: usize,
+}
+
 /// Extracts and validates the workout ids of a workouts-list response.
 ///
-/// Entries whose id is not a valid [`PelotonId`] are dropped.
+/// Entries whose id is not a valid [`PelotonId`] are counted, not returned;
+/// the ids themselves are not reported, as they are untrusted.
 ///
 /// # Errors
 ///
 /// Returns [`WorkoutsShapeError`] when the body is not a workouts list.
-pub fn workout_ids(body: &[u8]) -> Result<Vec<PelotonId>, WorkoutsShapeError> {
+pub fn workout_ids(body: &[u8]) -> Result<WorkoutIds, WorkoutsShapeError> {
     let list: WorkoutList = serde_json::from_slice(body).map_err(|_| WorkoutsShapeError)?;
-    Ok(list.data.iter().filter_map(|w| w.id.parse().ok()).collect())
+    let valid: Vec<PelotonId> = list.data.iter().filter_map(|w| w.id.parse().ok()).collect();
+    let skipped = list.data.len() - valid.len();
+    Ok(WorkoutIds { valid, skipped })
 }
 
 /// Extracts the ride id (`ride.id`) from a workout response, if valid.
@@ -184,27 +206,50 @@ pub(crate) fn prepare_dir(dir: &Path) -> Result<(), StoreError> {
     })
 }
 
-pub(crate) fn save(dir: &Path, name: &str, body: &[u8]) -> Result<(), StoreError> {
-    let path = dir.join(name);
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&path)
-        .map_err(|source| StoreError::Write {
-            path: path.clone(),
+/// Opens `path` for writing, empty, with mode 0600 before any content is
+/// written: new files are created with it, and an existing file is
+/// restricted before it is truncated.
+///
+/// A symbolic link is refused (`O_NOFOLLOW`), and so is anything but a
+/// regular file with a single link, so a planted link cannot redirect the
+/// capture or have another file truncated and re-permissioned. The file is
+/// opened with `O_NONBLOCK`, so a planted FIFO cannot block the open, and
+/// switched back to blocking once it is known to be a regular file.
+fn create_private(path: &Path) -> Result<fs::File, StoreError> {
+    let write_error = |source: std::io::Error| StoreError::Write {
+        path: path.to_path_buf(),
+        source,
+    };
+    let flags =
+        OFlags::WRONLY | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let file = fs::File::from(
+        rustix::fs::open(path, flags, Mode::RUSR | Mode::WUSR)
+            .map_err(|errno| write_error(errno.into()))?,
+    );
+    let meta = file.metadata().map_err(write_error)?;
+    if !meta.is_file() || meta.nlink() > 1 {
+        return Err(StoreError::NotPrivate {
+            path: path.to_path_buf(),
+        });
+    }
+    let status = rustix::fs::fcntl_getfl(&file).map_err(|errno| write_error(errno.into()))?;
+    rustix::fs::fcntl_setfl(&file, status - OFlags::NONBLOCK)
+        .map_err(|errno| write_error(errno.into()))?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|source| StoreError::Secure {
+            path: path.to_path_buf(),
             source,
         })?;
+    file.set_len(0).map_err(write_error)?;
+    Ok(file)
+}
+
+pub(crate) fn save(dir: &Path, name: &str, body: &[u8]) -> Result<(), StoreError> {
+    let path = dir.join(name);
+    let mut file = create_private(&path)?;
     file.write_all(body).map_err(|source| StoreError::Write {
         path: path.clone(),
         source,
-    })?;
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(|source| {
-        StoreError::Secure {
-            path: path.clone(),
-            source,
-        }
     })?;
     eprintln!("saved {name}");
     Ok(())
@@ -240,7 +285,14 @@ pub fn run(session: &Session, dir: &Path, count: u32) -> Result<(), CaptureError
     let mut tally = Tally::default();
     // me.json and the workouts list are already saved.
     tally.saved += 2;
-    for id in workout_ids(&list)? {
+    let ids = workout_ids(&list)?;
+    if ids.skipped > 0 {
+        eprintln!(
+            "skipped {} workout(s) in the list with an invalid id",
+            ids.skipped
+        );
+    }
+    for id in ids.valid {
         let fetch = |query: String, name: String, tally: &mut Tally| {
             session.pause();
             fetch_and_save(session, access, &dir, &query, &name, tally)
@@ -312,10 +364,13 @@ fn fetch_and_save(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt as _;
     use std::path::Path;
 
     use super::{
-        StoreError, Tally, guard_dir, prepare_dir, resolve_dir, ride_id, save, workout_ids,
+        StoreError, Tally, create_private, guard_dir, prepare_dir, resolve_dir, ride_id, save,
+        workout_ids,
     };
     use crate::report;
 
@@ -402,9 +457,94 @@ mod tests {
     }
 
     #[test]
-    fn workout_ids_drop_invalid() {
-        let body = format!(r#"{{"data":[{{"id":"{ID}"}},{{"id":"../x"}}]}}"#);
-        assert_eq!(workout_ids(body.as_bytes()).expect("list").len(), 1);
+    fn workout_ids_report_the_invalid_ones_they_skip() {
+        let body = format!(r#"{{"data":[{{"id":"{ID}"}},{{"id":"../x"}},{{"id":"0"}}]}}"#);
+        let ids = workout_ids(body.as_bytes()).expect("list");
+        assert_eq!(ids.valid.len(), 1);
+        assert_eq!(ids.skipped, 2);
+    }
+
+    #[test]
+    fn create_private_restricts_an_existing_file_before_it_is_written() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("me.json");
+        fs::write(&path, b"old and readable").expect("seed");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("chmod");
+
+        let file = create_private(&path).expect("open");
+
+        let meta = file.metadata().expect("metadata");
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        assert_eq!(meta.len(), 0);
+    }
+
+    #[test]
+    fn create_private_refuses_a_symlink_and_leaves_its_target_alone() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let target = dir.path().join("target.txt");
+        fs::write(&target, b"keep me").expect("seed");
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).expect("chmod");
+        let link = dir.path().join("me.json");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+        assert!(create_private(&link).is_err());
+
+        assert_eq!(fs::read(&target).expect("read"), b"keep me");
+        let mode = fs::metadata(&target)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o644);
+    }
+
+    #[test]
+    fn create_private_refuses_a_hard_linked_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let target = dir.path().join("target.txt");
+        fs::write(&target, b"keep me").expect("seed");
+        let link = dir.path().join("me.json");
+        fs::hard_link(&target, &link).expect("hard link");
+
+        assert!(matches!(
+            create_private(&link),
+            Err(StoreError::NotPrivate { .. })
+        ));
+
+        assert_eq!(fs::read(&target).expect("read"), b"keep me");
+    }
+
+    #[test]
+    fn create_private_refuses_a_fifo_without_blocking() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("me.json");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .expect("run mkfifo");
+        assert!(made.success(), "mkfifo failed");
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let opened = path.clone();
+        std::thread::spawn(move || {
+            let refused = create_private(&opened).is_err();
+            sender.send(refused).expect("send result");
+        });
+        let refused = receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("create_private blocked on a FIFO");
+
+        assert!(refused);
+    }
+
+    #[test]
+    fn create_private_creates_new_files_as_0600() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("new.json");
+
+        create_private(&path).expect("open");
+
+        let mode = fs::metadata(&path).expect("metadata").permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]
