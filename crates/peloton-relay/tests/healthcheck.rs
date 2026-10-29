@@ -7,7 +7,7 @@ use std::process::Output;
 use axum::Router;
 use axum::http::{StatusCode, header};
 use axum::routing::get;
-use peloton_relay::config::LISTEN_VAR;
+use peloton_relay::config::{ACCOUNTS_VAR, LISTEN_VAR};
 use time::macros::datetime;
 use tokio::net::TcpListener;
 use tokio::process::Command;
@@ -39,6 +39,7 @@ async fn healthcheck(listen: SocketAddr) -> Output {
         .arg("healthcheck")
         .env_clear()
         .env(LISTEN_VAR, listen.to_string())
+        .env(ACCOUNTS_VAR, "alice")
         .output()
         .await
         .unwrap()

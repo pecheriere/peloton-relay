@@ -4,12 +4,15 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::account::{AccountName, Accounts};
 use crate::store::StateFile;
 
 /// Environment variable holding the listen address.
 pub const LISTEN_VAR: &str = "PELOTON_RELAY_LISTEN";
 /// Environment variable holding the state directory.
 pub const STATE_DIR_VAR: &str = "PELOTON_RELAY_STATE_DIR";
+/// Environment variable holding the comma-separated account names.
+pub const ACCOUNTS_VAR: &str = "PELOTON_RELAY_ACCOUNTS";
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:8080";
 const DEFAULT_STATE_DIR: &str = "/state";
@@ -20,6 +23,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// An environment variable has an unusable value.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ConfigError {
     /// The listen address is not `host:port`.
     #[error("{LISTEN_VAR} must be an address like 0.0.0.0:8080")]
@@ -27,6 +31,11 @@ pub enum ConfigError {
     /// The state directory is empty or not valid unicode.
     #[error("{STATE_DIR_VAR} must be a non-empty path")]
     StateDir,
+    /// The account list is unset, empty, malformed or has a repeated name.
+    #[error(
+        "{ACCOUNTS_VAR} must list one or more distinct account names (1 to 16 lowercase ASCII letters), comma-separated"
+    )]
+    Accounts,
 }
 
 /// Settings shared by all commands.
@@ -36,6 +45,8 @@ pub struct Config {
     pub listen: SocketAddr,
     /// Directory holding the state file.
     pub state_dir: PathBuf,
+    /// The accounts this relay serves, under the state directory.
+    pub accounts: Accounts,
 }
 
 impl Config {
@@ -67,7 +78,20 @@ impl Config {
             Some(value) if value.is_empty() => return Err(ConfigError::StateDir),
             Some(value) => PathBuf::from(value),
         };
-        Ok(Self { listen, state_dir })
+        let names = lookup(ACCOUNTS_VAR)
+            .and_then(|value| value.into_string().ok())
+            .ok_or(ConfigError::Accounts)?
+            .split(',')
+            .map(str::parse::<AccountName>)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| ConfigError::Accounts)?;
+        let accounts =
+            Accounts::new(state_dir.clone(), names).map_err(|_| ConfigError::Accounts)?;
+        Ok(Self {
+            listen,
+            state_dir,
+            accounts,
+        })
     }
 
     /// URL of the liveness probe of a server bound to [`Self::listen`]: the
@@ -118,6 +142,11 @@ mod tests {
     use std::ffi::OsString;
 
     use super::{Config, ConfigError};
+    use crate::account::AccountName;
+
+    fn alice() -> AccountName {
+        "alice".parse().unwrap()
+    }
 
     fn config(vars: &[(&str, &str)]) -> Result<Config, ConfigError> {
         Config::from_lookup(|name| {
@@ -129,9 +158,13 @@ mod tests {
 
     #[test]
     fn defaults() {
-        let config = config(&[]).unwrap();
+        let config = config(&[("PELOTON_RELAY_ACCOUNTS", "alice")]).unwrap();
         assert_eq!(config.listen.to_string(), "0.0.0.0:8080");
         assert_eq!(config.state_file().path.to_str(), Some("/state/state.json"));
+        assert_eq!(
+            config.accounts.state_file(&alice()).path.to_str(),
+            Some("/state/alice/state.json")
+        );
     }
 
     #[test]
@@ -139,18 +172,26 @@ mod tests {
         let config = config(&[
             ("PELOTON_RELAY_LISTEN", "127.0.0.1:9000"),
             ("PELOTON_RELAY_STATE_DIR", "/tmp/x"),
+            ("PELOTON_RELAY_ACCOUNTS", "alice"),
         ])
         .unwrap();
         assert_eq!(config.listen.port(), 9000);
         assert_eq!(config.state_file().path.to_str(), Some("/tmp/x/state.json"));
+        assert_eq!(
+            config.accounts.state_file(&alice()).path.to_str(),
+            Some("/tmp/x/alice/state.json")
+        );
     }
 
     #[test]
     fn healthcheck_probes_the_listen_address() {
         let url = |listen: &str| {
-            config(&[("PELOTON_RELAY_LISTEN", listen)])
-                .unwrap()
-                .healthcheck_url()
+            config(&[
+                ("PELOTON_RELAY_LISTEN", listen),
+                ("PELOTON_RELAY_ACCOUNTS", "alice"),
+            ])
+            .unwrap()
+            .healthcheck_url()
         };
         assert_eq!(url("0.0.0.0:8080"), "http://127.0.0.1:8080/healthz");
         assert_eq!(url("[::]:8080"), "http://[::1]:8080/healthz");
@@ -164,12 +205,51 @@ mod tests {
     #[test]
     fn rejects_bad_values() {
         assert!(matches!(
-            config(&[("PELOTON_RELAY_LISTEN", "nonsense")]),
+            config(&[
+                ("PELOTON_RELAY_LISTEN", "nonsense"),
+                ("PELOTON_RELAY_ACCOUNTS", "alice"),
+            ]),
             Err(ConfigError::Listen)
         ));
         assert!(matches!(
-            config(&[("PELOTON_RELAY_STATE_DIR", "")]),
+            config(&[
+                ("PELOTON_RELAY_STATE_DIR", ""),
+                ("PELOTON_RELAY_ACCOUNTS", "alice"),
+            ]),
             Err(ConfigError::StateDir)
         ));
+    }
+
+    #[test]
+    fn config_reads_the_account_list() {
+        let config = config(&[("PELOTON_RELAY_ACCOUNTS", "alice,bob")]).unwrap();
+        let bob: AccountName = "bob".parse().unwrap();
+        assert_eq!(config.accounts.names(), [alice(), bob]);
+        assert_eq!(
+            config.accounts.state_file(&alice()).path.to_str(),
+            Some("/state/alice/state.json")
+        );
+    }
+
+    #[test]
+    fn config_rejects_bad_account_lists() {
+        assert!(matches!(config(&[]), Err(ConfigError::Accounts)));
+        for bad in [
+            "",
+            "alice,",
+            ",alice",
+            "alice,,bob",
+            "alice, bob",
+            "alice,alice",
+            "alice,Bob",
+        ] {
+            assert!(
+                matches!(
+                    config(&[("PELOTON_RELAY_ACCOUNTS", bad)]),
+                    Err(ConfigError::Accounts)
+                ),
+                "{bad:?}"
+            );
+        }
     }
 }
