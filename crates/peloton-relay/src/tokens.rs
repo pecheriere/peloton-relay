@@ -28,14 +28,19 @@
 //! Peloton also rejects the token that refresh minted before the cooldown
 //! ends, the manager logs `event="peloton_unauthorized_after_refresh"` instead
 //! of rotating again.
+//!
+//! [`TokenManager::status`] reports the credential's health and the last
+//! [`MAX_INCIDENTS`] problems logged about it, for the admin page; neither
+//! holds a token.
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::future::Future;
 use std::io;
 use std::mem;
 use std::panic;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant};
 
 use peloton::ids::PelotonId;
@@ -72,6 +77,9 @@ pub const BACKGROUND_REFRESH_INTERVAL: Duration = Duration::from_mins(15);
 /// holds it only while it writes the file.
 pub const DEFAULT_STATE_LOCK_WAIT: Duration = Duration::from_secs(10);
 
+/// How many recent problems [`TokenManager::status`] reports.
+pub const MAX_INCIDENTS: usize = 8;
+
 /// The monotonic clock that backoff and cooldown decisions read.
 #[derive(Clone)]
 pub struct MonotonicClock(Arc<dyn Fn() -> Instant + Send + Sync>);
@@ -97,6 +105,100 @@ impl MonotonicClock {
 impl fmt::Debug for MonotonicClock {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("MonotonicClock")
+    }
+}
+
+/// How usable an account's credential is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Health {
+    /// A saved credential that Peloton has not rejected.
+    Ok,
+    /// No credential, one Peloton rejected, or one the account's binding does
+    /// not allow: a sign-in fixes it.
+    NeedsSignIn,
+    /// The state or binding file cannot be read or parsed, or refreshed
+    /// tokens cannot be saved: the files need attention.
+    Unreadable,
+}
+
+/// A problem with the credential, as the manager logged it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncidentKind {
+    /// Peloton rejected the refresh token (`peloton_auth_failed`).
+    RefreshRejected,
+    /// A refresh failed and will be retried (`peloton_refresh_retry`).
+    RefreshFailed,
+    /// Peloton rejected a token just refreshed after a 401
+    /// (`peloton_unauthorized_after_refresh`).
+    UnauthorizedAfterRefresh,
+    /// The state file is empty or corrupt (`state_corrupt`).
+    StateCorrupt,
+    /// The binding does not allow the state file (`state_refused`).
+    StateRefused,
+    /// The state's user is bound to another account (`state_refused`,
+    /// reason `bound_elsewhere`).
+    BoundElsewhere,
+    /// Another account's binding cannot be read or parsed (`state_refused`,
+    /// reason `peer_binding_corrupt` or `peer_binding_unreadable`).
+    PeerBindingUnreadable,
+    /// The state file cannot be read (`state_file_unreadable`).
+    StateUnreadable,
+    /// Refreshed tokens cannot be saved (`state_save_failed`).
+    SaveFailed,
+    /// The state file lock was not available for a refresh
+    /// (`state_lock_failed`).
+    LockFailed,
+}
+
+impl IncidentKind {
+    /// A fixed, human-readable description.
+    #[must_use]
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::RefreshRejected => "Peloton rejected the refresh token",
+            Self::RefreshFailed => "The token refresh failed; retrying",
+            Self::UnauthorizedAfterRefresh => "Peloton rejected a freshly refreshed token",
+            Self::StateCorrupt => "The state file is empty or corrupt",
+            Self::StateRefused => "The binding does not allow the state file",
+            Self::BoundElsewhere => "Its Peloton user is bound to another account",
+            Self::PeerBindingUnreadable => "Another account's binding cannot be read",
+            Self::StateUnreadable => "The state file cannot be read",
+            Self::SaveFailed => "Refreshed tokens cannot be saved",
+            Self::LockFailed => "The state file lock was busy during a refresh",
+        }
+    }
+}
+
+/// One logged problem and when it happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Incident {
+    /// When it was logged.
+    pub at: OffsetDateTime,
+    /// What it was.
+    pub kind: IncidentKind,
+}
+
+/// What [`TokenManager::status`] reports. Holds no token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CredentialStatus {
+    /// How usable the credential is.
+    pub health: Health,
+    /// When this process last refreshed the access token.
+    pub last_refresh: Option<OffsetDateTime>,
+    /// When the access token in use expires.
+    pub expires_at: Option<OffsetDateTime>,
+    /// The last [`MAX_INCIDENTS`] problems, newest first.
+    pub incidents: Vec<Incident>,
+}
+
+impl Default for CredentialStatus {
+    fn default() -> Self {
+        Self {
+            health: Health::NeedsSignIn,
+            last_refresh: None,
+            expires_at: None,
+            incidents: Vec::new(),
+        }
     }
 }
 
@@ -129,6 +231,8 @@ struct Shared {
     inner: Mutex<Inner>,
     /// Mirror of [`Inner::is_ready`] for synchronous readers.
     ready: AtomicBool,
+    /// Mirror of [`Inner::status`] for synchronous readers.
+    status: std::sync::Mutex<CredentialStatus>,
 }
 
 #[derive(Debug, Default)]
@@ -137,6 +241,8 @@ struct Inner {
     reported: Reported,
     /// The Peloton user of the last credential this manager accepted.
     last_user: Option<PelotonId>,
+    /// When this manager last refreshed the access token.
+    last_refresh: Option<OffsetDateTime>,
 }
 
 /// State file problems already logged, so each is logged once, not per request.
@@ -146,6 +252,8 @@ struct Reported {
     load_problem: Option<LoadProblem>,
     /// A failed save was logged and no save has succeeded since.
     save_failing: bool,
+    /// The last [`MAX_INCIDENTS`] problems logged, oldest first.
+    incidents: VecDeque<Incident>,
 }
 
 #[derive(Debug, Default)]
@@ -275,6 +383,38 @@ impl Inner {
         matches!(&self.phase, Phase::Ready(ready) if ready.persist == Persist::Saved)
     }
 
+    fn health(&self) -> Health {
+        match &self.phase {
+            Phase::Ready(ready) if ready.persist == Persist::Saved => Health::Ok,
+            Phase::Ready(_) => Health::Unreadable,
+            Phase::Failed { .. } => Health::NeedsSignIn,
+            Phase::Empty => match self.reported.load_problem {
+                Some(
+                    LoadProblem::Corrupt
+                    | LoadProblem::Unreadable(_)
+                    | LoadProblem::Refused(
+                        Refusal::BindingCorrupt
+                        | Refusal::PeerBindingCorrupt(_)
+                        | Refusal::PeerBindingUnreadable(..),
+                    ),
+                ) => Health::Unreadable,
+                _ => Health::NeedsSignIn,
+            },
+        }
+    }
+
+    fn status(&self) -> CredentialStatus {
+        CredentialStatus {
+            health: self.health(),
+            last_refresh: self.last_refresh,
+            expires_at: match &self.phase {
+                Phase::Ready(ready) => Some(ready.state.tokens.expires_at),
+                _ => None,
+            },
+            incidents: self.reported.incidents.iter().rev().copied().collect(),
+        }
+    }
+
     /// Applies a fresh read of the state file while not ready.
     fn apply_loaded(&mut self, account: &AccountName, loaded: io::Result<Snapshot>) {
         let (state, version) = match loaded {
@@ -394,6 +534,7 @@ impl Reported {
                     tracing::info!(event = "state_missing", account = %account, "no state file yet; run seed");
                 }
                 LoadProblem::Corrupt => {
+                    self.record(IncidentKind::StateCorrupt);
                     tracing::warn!(
                         event = "state_corrupt",
                         account = %account,
@@ -401,6 +542,15 @@ impl Reported {
                     );
                 }
                 LoadProblem::Refused(refusal) => {
+                    self.record(match refusal {
+                        Refusal::BoundElsewhere(_) => IncidentKind::BoundElsewhere,
+                        Refusal::PeerBindingCorrupt(_) | Refusal::PeerBindingUnreadable(..) => {
+                            IncidentKind::PeerBindingUnreadable
+                        }
+                        Refusal::Unbound | Refusal::UserMismatch | Refusal::BindingCorrupt => {
+                            IncidentKind::StateRefused
+                        }
+                    });
                     tracing::error!(
                         event = "state_refused",
                         account = %account,
@@ -411,6 +561,7 @@ impl Reported {
                     );
                 }
                 LoadProblem::Unreadable(kind) => {
+                    self.record(IncidentKind::StateUnreadable);
                     tracing::warn!(event = "state_file_unreadable", account = %account, cause = ?kind, "cannot read the state file");
                 }
             }
@@ -421,8 +572,20 @@ impl Reported {
     /// Logs the first failed save of a streak of failures.
     fn save_failed(&mut self, account: &AccountName, err: &StoreError) {
         if !mem::replace(&mut self.save_failing, true) {
+            self.record(IncidentKind::SaveFailed);
             tracing::error!(event = "state_save_failed", account = %account, cause = ?err, "cannot save refreshed tokens; withholding them until saved");
         }
+    }
+
+    /// Remembers `kind`, happening now, keeping the last [`MAX_INCIDENTS`].
+    fn record(&mut self, kind: IncidentKind) {
+        if self.incidents.len() == MAX_INCIDENTS {
+            self.incidents.pop_front();
+        }
+        self.incidents.push_back(Incident {
+            at: OffsetDateTime::now_utc(),
+            kind,
+        });
     }
 
     /// Forgets what was logged about the credential `phase` held before: a
@@ -498,6 +661,7 @@ impl TokenManager {
                 lock_wait,
                 inner: Mutex::new(Inner::default()),
                 ready: AtomicBool::new(false),
+                status: std::sync::Mutex::new(CredentialStatus::default()),
             }),
             tasks: TaskTracker::new(),
         }
@@ -580,6 +744,40 @@ impl TokenManager {
     pub fn is_ready(&self) -> bool {
         self.shared.ready.load(Ordering::Acquire)
     }
+
+    /// The credential's health, last refresh, expiry and recent problems, as
+    /// of the last call that touched it; never a token.
+    #[must_use]
+    pub fn status(&self) -> CredentialStatus {
+        self.shared
+            .status
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Deletes the account's state file and drops the credential in memory,
+    /// so that callers are not authenticated until the next seed. Keeps the
+    /// binding. Returns whether there was a state file.
+    ///
+    /// Runs under the same locks as a refresh, in the same order, so a
+    /// refresh cannot save the credential back. The caller audits it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Locked`] when the state lock stayed held for the whole
+    /// wait, [`StoreError::Io`] when the file cannot be deleted; the
+    /// credential is then kept.
+    pub async fn revoke(&self) -> Result<bool, StoreError> {
+        let shared = Arc::clone(&self.shared);
+        self.detached(async move { shared.revoke().await })
+            .await
+            .unwrap_or_else(|| {
+                Err(StoreError::Io(io::Error::other(
+                    "revoke task did not complete",
+                )))
+            })
+    }
 }
 
 impl TokenManager {
@@ -625,9 +823,11 @@ impl Shared {
     }
 
     async fn unauthorized(&self, used: &SecretString) -> bool {
-        let mut inner = self.inner.lock().await;
+        let mut guard = self.inner.lock().await;
+        // Borrowed through the guard once, so its fields borrow apart.
+        let inner = &mut *guard;
         // A seed that landed since `used` was handed out is the retry's token.
-        self.check_external(&mut inner, None).await;
+        self.check_external(inner, None).await;
         let still_used =
             |ready: &Ready| ready.state.tokens.access_token.expose_secret() == used.expose_secret();
         let now = self.clock.now();
@@ -638,6 +838,9 @@ impl Shared {
                 Some(reactive) => {
                     if !reactive.warned {
                         reactive.warned = true;
+                        inner
+                            .reported
+                            .record(IncidentKind::UnauthorizedAfterRefresh);
                         let wait = REACTIVE_REFRESH_COOLDOWN
                             .saturating_sub(now.saturating_duration_since(reactive.at));
                         tracing::warn!(
@@ -653,7 +856,7 @@ impl Shared {
             _ => false,
         };
         if force
-            && self.refresh(&mut inner, still_used).await
+            && self.refresh(inner, still_used).await
             && let Phase::Ready(ready) = &mut inner.phase
         {
             ready.reactive = Some(Reactive {
@@ -661,12 +864,31 @@ impl Shared {
                 warned: false,
             });
         }
-        self.publish(&inner);
+        self.publish(inner);
         matches!(&inner.phase, Phase::Ready(ready) if !still_used(ready))
     }
 
     fn publish(&self, inner: &Inner) {
         self.ready.store(inner.is_ready(), Ordering::Release);
+        *self.status.lock().unwrap_or_else(PoisonError::into_inner) = inner.status();
+    }
+
+    async fn revoke(&self) -> Result<bool, StoreError> {
+        let mut inner = self.inner.lock().await;
+        let removed = match self.lock_file().await {
+            Ok(lock) => blocking(move || lock.remove())
+                .await
+                .map_err(StoreError::Io)
+                .and_then(|r| r)?,
+            // No account directory to hold the lock file: there is no state either.
+            Err(StoreError::Io(err)) if err.kind() == io::ErrorKind::NotFound => false,
+            Err(err) => return Err(err),
+        };
+        inner.phase = Phase::Empty;
+        // Known missing: the next read must not log it as news.
+        inner.reported.load_problem = Some(LoadProblem::Missing);
+        self.publish(&inner);
+        Ok(removed)
     }
 
     /// Re-reads the state file, or retries a failed save of refreshed tokens.
@@ -927,6 +1149,7 @@ impl Shared {
                 // The wait for the lock took time: back off from its end.
                 let backoff = Backoff::after_failure(ready.backoff, self.clock.now());
                 ready.backoff = Some(backoff);
+                inner.reported.record(IncidentKind::LockFailed);
                 tracing::warn!(event = "state_lock_failed", account = %self.account, cause = ?err, retry_in_s = backoff.delay.as_secs(), "cannot lock the state file to refresh the Peloton access token");
                 return false;
             }
@@ -944,6 +1167,7 @@ impl Shared {
                 ready.backoff = None;
                 ready.reactive = None;
                 ready.persist = Persist::Pending;
+                inner.last_refresh = Some(OffsetDateTime::now_utc());
                 tracing::info!(event = "peloton_token_refreshed", account = %self.account, expires_at = %ready.state.tokens.expires_at, "refreshed the Peloton access token");
                 if self.persist(ready, &mut inner.reported, &lock).await == Persisted::Refused {
                     inner.phase = Phase::Empty;
@@ -954,6 +1178,7 @@ impl Shared {
             Err(err) if is_terminal(err) => {
                 let dead_refresh = ready.state.tokens.refresh_token.clone();
                 inner.phase = Phase::Failed { dead_refresh };
+                inner.reported.record(IncidentKind::RefreshRejected);
                 tracing::error!(event = "peloton_auth_failed", account = %self.account, reason = %err, "Peloton rejected the refresh token; run seed to sign in again");
                 false
             }
@@ -961,6 +1186,7 @@ impl Shared {
                 // The request may have run into its timeout: back off from its end.
                 let backoff = Backoff::after_failure(ready.backoff, self.clock.now());
                 ready.backoff = Some(backoff);
+                inner.reported.record(IncidentKind::RefreshFailed);
                 tracing::warn!(event = "peloton_refresh_retry", account = %self.account, reason = %err, retry_in_s = backoff.delay.as_secs(), "could not refresh the Peloton access token");
                 false
             }
