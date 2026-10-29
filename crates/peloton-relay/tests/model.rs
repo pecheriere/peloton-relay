@@ -94,7 +94,7 @@ fn maps_every_fixture_workout() {
             assert!(!details.segments.is_empty(), "{name}: segments");
         } else if name == "workouts.json" {
             let page = WorkoutPage::from_upstream(&load(&name));
-            assert!(!page.workouts.is_empty());
+            assert!(!page.workouts.is_empty(), "{name}: workouts");
         } else if name == "me.json" {
             let profile = Profile::from_upstream(&load(&name));
             assert!(profile.username.is_some());
@@ -161,9 +161,9 @@ fn empty_metrics_is_ok() {
     ] {
         let graph: upstream::PerformanceGraph = serde_json::from_value(raw).expect("parse");
         let metrics = Metrics::from_upstream(&graph);
-        assert!(metrics.series.is_empty());
-        assert!(metrics.summaries.is_empty());
-        assert!(metrics.offsets_s.is_empty());
+        assert!(metrics.series.is_empty(), "no series");
+        assert!(metrics.summaries.is_empty(), "no summaries");
+        assert!(metrics.offsets_s.is_empty(), "no offsets");
         assert_eq!(metrics.every_n_s, None);
     }
 }
@@ -286,7 +286,7 @@ fn scenic_metrics_keep_irregular_offsets() {
 #[test]
 fn non_pedaling_metrics_have_no_series() {
     let metrics = Metrics::from_upstream(&load("performance_graph-yoga.json"));
-    assert!(metrics.series.is_empty());
+    assert!(metrics.series.is_empty(), "no series");
     assert_eq!(metrics.summaries.len(), 1);
     assert_eq!(metrics.summaries[0].unit.as_deref(), Some("kcal"));
 }
@@ -299,13 +299,13 @@ fn class_details_have_segments_instructor_and_music() {
         Some(raw_title("workout-cycling-class.json"))
     );
     assert!(details.class.instructor.is_some());
-    assert!(!details.class_types.is_empty());
+    assert!(!details.class_types.is_empty(), "class types");
     let first = &details.segments[0];
     assert_eq!(first.start_offset_s, Some(0));
     assert!(first.length_s.is_some());
     let music = details.music.expect("music");
-    assert!(!music.is_empty());
-    assert!(!music[0].artists.is_empty());
+    assert!(!music.is_empty(), "music tracks");
+    assert!(!music[0].artists.is_empty(), "first track artists");
 }
 
 #[test]
