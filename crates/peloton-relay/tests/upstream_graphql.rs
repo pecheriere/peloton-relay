@@ -319,6 +319,53 @@ async fn scheduled_class_listed_only_under_another_id_is_not_found() {
 }
 
 #[tokio::test]
+async fn scheduled_class_answered_under_another_id_does_not_decode() {
+    // The list does hold the id Peloton answered with; that must not confirm
+    // the id asked for.
+    let server = MockServer::start().await;
+    let other = fixture("schedule_reschedule.json")["data"]["rescheduleClass"]["id"].clone();
+    let mut class = fixture("scheduled_class.json");
+    class["data"]["scheduledClass"]["id"] = other.clone();
+    mount_scheduled_class(&server, &class).await;
+    let mut list = fixture("schedule_during.json");
+    list["data"]["userScheduledItemsList"]["yourScheduleItems"][0]["id"] = other;
+    mount_schedule_list(&server, &list, 0).await;
+    let dir = tempfile::tempdir().unwrap();
+    let err = client(&dir, &server)
+        .scheduled_class(&scheduled_id())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err,
+        UpstreamError::Decode {
+            path: "data.scheduledClass.id".to_owned()
+        }
+    );
+}
+
+#[tokio::test]
+async fn scheduled_class_whose_window_leaves_the_sendable_range_is_transport() {
+    // RFC 3339 caps the year at 9999: a minute past this end overflows the
+    // window, and a minute before this start is a year Peloton cannot be sent.
+    for (field, instant) in [
+        ("scheduledEndTime", "9999-12-31T23:59:30Z"),
+        ("scheduledStartTime", "0000-01-01T00:00:30Z"),
+    ] {
+        let server = MockServer::start().await;
+        let mut class = fixture("scheduled_class.json");
+        class["data"]["scheduledClass"][field] = json!(instant);
+        mount_scheduled_class(&server, &class).await;
+        mount_schedule_list(&server, &fixture("schedule_during.json"), 0).await;
+        let dir = tempfile::tempdir().unwrap();
+        let err = client(&dir, &server)
+            .scheduled_class(&scheduled_id())
+            .await
+            .unwrap_err();
+        assert_eq!(err, UpstreamError::Transport, "{field}");
+    }
+}
+
+#[tokio::test]
 async fn scheduled_class_without_its_times_does_not_decode() {
     for field in ["scheduledStartTime", "scheduledEndTime"] {
         let server = MockServer::start().await;

@@ -386,9 +386,11 @@ impl Peloton {
     ///
     /// [`UpstreamError::NotFound`] when Peloton has no such scheduled class,
     /// or its schedule lists no scheduled class with this id.
-    /// [`UpstreamError::Decode`] when the class comes without its start or
-    /// end time, without which it cannot be confirmed. See [`UpstreamError`]
-    /// for the others.
+    /// [`UpstreamError::Decode`] when the class comes under another id than
+    /// `id`, or without its start or end time, without which it cannot be
+    /// confirmed. [`UpstreamError::Transport`] when the confirm window runs
+    /// past the instants Peloton can be sent. See [`UpstreamError`] for the
+    /// others.
     pub async fn scheduled_class(
         &self,
         id: &ScheduledClassId,
@@ -396,6 +398,10 @@ impl Peloton {
         let op = ops::SCHEDULED_CLASS;
         let result = self.gql(&op, &json!({ "id": id.as_str() })).await?;
         let class = scheduled(&op, result)?;
+        if class.id != *id {
+            // An answer for another class is no answer about this one.
+            return Err(decode_failure(&op, format!("data.{}.id", op.field)));
+        }
         let Some(start) = class.scheduled_start_time else {
             return Err(decode_failure(
                 &op,
@@ -414,9 +420,11 @@ impl Peloton {
         let to = end
             .checked_add(SCHEDULE_CONFIRM_MARGIN)
             .ok_or(UpstreamError::Transport)?;
-        let listed = self.schedule(from, to).await?.iter().any(
-            |item| matches!(item, ScheduleItem::ScheduledClass(listed) if listed.id == class.id),
-        );
+        let listed = self
+            .schedule(from, to)
+            .await?
+            .iter()
+            .any(|item| matches!(item, ScheduleItem::ScheduledClass(c) if c.id == *id));
         if listed {
             Ok(class)
         } else {
