@@ -19,10 +19,11 @@
 //!     "þ", "œ", "æ" as "th", "oe", "ae"), so "Élodie" also erases "ELODIE"
 //!     and "ｅｌｏｄｉｅ", and "Łukasz" erases "Lukasz";
 //!   - a string of fewer than 3 characters (counted as written, composed,
-//!     so a spacing vowel sign counts) is never erased; one that folds to 3
-//!     characters or fewer only as a whole word or glued to digits ("Ben123",
-//!     "`ben_2024`"; "ben" leaves "benefits" and "Bento" alone, and hex ids
-//!     alone); one that folds to 4 or more also
+//!     so a spacing vowel sign counts) is never erased, unless it is written
+//!     in a script without spaces between words (see below); one that folds
+//!     to 3 characters or fewer only as a whole word or glued to digits
+//!     ("Ben123", "`ben_2024`"; "ben" leaves "benefits" and "Bento" alone,
+//!     and hex ids alone); one that folds to 4 or more also
 //!     inside a longer word when both its ends are boundaries: the edge of
 //!     the text or a character that is neither a letter nor a digit
 //!     ("Jean-Luc", "`coach_elodie`"); a digit on either side ("Elodie123",
@@ -36,6 +37,15 @@
 //!     either end is enough ("JEANLUC", "MARIECLAIRE", and "KINGDOM" for a
 //!     name "King"). Ordinary words are kept ("walking", "glove", "Kingdom",
 //!     "XKINGX" for "King" or "Love"); "iPhone" for a name "Phone" is erased;
+//!   - a string made only of letters of a script written without spaces
+//!     between words (Han, kana, Thai, Lao, Khmer, Myanmar, and Hangul, whose
+//!     particles and honorifics are glued to the name) is erased from 2
+//!     characters on, and anywhere, even inside a run of the same script
+//!     ("ゆらのさん"), as long as it matches whole characters (a Hangul
+//!     syllable is not matched by a prefix of its letters); a single character
+//!     is never erased. Such text has no word boundary to look for, and
+//!     publishing a name costs more than erasing an ordinary word that holds
+//!     it, so a name "ゆら" also erases "ゆらゆら" ("swaying");
 //!   - an object key is erased only when it is the whole string, as keys are
 //!     schema: `max_value` and `power_zone` stay for names "Max" and "Zone";
 //!     keys of one object that would end up equal ("Max" and "MAX") get
@@ -99,6 +109,7 @@ use time::format_description::BorrowedFormatItem;
 use time::format_description::well_known::Rfc3339;
 use unicode_normalization::UnicodeNormalization as _;
 use unicode_normalization::char::is_combining_mark;
+use unicode_script::{Script, UnicodeScript as _};
 
 use crate::capture::{StoreError, prepare_dir, save};
 
@@ -109,6 +120,20 @@ const SHIFT_RANGE: std::ops::RangeInclusive<i64> = -5 * 365 * 86_400..=-365 * 86
 const MIN_HEX_RUN: usize = 32;
 const MIN_TOKEN_RUN: usize = 40;
 const MIN_SENSITIVE_LEN: usize = 3;
+/// Characters from which a string in [`UNSPACED_SCRIPTS`] is erased.
+const MIN_UNSPACED_LEN: usize = 2;
+/// Scripts written without spaces between words, or (Hangul) with particles
+/// and honorifics glued to the word: a name in them is erased anywhere.
+const UNSPACED_SCRIPTS: &[Script] = &[
+    Script::Han,
+    Script::Hiragana,
+    Script::Katakana,
+    Script::Hangul,
+    Script::Thai,
+    Script::Lao,
+    Script::Khmer,
+    Script::Myanmar,
+];
 /// Characters from which a sensitive string is erased inside longer words too.
 const MIN_SUBSTRING_LEN: usize = 4;
 /// How many times percent-encoding is decoded in a row at most.
@@ -541,14 +566,11 @@ impl Scrubber {
         }
     }
 
-    /// Adds `text` to the strings to erase, unless it is shorter than
-    /// [`MIN_SENSITIVE_LEN`]. The length is counted on the text as written
-    /// (composed, so a decomposed "É" is one character and a spacing vowel
-    /// sign counts), not on its folded form, which drops marks: a three
-    /// letter Devanagari name folds to two characters but is still a name.
+    /// Adds `text` to the strings to erase, unless it is too short (see
+    /// [`sensitive_form`]).
     fn note_sensitive(&mut self, text: &str) {
-        if text.nfc().count() >= MIN_SENSITIVE_LEN {
-            self.sensitive.push(fold_case(text));
+        if let Some(folded) = sensitive_form(text) {
+            self.sensitive.push(folded);
         }
     }
 
@@ -1074,6 +1096,34 @@ fn has_opaque_token(text: &str) -> bool {
         .any(|run| run.len() >= MIN_TOKEN_RUN && !run.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
+/// The folded form of `text` (see [`fold_case`]) to erase, or `None` when it
+/// is shorter than [`MIN_SENSITIVE_LEN`], or than [`MIN_UNSPACED_LEN`] when
+/// it folds to letters of [`UNSPACED_SCRIPTS`] only. The length is counted on
+/// the text as written (composed, so a decomposed "É" is one character and a
+/// spacing vowel sign counts), not on its folded form, which drops marks: a
+/// three letter Devanagari name folds to two characters but is still a name.
+fn sensitive_form(text: &str) -> Option<String> {
+    let folded = fold_case(text);
+    let min = if is_unspaced(&folded) {
+        MIN_UNSPACED_LEN
+    } else {
+        MIN_SENSITIVE_LEN
+    };
+    (text.nfc().count() >= min).then_some(folded)
+}
+
+/// Whether `folded` is made only of letters of [`UNSPACED_SCRIPTS`] (or
+/// shared by them, as the kana length mark "ー").
+fn is_unspaced(folded: &str) -> bool {
+    !folded.is_empty()
+        && folded.chars().all(|c| {
+            c.is_alphabetic()
+                && c.script_extension()
+                    .iter()
+                    .any(|script| UNSPACED_SCRIPTS.contains(&script))
+        })
+}
+
 /// Folds `text` for comparison: combining marks are dropped, and every other
 /// character is decomposed with compatibility (NFKD, so "ｅ", "ⓔ" and "e"
 /// agree, and "ǅ" is "Dž") and stripped of its combining marks (accents, so
@@ -1129,10 +1179,12 @@ fn spell_out(c: char) -> [Option<char>; 2] {
 /// A needle of fewer than [`MIN_SUBSTRING_LEN`] characters only matches as a
 /// word of its own or glued to digits, so "ben" does not erase half of
 /// "benefits". A longer one also matches inside longer words where
-/// [`FoldedText::counts`] accepts it. A text with percent-encoded UTF-8
-/// (`%C3%89lodie`) is also matched in its decoded form, decoded again while
-/// that changes it, up to [`MAX_PERCENT_DECODINGS`] times (`%25C3%2589lodie`),
-/// and a match there erases the whole encoded span. Each form is folded once.
+/// [`FoldedText::counts`] accepts it. A needle made only of letters of
+/// [`UNSPACED_SCRIPTS`] matches anywhere, on whole characters. A text with
+/// percent-encoded UTF-8 (`%C3%89lodie`) is also matched in its decoded form,
+/// decoded again while that changes it, up to [`MAX_PERCENT_DECODINGS`] times
+/// (`%25C3%2589lodie`), and a match there erases the whole encoded span. Each
+/// form is folded once.
 fn erase_words(text: &str, needles: &[String]) -> String {
     let mut spans = match_spans(text, needles);
     let mut layers: Vec<PercentDecoded> = Vec::new();
@@ -1177,7 +1229,7 @@ fn match_spans(text: &str, needles: &[String]) -> Vec<(usize, usize)> {
     let folded = FoldedText::new(text);
     let mut spans = Vec::new();
     for needle in needles.iter().filter(|n| !n.is_empty()) {
-        let short = needle.chars().count() < MIN_SUBSTRING_LEN;
+        let kind = NeedleKind::of(needle);
         let mut at = 0;
         while let Some(found) = folded.folded[at..].find(needle.as_str()) {
             let start = at + found;
@@ -1186,7 +1238,7 @@ fn match_spans(text: &str, needles: &[String]) -> Vec<(usize, usize)> {
                     .chars()
                     .next()
                     .map_or(1, char::len_utf8);
-            if let Some(span) = folded.span(start, needle.len(), short) {
+            if let Some(span) = folded.span(start, needle.len(), kind) {
                 spans.push(span);
             }
         }
@@ -1360,30 +1412,46 @@ impl<'a> FoldedText<'a> {
     /// The byte range of `text` to erase for the needle of `len` bytes found
     /// at byte `start` of the folded text, or `None` when that match does not
     /// count. The range ends past the combining marks of its last character.
-    fn span(&self, start: usize, len: usize, short: bool) -> Option<(usize, usize)> {
+    ///
+    /// A [`NeedleKind::Unspaced`] match must also cover the whole folded
+    /// form of its first and last characters: a Hangul syllable folds to its
+    /// letters, and a prefix of them spells another syllable.
+    fn span(&self, start: usize, len: usize, kind: NeedleKind) -> Option<(usize, usize)> {
         let first = *self.origins.get(start)?;
-        let end = self.origins.get(start + len.checked_sub(1)?)? + 1;
-        self.counts(first, end, short)
+        let last = *self.origins.get(start + len.checked_sub(1)?)?;
+        let whole = start
+            .checked_sub(1)
+            .and_then(|before| self.origins.get(before))
+            != Some(&first)
+            && self.origins.get(start + len) != Some(&last);
+        if kind == NeedleKind::Unspaced && !whole {
+            return None;
+        }
+        let end = last + 1;
+        self.counts(first, end, kind)
             .then(|| (self.offset(first), self.offset(end)))
     }
 
     /// Whether a match of the base characters `start..end` is erased.
     ///
     /// No match may lie inside a word (a run of letters and digits) that
-    /// looks like a hex id (see [`Self::is_hex_id`]). A `short` needle must
-    /// start and end at a hard boundary (see [`is_hard_boundary`]: "Ben",
-    /// "Ben123", not "benefits"). A longer one must start and end at a boundary
-    /// (see [`is_boundary`]; after the match an upper to lower case change
-    /// also counts, as in "`ELODIEmartin`"). Inside a stretch between
+    /// looks like a hex id (see [`Self::is_hex_id`]). An unspaced needle
+    /// matches anywhere else. A short needle must start and end at a hard
+    /// boundary (see [`is_hard_boundary`]: "Ben", "Ben123", not "benefits").
+    /// A long one must start and end at a boundary (see [`is_boundary`];
+    /// after the match an upper to lower case change also counts, as in
+    /// "`ELODIEmartin`"). Inside a stretch between
     /// boundaries that has no lowercase letter (`JEANLUC`, `KINGDOM`), case
     /// marks no boundary, so a boundary at either end is enough.
-    fn counts(&self, start: usize, end: usize, short: bool) -> bool {
+    fn counts(&self, start: usize, end: usize, kind: NeedleKind) -> bool {
         let word = self.words.around(start, end);
         if word != (start, end) && self.is_hex_id(word) {
             return false;
         }
-        if short {
-            return self.hard_cuts[start] && self.hard_cuts[end];
+        match kind {
+            NeedleKind::Unspaced => return true,
+            NeedleKind::Short => return self.hard_cuts[start] && self.hard_cuts[end],
+            NeedleKind::Long => {}
         }
         let opens = self.cuts[start];
         let closes = self.cuts[end]
@@ -1467,6 +1535,30 @@ impl Stretches {
     }
 }
 
+/// Where a needle may match (see [`FoldedText::counts`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NeedleKind {
+    /// Fewer than [`MIN_SUBSTRING_LEN`] characters: a word of its own, or
+    /// glued to digits.
+    Short,
+    /// Also inside longer words, between boundaries.
+    Long,
+    /// Only letters of [`UNSPACED_SCRIPTS`]: anywhere.
+    Unspaced,
+}
+
+impl NeedleKind {
+    fn of(needle: &str) -> Self {
+        if is_unspaced(needle) {
+            Self::Unspaced
+        } else if needle.chars().count() < MIN_SUBSTRING_LEN {
+            Self::Short
+        } else {
+            Self::Long
+        }
+    }
+}
+
 /// What a character is for word boundaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CharKind {
@@ -1529,7 +1621,7 @@ fn is_boundary(before: Option<char>, after: Option<char>) -> bool {
 mod tests {
     use super::{
         FoldedText, ScrubError, ScrubParams, erase_words, fold_case, has_opaque_token, is_boundary,
-        is_month_buckets, is_uuid, run, scrub_files,
+        is_month_buckets, is_uuid, run, scrub_files, sensitive_form,
     };
     use crate::report;
     use proptest::prelude::*;
@@ -1803,6 +1895,91 @@ mod tests {
     }
 
     #[test]
+    fn names_in_unspaced_scripts_are_erased_inside_longer_words() {
+        let needles = vec![
+            fold_case("\u{3086}\u{3089}\u{306e}"),
+            fold_case("\u{30e6}\u{30fc}\u{30ea}\u{30ab}"),
+            fold_case("\u{9673}\u{8a60}\u{5d50}"),
+            fold_case("\u{c724}\u{b2e4}\u{c194}"),
+            fold_case("\u{e28}\u{e23}\u{e35}\u{e27}\u{e23}\u{e32}"),
+        ];
+        assert_eq!(
+            erase_words(
+                "\u{306f}\u{3044}\u{3086}\u{3089}\u{306e}\u{3055}\u{3093}, \
+                 \u{3088}\u{3046}\u{3053}\u{305d}\u{30e6}\u{30fc}\u{30ea}\u{30ab}\u{69d8}, \
+                 \u{4eca}\u{5929}\u{9673}\u{8a60}\u{5d50}\u{8001}\u{5e2b}, \
+                 \u{c624}\u{b298}\u{c724}\u{b2e4}\u{c194}\u{b2d8}\u{c774}, \
+                 \u{e04}\u{e38}\u{e13}\u{e28}\u{e23}\u{e35}\u{e27}\u{e23}\u{e32}\u{e04}\u{e23}\u{e31}\u{e1a}",
+                &needles
+            ),
+            "\u{306f}\u{3044}redacted\u{3055}\u{3093}, \u{3088}\u{3046}\u{3053}\u{305d}redacted\u{69d8}, \
+             \u{4eca}\u{5929}redacted\u{8001}\u{5e2b}, \u{c624}\u{b298}redacted\u{b2d8}\u{c774}, \
+             \u{e04}\u{e38}\u{e13}redacted\u{e04}\u{e23}\u{e31}\u{e1a}"
+        );
+    }
+
+    #[test]
+    fn names_in_unspaced_scripts_match_their_compatibility_forms() {
+        let needles = vec![fold_case("\u{30e6}\u{30e9}\u{30ce}")];
+        assert_eq!(
+            erase_words("\u{3088}\u{3046}\u{ff95}\u{ff97}\u{ff89}\u{69d8}", &needles),
+            "\u{3088}\u{3046}redacted\u{69d8}"
+        );
+    }
+
+    #[test]
+    fn names_in_unspaced_scripts_match_whole_hangul_syllables_only() {
+        let needles = vec![fold_case("\u{b2e4}\u{c18c}")];
+        assert_eq!(
+            erase_words("\u{b2e4}\u{c194}, \u{b2e4}\u{c18c}\u{c528}", &needles),
+            "\u{b2e4}\u{c194}, redacted\u{c528}"
+        );
+    }
+
+    #[test]
+    fn names_in_spaced_uncased_scripts_keep_word_boundaries() {
+        let needles = vec![fold_case("\u{930}\u{93e}\u{92e}\u{928}")];
+        assert_eq!(
+            erase_words(
+                "\u{930}\u{93e}\u{92e}\u{928}\u{93e}\u{925}, \u{930}\u{93e}\u{92e}\u{928} \u{91c}\u{940}",
+                &needles
+            ),
+            "\u{930}\u{93e}\u{92e}\u{928}\u{93e}\u{925}, redacted \u{91c}\u{940}"
+        );
+    }
+
+    #[test]
+    fn two_character_names_in_unspaced_scripts_are_erased() {
+        let files = vec![(
+            "me.json".to_owned(),
+            json!({
+                "user": {
+                    "username": "u_x1",
+                    "name": "\u{6893}\u{6f6e} \u{3086}\u{3089}",
+                    "first_name": "\u{b2e4}\u{c194}",
+                    "last_name": "\u{82b3}"
+                },
+                "feed": [
+                    "\u{6893}\u{6f6e}\u{5148}\u{751f}",
+                    "\u{3086}\u{3089}\u{3061}\u{3083}\u{3093}",
+                    "\u{b2e4}\u{c194}\u{c528} \u{c548}\u{b155}",
+                    "\u{82b3}\u{9999}"
+                ]
+            }),
+        )];
+        let output = scrub_files(files, PARAMS);
+        assert_eq!(
+            output[0].1["feed"],
+            json!([
+                "redacted\u{5148}\u{751f}",
+                "redacted\u{3061}\u{3083}\u{3093}",
+                "redacted\u{c528} \u{c548}\u{b155}",
+                "\u{82b3}\u{9999}"
+            ])
+        );
+    }
+
+    #[test]
     fn apostrophes_and_underscores_are_boundaries() {
         let needles = vec![fold_case("\u{c9}lodie")];
         assert_eq!(
@@ -1990,6 +2167,7 @@ mod tests {
         let mut needles: Vec<String> = (0..48).map(|i| fold_case(&format!("Zorvane{i}"))).collect();
         needles.push(fold_case("\u{c9}lodie"));
         needles.push(fold_case("\u{65e5}\u{672c}\u{65e5}\u{672c}"));
+        needles.push(fold_case("\u{65e5}\u{672c}"));
         let latin = "\u{c9}lodie".repeat(400_000 / "\u{c9}lodie".len());
         let caps = "\u{c9}LODIE".repeat(400_000 / "\u{c9}LODIE".len());
         let cjk = "\u{65e5}\u{672c}".repeat(400_000 / "\u{65e5}\u{672c}".len());
@@ -2108,8 +2286,7 @@ mod tests {
         for (text, names, expected) in REVIEW_PROBES {
             let mut needles: Vec<String> = names
                 .iter()
-                .filter(|name| name.nfc().count() >= 3)
-                .map(|name| fold_case(name))
+                .filter_map(|name| sensitive_form(name))
                 .collect();
             needles.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
             needles.dedup();
@@ -2139,7 +2316,7 @@ mod tests {
     }
 
     #[test]
-    fn names_shorter_than_three_characters_are_never_erased() {
+    fn names_of_spaced_scripts_shorter_than_three_characters_are_never_erased() {
         let files = vec![(
             "ride.json".to_owned(),
             json!({
@@ -2290,6 +2467,24 @@ mod tests {
                 prop_assert!(
                     !fold_case(&scrubbed).contains(&folded)
                         && !fold_case(&percent_decode(&scrubbed)).contains(&folded),
+                    "{scrubbed:?} still contains {name:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn scrubbed_text_never_contains_a_name_of_an_unspaced_script(
+            name in "[\u{3041}-\u{3096}\u{30a1}-\u{30fa}\u{30fc}\u{4e00}-\u{4e80}\u{ac00}-\u{ac80}\u{e01}-\u{e2e}]{2,6}",
+            before in "[ ,a1\u{3001}\u{3055}\u{3093}\u{69d8}\u{8001}\u{5e2b}\u{c528}\u{b2d8}\u{c740}]{0,3}",
+            after in "[ ,a1\u{3001}\u{3055}\u{3093}\u{69d8}\u{8001}\u{5e2b}\u{c528}\u{b2d8}\u{c740}]{0,3}",
+        ) {
+            let folded = sensitive_form(&name).expect("an unspaced name of 2 characters or more");
+            let needles = vec![folded.clone()];
+            for variant in [name.clone(), name.nfd().collect(), percent_encode(&name, false)] {
+                let text = format!("{before}{variant}{after}{variant}");
+                let scrubbed = erase_words(&text, &needles);
+                prop_assert!(
+                    !fold_case(&scrubbed).contains(&folded),
                     "{scrubbed:?} still contains {name:?}"
                 );
             }
