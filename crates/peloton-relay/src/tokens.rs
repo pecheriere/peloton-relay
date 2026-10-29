@@ -181,7 +181,9 @@ fn is_terminal(err: AuthError) -> bool {
     match err {
         AuthError::InvalidGrant => true,
         AuthError::Rejected { status } => (400..500).contains(&status) && status != 429,
-        AuthError::Transport | AuthError::Decode => false,
+        // Transport and decode failures, and any failure added later, are
+        // retried with backoff: only a proven rejection gives up on the token.
+        _ => false,
     }
 }
 
