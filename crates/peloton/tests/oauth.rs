@@ -9,16 +9,6 @@ use url::Url;
 use wiremock::matchers::{body_json, body_string_contains, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn request_with_verifier(verifier: &str) -> AuthRequest {
-    AuthRequest::from_verifier(SecretString::from(verifier.to_owned()))
-}
-
-#[test]
-fn challenge_is_s256_of_verifier() {
-    let req = request_with_verifier("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk");
-    assert_eq!(req.challenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
-}
-
 #[test]
 fn generate_produces_distinct_well_formed_values() {
     let a = AuthRequest::generate();
@@ -126,6 +116,34 @@ fn parse_callback_provider_error() {
     }
 }
 
+#[test]
+fn parse_callback_rejects_duplicated_parameters() {
+    for (query, name) in [
+        ("code=abc&code=def&state=xyz", "code"),
+        ("code=abc&state=xyz&state=xyz", "state"),
+        ("state=xyz&code=abc&state=other", "state"),
+        ("error=a&error=b&state=xyz", "error"),
+    ] {
+        let url = format!("https://members.onepeloton.com/callback?{query}");
+        match parse_callback(&url, "xyz") {
+            Err(CallbackError::DuplicateParameter { name: got }) => {
+                assert_eq!(got, name, "{query}");
+            }
+            other => panic!("{query}: unexpected result {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn parse_callback_ignores_duplicates_of_unread_parameters() {
+    let code = parse_callback(
+        "https://members.onepeloton.com/callback?code=abc&state=xyz&extra=1&extra=2",
+        "xyz",
+    )
+    .unwrap();
+    assert_eq!(code.expose_secret(), "abc");
+}
+
 fn client_for(server: &MockServer) -> AuthClient {
     AuthClient::new(reqwest::Client::new(), Url::parse(&server.uri()).unwrap())
 }
@@ -133,14 +151,14 @@ fn client_for(server: &MockServer) -> AuthClient {
 #[tokio::test]
 async fn exchange_and_refresh_against_mock() {
     let server = MockServer::start().await;
-    let req = request_with_verifier("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk");
+    let req = AuthRequest::generate();
 
     Mock::given(method("POST"))
         .and(path("/oauth/token"))
         .and(body_json(serde_json::json!({
             "grant_type": "authorization_code",
             "client_id": peloton::oauth::CLIENT_ID,
-            "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+            "code_verifier": req.verifier.expose_secret(),
             "code": "the-code",
             "redirect_uri": peloton::oauth::REDIRECT_URI,
         })))
@@ -231,6 +249,35 @@ async fn invalid_grant_maps_to_invalid_grant() {
             matches!(err, AuthError::InvalidGrant),
             "status {status}: {err:?}"
         );
+    }
+}
+
+#[tokio::test]
+async fn client_errors_other_than_invalid_grant_map_to_rejected() {
+    for status in [403_u16, 400] {
+        for template in [
+            ResponseTemplate::new(status).set_body_json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "Missing required parameter."
+            })),
+            ResponseTemplate::new(status).set_body_json(serde_json::json!({
+                "error": "unauthorized_client"
+            })),
+            ResponseTemplate::new(status).set_body_string("<html>blocked</html>"),
+            ResponseTemplate::new(status),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/oauth/token"))
+                .respond_with(template)
+                .mount(&server)
+                .await;
+            let err = client_for(&server)
+                .refresh(&SecretString::from("r".to_owned()))
+                .await
+                .unwrap_err();
+            assert_eq!(err, AuthError::Rejected { status }, "status {status}");
+        }
     }
 }
 

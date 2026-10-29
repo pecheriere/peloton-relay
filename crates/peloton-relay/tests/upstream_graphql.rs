@@ -243,16 +243,45 @@ async fn schedule_list_of_another_member_is_upstream_error() {
     assert!(!format!("{err} {err:?}").contains("secret-xyz"));
 }
 
-#[tokio::test]
-async fn scheduled_class_reads_by_pelotons_id() {
-    let server = MockServer::start().await;
+/// Answers `ScheduledClass` for `scheduled_id()` with `class`.
+async fn mount_scheduled_class(server: &MockServer, class: &Value) {
     Mock::given(method("POST"))
         .and(query_param("query", "ScheduledClass"))
         .and(body_json(json!({
             "query": SCHEDULED_CLASS,
             "variables": { "id": scheduled_id().as_str() },
         })))
-        .respond_with(answer(&fixture("scheduled_class.json")))
+        .respond_with(answer(class))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+/// Answers `YourScheduleItems` with `list`, expecting `calls` requests.
+async fn mount_schedule_list(server: &MockServer, list: &Value, calls: u64) {
+    Mock::given(method("POST"))
+        .and(query_param("query", "YourScheduleItems"))
+        .respond_with(answer(list))
+        .expect(calls)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn scheduled_class_reads_by_pelotons_id_and_confirms_it_in_its_window() {
+    let server = MockServer::start().await;
+    mount_scheduled_class(&server, &fixture("scheduled_class.json")).await;
+    // The class runs 12:00 to 12:30; the window is a minute wider each side.
+    Mock::given(method("POST"))
+        .and(query_param("query", "YourScheduleItems"))
+        .and(body_json(json!({
+            "query": YOUR_SCHEDULE_ITEMS,
+            "variables": {
+                "startTime": "2030-01-07T11:59:00Z",
+                "endTime": "2030-01-07T12:31:00Z",
+            },
+        })))
+        .respond_with(answer(&fixture("schedule_during.json")))
         .expect(1)
         .mount(&server)
         .await;
@@ -262,6 +291,113 @@ async fn scheduled_class_reads_by_pelotons_id() {
         .await
         .unwrap();
     assert_eq!(scheduled.id, scheduled_id());
+}
+
+#[tokio::test]
+async fn scheduled_class_missing_from_the_schedule_is_not_found() {
+    // Peloton rebuilds a removed class from its id, but no longer lists it.
+    let server = MockServer::start().await;
+    mount_scheduled_class(&server, &fixture("scheduled_class.json")).await;
+    mount_schedule_list(&server, &fixture("schedule_after.json"), 1).await;
+    let dir = tempfile::tempdir().unwrap();
+    let err = client(&dir, &server)
+        .scheduled_class(&scheduled_id())
+        .await
+        .unwrap_err();
+    assert_eq!(err, UpstreamError::NotFound);
+}
+
+#[tokio::test]
+async fn scheduled_class_listed_only_under_another_id_is_not_found() {
+    let server = MockServer::start().await;
+    mount_scheduled_class(&server, &fixture("scheduled_class.json")).await;
+    let other = fixture("schedule_reschedule.json")["data"]["rescheduleClass"]["id"].clone();
+    let mut list = fixture("schedule_during.json");
+    list["data"]["userScheduledItemsList"]["yourScheduleItems"][0]["id"] = other;
+    let invite = json!({ "__typename": "InviteDetails", "id": scheduled_id().as_str() });
+    list["data"]["userScheduledItemsList"]["yourScheduleItems"]
+        .as_array_mut()
+        .unwrap()
+        .push(invite);
+    mount_schedule_list(&server, &list, 1).await;
+    let dir = tempfile::tempdir().unwrap();
+    let err = client(&dir, &server)
+        .scheduled_class(&scheduled_id())
+        .await
+        .unwrap_err();
+    assert_eq!(err, UpstreamError::NotFound);
+}
+
+#[tokio::test]
+async fn scheduled_class_answered_under_another_id_does_not_decode() {
+    // The list does hold the id Peloton answered with; that must not confirm
+    // the id asked for.
+    let server = MockServer::start().await;
+    let other = fixture("schedule_reschedule.json")["data"]["rescheduleClass"]["id"].clone();
+    let mut class = fixture("scheduled_class.json");
+    class["data"]["scheduledClass"]["id"] = other.clone();
+    mount_scheduled_class(&server, &class).await;
+    let mut list = fixture("schedule_during.json");
+    list["data"]["userScheduledItemsList"]["yourScheduleItems"][0]["id"] = other;
+    mount_schedule_list(&server, &list, 0).await;
+    let dir = tempfile::tempdir().unwrap();
+    let err = client(&dir, &server)
+        .scheduled_class(&scheduled_id())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err,
+        UpstreamError::Decode {
+            path: "data.scheduledClass.id".to_owned()
+        }
+    );
+}
+
+#[tokio::test]
+async fn scheduled_class_whose_window_leaves_the_sendable_range_is_transport() {
+    // RFC 3339 caps the year at 9999: a minute past this end overflows the
+    // window, and a minute before this start is a year Peloton cannot be sent.
+    for (field, instant) in [
+        ("scheduledEndTime", "9999-12-31T23:59:30Z"),
+        ("scheduledStartTime", "0000-01-01T00:00:30Z"),
+    ] {
+        let server = MockServer::start().await;
+        let mut class = fixture("scheduled_class.json");
+        class["data"]["scheduledClass"][field] = json!(instant);
+        mount_scheduled_class(&server, &class).await;
+        mount_schedule_list(&server, &fixture("schedule_during.json"), 0).await;
+        let dir = tempfile::tempdir().unwrap();
+        let err = client(&dir, &server)
+            .scheduled_class(&scheduled_id())
+            .await
+            .unwrap_err();
+        assert_eq!(err, UpstreamError::Transport, "{field}");
+    }
+}
+
+#[tokio::test]
+async fn scheduled_class_without_its_times_does_not_decode() {
+    for field in ["scheduledStartTime", "scheduledEndTime"] {
+        let server = MockServer::start().await;
+        let mut class = fixture("scheduled_class.json");
+        class["data"]["scheduledClass"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        mount_scheduled_class(&server, &class).await;
+        mount_schedule_list(&server, &fixture("schedule_during.json"), 0).await;
+        let dir = tempfile::tempdir().unwrap();
+        let err = client(&dir, &server)
+            .scheduled_class(&scheduled_id())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            UpstreamError::Decode {
+                path: format!("data.scheduledClass.{field}")
+            }
+        );
+    }
 }
 
 #[tokio::test]

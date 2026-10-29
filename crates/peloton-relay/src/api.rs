@@ -3,6 +3,7 @@
 
 use std::any::Any;
 use std::collections::HashSet;
+use std::future;
 use std::sync::Arc;
 
 use axum::extract::{FromRequest, FromRequestParts, MatchedPath, Path, Query, Request, State};
@@ -250,13 +251,18 @@ impl<S: Send + Sync> FromRequestParts<S> for Id {
 /// A query string deserialised into `T`; rejection is the JSON error.
 struct Params<T>(T);
 
-impl<S: Send + Sync, T: serde::de::DeserializeOwned> FromRequestParts<S> for Params<T> {
+impl<S: Send + Sync, T: serde::de::DeserializeOwned + Send> FromRequestParts<S> for Params<T> {
     type Rejection = ApiError;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, ApiError> {
-        Query::<T>::try_from_uri(&parts.uri)
-            .map(|Query(value)| Self(value))
-            .map_err(|_| ApiError::InvalidInput)
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, ApiError>> + Send {
+        future::ready(
+            Query::<T>::try_from_uri(&parts.uri)
+                .map(|Query(value)| Self(value))
+                .map_err(|_| ApiError::InvalidInput),
+        )
     }
 }
 
@@ -847,6 +853,9 @@ async fn schedule(
 }
 
 /// One class on the member's schedule.
+///
+/// Only a class the schedule still lists is found: after a remove, and for
+/// the old id after a move, the id answers 404.
 #[utoipa::path(
     get,
     path = "/v1/schedule/{scheduled_id}",
@@ -854,7 +863,7 @@ async fn schedule(
     responses(
         (status = 200, body = ScheduledClassView),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
-        (status = 404, description = "`not_found`: no such scheduled class.", body = ErrorBody),
+        (status = 404, description = "`not_found`: no such scheduled class, or it is no longer on the schedule (removed, or moved to a new id).", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
         (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
