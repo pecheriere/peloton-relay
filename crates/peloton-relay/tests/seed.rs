@@ -15,7 +15,7 @@ use std::time::Duration;
 use peloton::body::MAX_RESPONSE_BODY_BYTES;
 use peloton::ids::PelotonId;
 use peloton_relay::account::{AccountName, Accounts};
-use peloton_relay::seed::{SeedError, Seeded, run_bind, run_seed};
+use peloton_relay::seed::{SeedError, Seeded, run_bind, run_seed, seed_tokens};
 use peloton_relay::store::{StateFile, StoreError};
 use secrecy::ExposeSecret as _;
 use url::Url;
@@ -891,4 +891,50 @@ fn bind_holds_the_bindings_lock() {
 
     assert!(matches!(err, SeedError::Busy), "{err:?}");
     assert!(!state_file(dir.path(), &alice()).binding_path().exists());
+}
+
+#[tokio::test]
+async fn seed_tokens_stores_a_parsed_token_set() {
+    let server = me_server(common::USER).await;
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = serde_json::from_str(TOKENS).unwrap();
+
+    let seeded = seed_tokens(
+        tokens,
+        &accounts(dir.path()),
+        &alice(),
+        false,
+        &common::http(),
+        &base(&server),
+        common::LOCK_WAIT,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(seeded.user_id, common::user());
+    let stored = state_file(dir.path(), &alice()).load().unwrap().unwrap();
+    assert_eq!(stored.tokens.access_token.expose_secret(), "access-secret");
+    assert_eq!(bound_user(dir.path(), &alice()), Some(common::user()));
+}
+
+#[tokio::test]
+async fn seed_tokens_refuses_an_unconfigured_account_before_calling_peloton() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = serde_json::from_str(TOKENS).unwrap();
+
+    let err = seed_tokens(
+        tokens,
+        &accounts(dir.path()),
+        &common::account("carol"),
+        false,
+        &common::http(),
+        &base(&server),
+        common::LOCK_WAIT,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(err, SeedError::UnknownAccount { .. }), "{err:?}");
+    assert_eq!(server.received_requests().await.unwrap().len(), 0);
 }

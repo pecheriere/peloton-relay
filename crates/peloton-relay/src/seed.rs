@@ -152,10 +152,32 @@ impl fmt::Display for Bound {
     }
 }
 
-/// Reads a [`TokenSet`] from `input`, looks up its owner with `GET /me` on
-/// `api_base`, and stores it in `account`, bound to that owner.
+/// Reads a [`TokenSet`] from `input` and seeds `account` with it (see
+/// [`seed_tokens`]). An unconfigured account is refused before the input is
+/// read.
 ///
-/// An unconfigured account is refused before the input is read. Under the
+/// # Errors
+///
+/// See [`SeedError`].
+pub async fn run_seed(
+    input: impl Read,
+    accounts: &Accounts,
+    account: &AccountName,
+    rebind: bool,
+    http: &reqwest::Client,
+    api_base: &Url,
+    lock_wait: Duration,
+) -> Result<Seeded, SeedError> {
+    ensure_configured(accounts, account)?;
+    let tokens = read_tokens(input)?;
+    seed_tokens(tokens, accounts, account, rebind, http, api_base, lock_wait).await
+}
+
+/// Looks up the owner of `tokens` with `GET /me` on `api_base`, and stores
+/// them in `account`, bound to that owner: what `seed` and the admin API's
+/// `POST /admin/seed` both do.
+///
+/// An unconfigured account is refused before Peloton is called. Under the
 /// account's state lock, then the cross-account bindings lock, the seed is
 /// refused when the owner is bound to another account (even with `rebind`),
 /// when a binding it must check is unreadable, or when the account is bound
@@ -174,8 +196,8 @@ impl fmt::Display for Bound {
 /// # Errors
 ///
 /// See [`SeedError`].
-pub async fn run_seed(
-    input: impl Read,
+pub async fn seed_tokens(
+    tokens: TokenSet,
     accounts: &Accounts,
     account: &AccountName,
     rebind: bool,
@@ -184,7 +206,6 @@ pub async fn run_seed(
     lock_wait: Duration,
 ) -> Result<Seeded, SeedError> {
     ensure_configured(accounts, account)?;
-    let tokens = read_tokens(input)?;
     let me = fetch_me(http, api_base, &tokens).await?;
     let accounts = accounts.clone();
     let account = account.clone();
