@@ -87,6 +87,7 @@ impl AuthRequest {
 
 /// Why a redirect URL could not be turned into an authorization code.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum CallbackError {
     /// The URL is not the registered redirect URI.
     #[error("URL is not the expected redirect URI")]
@@ -183,6 +184,7 @@ pub struct TokenSet {
 
 /// A failed token request. Never carries upstream bodies, URLs or tokens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum AuthError {
     /// The code or refresh token is invalid, expired or revoked.
     #[error("grant is invalid or expired")]
