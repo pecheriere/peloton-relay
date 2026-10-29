@@ -53,9 +53,9 @@ pub const REACTIVE_REFRESH_COOLDOWN: Duration = Duration::from_secs(10 * 60);
 /// How often [`TokenManager::keep_fresh`] checks the credential.
 pub const BACKGROUND_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
-/// How long the manager waits for the state file lock; `seed` holds it only
-/// while it writes the file.
-const STATE_LOCK_WAIT: Duration = Duration::from_secs(10);
+/// How long a refresh waits for the state file lock by default; `seed`
+/// holds it only while it writes the file.
+pub const DEFAULT_STATE_LOCK_WAIT: Duration = Duration::from_secs(10);
 
 /// The monotonic clock that backoff and cooldown decisions read.
 #[derive(Clone)]
@@ -105,6 +105,8 @@ struct Shared {
     auth: AuthClient,
     refresh_margin: Duration,
     clock: MonotonicClock,
+    /// How long a refresh waits for the state file lock.
+    lock_wait: Duration,
     inner: Mutex<Inner>,
     /// Mirror of [`Inner::is_ready`] for synchronous readers.
     ready: AtomicBool,
@@ -192,17 +194,6 @@ enum LoadProblem {
     Unreadable(io::ErrorKind),
 }
 
-impl LoadProblem {
-    fn from_error(err: &StoreError) -> Self {
-        match err {
-            StoreError::Corrupt => Self::Corrupt,
-            StoreError::Io(io) => Self::Unreadable(io.kind()),
-            // Reading takes no lock, so this does not happen; mapped for totality.
-            StoreError::Locked => Self::Unreadable(io::ErrorKind::WouldBlock),
-        }
-    }
-}
-
 /// Exponential backoff between transient refresh failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Backoff {
@@ -244,12 +235,16 @@ impl Inner {
     }
 
     /// Applies a fresh read of the state file while not ready.
-    fn apply_loaded(&mut self, loaded: Result<Snapshot, StoreError>) {
+    fn apply_loaded(&mut self, loaded: io::Result<Snapshot>) {
         let (state, id) = match loaded {
             Ok(Snapshot::Valid(state, id)) => (state, id),
             Ok(Snapshot::Missing) => return self.reported.load_problem(LoadProblem::Missing),
             Ok(Snapshot::Corrupt(_)) => return self.reported.load_problem(LoadProblem::Corrupt),
-            Err(err) => return self.reported.load_problem(LoadProblem::from_error(&err)),
+            Err(err) => {
+                return self
+                    .reported
+                    .load_problem(LoadProblem::Unreadable(err.kind()));
+            }
         };
         self.reported.load_problem = None;
         if let Phase::Failed { dead_refresh } = &self.phase
@@ -262,11 +257,12 @@ impl Inner {
             event = "state_loaded",
             "loaded Peloton credential from the state file"
         );
+        self.reported.credential_installed();
         self.phase = Phase::Ready(Ready::new(state, id));
     }
 
     /// Adopts a state file that another process replaced while ready.
-    fn apply_external(&mut self, loaded: Result<Snapshot, StoreError>) {
+    fn apply_external(&mut self, loaded: io::Result<Snapshot>) {
         let Phase::Ready(ready) = &mut self.phase else {
             return;
         };
@@ -277,7 +273,7 @@ impl Inner {
                     "state file was replaced; using the new credential"
                 );
                 *ready = Ready::new(state, id);
-                self.reported.load_problem = None;
+                self.reported.credential_installed();
             }
             Ok(Snapshot::Corrupt(id)) => {
                 // Keep the working credential; remember this version so it is not re-parsed.
@@ -286,7 +282,9 @@ impl Inner {
             }
             // Deleted: the next save recreates it.
             Ok(Snapshot::Missing) => {}
-            Err(err) => self.reported.load_problem(LoadProblem::from_error(&err)),
+            Err(err) => self
+                .reported
+                .load_problem(LoadProblem::Unreadable(err.kind())),
         }
     }
 
@@ -335,6 +333,14 @@ impl Reported {
         }
     }
 
+    /// Forgets what was logged about the credential `phase` held before: a
+    /// new one from the file starts clean, so its first failed save is logged
+    /// and no recovery is claimed for tokens that were dropped unsaved.
+    fn credential_installed(&mut self) {
+        self.load_problem = None;
+        self.save_failing = false;
+    }
+
     /// Records a successful save, logging the end of a failure streak.
     fn save_succeeded(&mut self) {
         // The file now holds a valid credential: a later problem is news again.
@@ -355,16 +361,24 @@ impl TokenManager {
     /// so [`Self::is_ready`] is `false` until then.
     #[must_use]
     pub fn new(store: StateFile, auth: AuthClient, refresh_margin: Duration) -> Self {
-        Self::with_clock(store, auth, refresh_margin, MonotonicClock::system())
+        Self::with_timing(
+            store,
+            auth,
+            refresh_margin,
+            MonotonicClock::system(),
+            DEFAULT_STATE_LOCK_WAIT,
+        )
     }
 
-    /// [`Self::new`], with backoff and cooldown decisions made on `clock`.
+    /// [`Self::new`], with backoff and cooldown decisions made on `clock`,
+    /// and refreshes waiting at most `lock_wait` for the state file lock.
     #[must_use]
-    pub fn with_clock(
+    pub fn with_timing(
         store: StateFile,
         auth: AuthClient,
         refresh_margin: Duration,
         clock: MonotonicClock,
+        lock_wait: Duration,
     ) -> Self {
         Self {
             shared: Arc::new(Shared {
@@ -372,6 +386,7 @@ impl TokenManager {
                 auth,
                 refresh_margin,
                 clock,
+                lock_wait,
                 inner: Mutex::new(Inner::default()),
                 ready: AtomicBool::new(false),
             }),
@@ -588,8 +603,10 @@ impl Shared {
     /// Takes the state file lock without blocking an async worker.
     async fn lock_file(&self) -> Result<StateLock, StoreError> {
         let store = self.store.clone();
-        blocking(move || store.lock(STATE_LOCK_WAIT))
+        let wait = self.lock_wait;
+        blocking(move || store.lock(wait))
             .await
+            .map_err(StoreError::Io)
             .and_then(|r| r)
     }
 
@@ -610,7 +627,8 @@ impl Shared {
         let lock = match self.lock_file().await {
             Ok(lock) => lock,
             Err(err) => {
-                let backoff = Backoff::after_failure(ready.backoff, now);
+                // The wait for the lock took time: back off from its end.
+                let backoff = Backoff::after_failure(ready.backoff, self.clock.now());
                 ready.backoff = Some(backoff);
                 tracing::warn!(event = "state_lock_failed", cause = ?err, retry_in_s = backoff.delay.as_secs(), "cannot lock the state file to refresh the Peloton access token");
                 return false;
@@ -640,7 +658,8 @@ impl Shared {
                 false
             }
             Err(err) => {
-                let backoff = Backoff::after_failure(ready.backoff, now);
+                // The request may have run into its timeout: back off from its end.
+                let backoff = Backoff::after_failure(ready.backoff, self.clock.now());
                 ready.backoff = Some(backoff);
                 tracing::warn!(event = "peloton_refresh_retry", reason = %err, retry_in_s = backoff.delay.as_secs(), "could not refresh the Peloton access token");
                 false
@@ -658,6 +677,7 @@ impl Shared {
         let state = ready.state.clone();
         match blocking(move || lock.save_with_id(&state))
             .await
+            .map_err(StoreError::Io)
             .and_then(|r| r)
         {
             Ok(id) => {
@@ -672,14 +692,14 @@ impl Shared {
 }
 
 /// Runs blocking file I/O off the async worker threads.
-async fn blocking<T, F>(f: F) -> Result<T, StoreError>
+async fn blocking<T, F>(f: F) -> io::Result<T>
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
     tokio::task::spawn_blocking(f)
         .await
-        .map_err(|_| StoreError::Io(io::Error::other("state file task did not complete")))
+        .map_err(|_| io::Error::other("state file task did not complete"))
 }
 
 #[cfg(test)]

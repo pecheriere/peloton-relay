@@ -95,7 +95,7 @@ impl StateFile {
     /// [`StoreError::Corrupt`] when the file is empty or does not parse,
     /// [`StoreError::Io`] when it cannot be read. A missing file is `Ok(None)`.
     pub fn load(&self) -> Result<Option<State>, StoreError> {
-        match self.snapshot()? {
+        match self.snapshot().map_err(StoreError::Io)? {
             Snapshot::Missing => Ok(None),
             Snapshot::Corrupt(_) => Err(StoreError::Corrupt),
             Snapshot::Valid(state, _) => Ok(Some(state)),
@@ -103,15 +103,18 @@ impl StateFile {
     }
 
     /// Reads the state together with the identity of the version read.
-    pub(crate) fn snapshot(&self) -> Result<Snapshot, StoreError> {
+    ///
+    /// Takes no lock: the file is only ever replaced by a rename, so a read
+    /// sees one whole version. A corrupt file is a [`Snapshot`], not an error.
+    pub(crate) fn snapshot(&self) -> io::Result<Snapshot> {
         let mut file = match File::open(&self.path) {
             Ok(file) => file,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Snapshot::Missing),
-            Err(err) => return Err(StoreError::Io(err)),
+            Err(err) => return Err(err),
         };
-        let id = FileId::of(&file.metadata().map_err(StoreError::Io)?);
+        let id = FileId::of(&file.metadata()?);
         let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).map_err(StoreError::Io)?;
+        file.read_to_end(&mut bytes)?;
         // The parse error is dropped on purpose: its message can quote file content.
         Ok(match serde_json::from_slice(&bytes) {
             Ok(state) => Snapshot::Valid(state, id),
@@ -120,11 +123,11 @@ impl StateFile {
     }
 
     /// The identity of the current file version, `None` if there is none.
-    pub(crate) fn current_id(&self) -> Result<Option<FileId>, StoreError> {
+    pub(crate) fn current_id(&self) -> io::Result<Option<FileId>> {
         match fs::metadata(&self.path) {
             Ok(meta) => Ok(Some(FileId::of(&meta))),
             Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(StoreError::Io(err)),
+            Err(err) => Err(err),
         }
     }
 

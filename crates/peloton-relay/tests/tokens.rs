@@ -12,7 +12,8 @@ use peloton::oauth::AuthClient;
 use peloton_relay::seed::run_seed;
 use peloton_relay::store::StoreError;
 use peloton_relay::tokens::{
-    MonotonicClock, NotAuthenticated, REACTIVE_REFRESH_COOLDOWN, TokenManager,
+    DEFAULT_STATE_LOCK_WAIT, MonotonicClock, NotAuthenticated, REACTIVE_REFRESH_COOLDOWN,
+    TokenManager,
 };
 use secrecy::{ExposeSecret, SecretString};
 use time::{Duration, OffsetDateTime};
@@ -816,8 +817,26 @@ impl TestClock {
 }
 
 fn manager_at(dir: &Path, auth_base: Url, clock: &TestClock) -> TokenManager {
+    manager_waiting(dir, auth_base, clock, DEFAULT_STATE_LOCK_WAIT)
+}
+
+fn manager_waiting(
+    dir: &Path,
+    auth_base: Url,
+    clock: &TestClock,
+    lock_wait: StdDuration,
+) -> TokenManager {
     let auth = AuthClient::new(common::http(), auth_base);
-    TokenManager::with_clock(state_file(dir), auth, MARGIN, clock.clock())
+    TokenManager::with_timing(state_file(dir), auth, MARGIN, clock.clock(), lock_wait)
+}
+
+/// Moves `clock` forward by `by` once `after` has passed, from another thread.
+fn advance_later(clock: &TestClock, after: StdDuration, by: StdDuration) -> thread::JoinHandle<()> {
+    let clock = clock.clone();
+    thread::spawn(move || {
+        thread::sleep(after);
+        clock.advance(by);
+    })
 }
 
 fn server_url(server: &MockServer) -> Url {
@@ -1384,4 +1403,239 @@ async fn seed_during_a_refresh_lands_after_the_rotated_tokens() {
     );
     let (access, _) = tokens.bearer().await.unwrap();
     assert_eq!(access.expose_secret(), "seeded-access");
+}
+
+#[tokio::test]
+async fn lock_timeout_backs_off_from_the_end_of_the_wait() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    refresh_mock("old-refresh")
+        .respond_with(rotated_tokens())
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(
+        &state("old-access", "old-refresh", Duration::minutes(30)),
+        LOCK_WAIT,
+    )
+    .unwrap();
+    let clock = TestClock::new();
+    let tokens = manager_waiting(
+        dir.path(),
+        server_url(&server),
+        &clock,
+        StdDuration::from_millis(300),
+    );
+
+    async {
+        let held = file.lock(LOCK_WAIT).unwrap();
+        // A minute passes while the refresh waits for the lock.
+        let waiting = advance_later(
+            &clock,
+            StdDuration::from_millis(50),
+            StdDuration::from_secs(60),
+        );
+        let (access, _) = tokens.bearer().await.unwrap();
+        assert_eq!(access.expose_secret(), "old-access");
+        waiting.join().unwrap();
+        drop(held);
+
+        // Still inside the backoff counted from the end of the wait.
+        clock.advance(StdDuration::from_secs(1));
+        let (access, _) = tokens.bearer().await.unwrap();
+        assert_eq!(access.expose_secret(), "old-access");
+        assert_eq!(refresh_calls(&server).await, 0);
+
+        clock.advance(StdDuration::from_secs(5));
+        let (access, _) = tokens.bearer().await.unwrap();
+        assert_eq!(access.expose_secret(), "new-access");
+    }
+    .instrument(tracing::info_span!("case", name = "lock_timeout"))
+    .await;
+    assert_eq!(refresh_calls(&server).await, 1);
+
+    let output = logs.contents();
+    assert_eq!(
+        logged(&output, "lock_timeout", "state_lock_failed"),
+        1,
+        "{output}"
+    );
+}
+
+#[tokio::test]
+async fn slow_refresh_failure_backs_off_from_when_it_failed() {
+    let server = MockServer::start().await;
+    refresh_mock("old-refresh")
+        .respond_with(ResponseTemplate::new(503).set_delay(StdDuration::from_millis(300)))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    refresh_mock("old-refresh")
+        .respond_with(rotated_tokens())
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    state_file(dir.path())
+        .save(
+            &state("old-access", "old-refresh", Duration::minutes(30)),
+            LOCK_WAIT,
+        )
+        .unwrap();
+    let clock = TestClock::new();
+    let tokens = manager_at(dir.path(), server_url(&server), &clock);
+
+    // A minute passes while the token endpoint takes its time to fail.
+    let waiting = advance_later(
+        &clock,
+        StdDuration::from_millis(50),
+        StdDuration::from_secs(60),
+    );
+    let (access, _) = tokens.bearer().await.unwrap();
+    assert_eq!(access.expose_secret(), "old-access");
+    waiting.join().unwrap();
+
+    clock.advance(StdDuration::from_secs(1));
+    tokens.bearer().await.unwrap();
+    assert_eq!(refresh_calls(&server).await, 1);
+
+    clock.advance(StdDuration::from_secs(5));
+    let (access, _) = tokens.bearer().await.unwrap();
+    assert_eq!(access.expose_secret(), "new-access");
+    assert_eq!(refresh_calls(&server).await, 2);
+}
+
+#[tokio::test]
+async fn new_seed_starts_a_fresh_save_failure_streak() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    refresh_mock("old-refresh")
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": "short-access",
+            "refresh_token": "short-refresh",
+            "expires_in": 1800,
+            "token_type": "Bearer",
+        })))
+        .mount(&server)
+        .await;
+    refresh_mock("short-refresh")
+        .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+            "error": "invalid_grant",
+        })))
+        .mount(&server)
+        .await;
+    refresh_mock("seeded-refresh")
+        .respond_with(rotated_tokens())
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(
+        &state("old-access", "old-refresh", -Duration::minutes(5)),
+        LOCK_WAIT,
+    )
+    .unwrap();
+    let tokens = manager(dir.path(), &server);
+
+    async {
+        // The refreshed tokens cannot be saved, then their refresh token dies.
+        make_read_only(dir.path());
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+        make_writable(dir.path());
+
+        // A new seed whose refreshed tokens cannot be saved either.
+        file.save(
+            &state("seeded-access", "seeded-refresh", -Duration::minutes(5)),
+            LOCK_WAIT,
+        )
+        .unwrap();
+        make_read_only(dir.path());
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+        make_writable(dir.path());
+        let (access, _) = tokens.bearer().await.unwrap();
+        assert_eq!(access.expose_secret(), "new-access");
+    }
+    .instrument(tracing::info_span!("case", name = "seed_streak"))
+    .await;
+
+    let output = logs.contents();
+    assert_eq!(
+        logged(&output, "seed_streak", "peloton_auth_failed"),
+        1,
+        "{output}"
+    );
+    assert_eq!(
+        logged(&output, "seed_streak", "state_save_failed"),
+        2,
+        "{output}"
+    );
+    assert_eq!(
+        logged(&output, "seed_streak", "state_save_recovered"),
+        1,
+        "{output}"
+    );
+}
+
+#[tokio::test]
+async fn new_seed_after_a_failed_streak_claims_no_recovery() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    refresh_mock("old-refresh")
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": "short-access",
+            "refresh_token": "short-refresh",
+            "expires_in": 1800,
+            "token_type": "Bearer",
+        })))
+        .mount(&server)
+        .await;
+    refresh_mock("short-refresh")
+        .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+            "error": "invalid_grant",
+        })))
+        .mount(&server)
+        .await;
+    refresh_mock("seeded-refresh")
+        .respond_with(rotated_tokens())
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(
+        &state("old-access", "old-refresh", -Duration::minutes(5)),
+        LOCK_WAIT,
+    )
+    .unwrap();
+    let tokens = manager(dir.path(), &server);
+
+    async {
+        make_read_only(dir.path());
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+        make_writable(dir.path());
+
+        // The seed's refreshed tokens save at once: nothing recovered.
+        file.save(
+            &state("seeded-access", "seeded-refresh", -Duration::minutes(5)),
+            LOCK_WAIT,
+        )
+        .unwrap();
+        let (access, _) = tokens.bearer().await.unwrap();
+        assert_eq!(access.expose_secret(), "new-access");
+    }
+    .instrument(tracing::info_span!("case", name = "seed_no_recovery"))
+    .await;
+
+    let output = logs.contents();
+    assert_eq!(
+        logged(&output, "seed_no_recovery", "state_save_failed"),
+        1,
+        "{output}"
+    );
+    assert_eq!(
+        logged(&output, "seed_no_recovery", "state_save_recovered"),
+        0,
+        "{output}"
+    );
 }
