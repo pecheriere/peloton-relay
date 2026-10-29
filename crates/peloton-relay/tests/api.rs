@@ -614,6 +614,25 @@ async fn other_members_workouts_are_not_found() {
 }
 
 #[test]
+fn openapi_describes_every_response() {
+    let document = serde_json::to_value(openapi()).unwrap();
+    let mut checked = 0;
+    for (route, item) in document["paths"].as_object().unwrap() {
+        for (verb, operation) in item.as_object().unwrap() {
+            for (status, response) in operation["responses"].as_object().unwrap() {
+                let description = response["description"].as_str().unwrap_or_default();
+                assert!(
+                    !description.trim().is_empty(),
+                    "{verb} {route} {status} has no description"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 0);
+}
+
+#[test]
 fn openapi_documents_every_error_response() {
     let document = serde_json::to_value(openapi()).unwrap();
     let responses = |route: &str| document["paths"][route]["get"]["responses"].clone();
