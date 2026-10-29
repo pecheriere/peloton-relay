@@ -2166,3 +2166,145 @@ async fn binding_only_change_is_noticed() {
     );
     assert_eq!(refusals(&output, "binding_only", "unbound"), 1, "{output}");
 }
+
+/// A manager ready on [`user`]'s credential, and its state file, in `dir`.
+async fn ready_manager(dir: &Path, server: &MockServer) -> (TokenManager, StateFile) {
+    let file = state_file(dir);
+    file.save(
+        &state("old-access", "old-refresh", Duration::hours(48)),
+        LOCK_WAIT,
+    )
+    .unwrap();
+    let tokens = manager(dir, server);
+    tokens.bearer().await.unwrap();
+    assert!(tokens.is_ready());
+    (tokens, file)
+}
+
+#[tokio::test]
+async fn rebinding_while_the_state_file_is_missing_is_refused() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (tokens, file) = ready_manager(dir.path(), &server).await;
+
+    async {
+        fs::remove_file(&file.path).unwrap();
+        file.lock(LOCK_WAIT).unwrap().bind(&other_user()).unwrap();
+        for _ in 0..2 {
+            assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+            assert!(!tokens.is_ready());
+        }
+    }
+    .instrument(tracing::info_span!("case", name = "missing_rebound"))
+    .await;
+    assert_eq!(refresh_calls(&server).await, 0);
+
+    let output = logs.contents();
+    assert_eq!(
+        refusals(&output, "missing_rebound", "user_mismatch"),
+        1,
+        "{output}"
+    );
+}
+
+#[tokio::test]
+async fn unbinding_while_the_state_file_is_missing_is_refused() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (tokens, file) = ready_manager(dir.path(), &server).await;
+
+    async {
+        fs::remove_file(&file.path).unwrap();
+        fs::remove_file(file.binding_path()).unwrap();
+        for _ in 0..2 {
+            assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+        }
+    }
+    .instrument(tracing::info_span!("case", name = "missing_unbound"))
+    .await;
+
+    let output = logs.contents();
+    assert_eq!(
+        refusals(&output, "missing_unbound", "unbound"),
+        1,
+        "{output}"
+    );
+}
+
+#[tokio::test]
+async fn same_user_rebind_while_the_state_file_is_missing_keeps_the_credential() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (tokens, file) = ready_manager(dir.path(), &server).await;
+
+    async {
+        fs::remove_file(&file.path).unwrap();
+        file.lock(LOCK_WAIT).unwrap().bind(&user()).unwrap();
+        for _ in 0..2 {
+            let (access, _) = tokens.bearer().await.unwrap();
+            assert_eq!(access.expose_secret(), "old-access");
+        }
+    }
+    .instrument(tracing::info_span!("case", name = "missing_same_user"))
+    .await;
+
+    let output = logs.contents();
+    assert_eq!(
+        logged(&output, "missing_same_user", "state_refused"),
+        0,
+        "{output}"
+    );
+}
+
+#[tokio::test]
+async fn binding_that_cannot_be_checked_fails_closed() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let root = tempfile::tempdir().unwrap();
+    let file = account_state_file(root.path(), ACCOUNT, &user());
+    let dir = file.path.parent().unwrap().to_path_buf();
+    file.save(
+        &state("old-access", "old-refresh", Duration::hours(48)),
+        LOCK_WAIT,
+    )
+    .unwrap();
+    let tokens = TokenManager::new(
+        account(ACCOUNT),
+        file.clone(),
+        AuthClient::new(common::http(), server_url(&server)),
+        MARGIN,
+    );
+    tokens.bearer().await.unwrap();
+
+    async {
+        // Without search permission on the account directory, neither file
+        // can even be stat'ed (this does not hold for root).
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o000)).unwrap();
+        let blocked = fs::metadata(file.binding_path()).is_err();
+        let refused = tokens.bearer().await;
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(blocked, "tests must not run as root");
+        assert!(matches!(refused, Err(NotAuthenticated)));
+        assert!(!tokens.is_ready());
+
+        // Readable again: the bound credential is used again.
+        let (access, _) = tokens.bearer().await.unwrap();
+        assert_eq!(access.expose_secret(), "old-access");
+    }
+    .instrument(tracing::info_span!("case", name = "binding_unreadable"))
+    .await;
+
+    let output = logs.contents();
+    let unreadable: Vec<serde_json::Value> = output
+        .lines()
+        .filter(|line| {
+            line.contains("binding_unreadable") && line.contains("state_file_unreadable")
+        })
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(unreadable.len(), 1, "{output}");
+    assert_eq!(unreadable[0]["account"], ACCOUNT);
+}

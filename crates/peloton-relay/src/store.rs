@@ -289,6 +289,12 @@ impl StateFile {
         }
     }
 
+    /// The version of the binding if it allows a state of `user`, or why it
+    /// does not. Takes no lock, like [`Self::snapshot`].
+    pub(crate) fn binding_allows(&self, user: &PelotonId) -> io::Result<Result<FileId, Refusal>> {
+        Ok(self.binding_read()?.allows(user))
+    }
+
     /// Reads the binding file together with the identity of the version read.
     fn binding_read(&self) -> io::Result<BindingRead> {
         let mut file = match File::open(self.binding_path()) {
@@ -381,6 +387,11 @@ impl StateLock {
     /// which replace the binding and the state while holding it.
     pub(crate) fn snapshot(&self) -> io::Result<Snapshot> {
         self.store.snapshot()
+    }
+
+    /// [`StateFile::binding_allows`], read under the lock.
+    pub(crate) fn binding_allows(&self, user: &PelotonId) -> io::Result<Result<FileId, Refusal>> {
+        self.store.binding_allows(user)
     }
 
     /// [`Self::save`], but only if the binding, read under the lock, names
@@ -758,6 +769,31 @@ mod tests {
         assert_eq!(file.binding_id().unwrap(), Some(version.binding));
         file.lock(WAIT).unwrap().bind(&alice).unwrap();
         assert_ne!(file.binding_id().unwrap(), Some(version.binding));
+    }
+
+    #[test]
+    fn binding_allows_only_the_bound_user() {
+        let alice = user("00a1");
+        let other = user("00b2");
+        let (_dir, file) = unbound(&alice);
+        let lock = file.lock(WAIT).unwrap();
+        assert_eq!(file.binding_allows(&alice).unwrap(), Err(Refusal::Unbound));
+        lock.bind(&alice).unwrap();
+        let id = file.binding_id().unwrap().unwrap();
+        assert_eq!(file.binding_allows(&alice).unwrap(), Ok(id));
+        assert_eq!(lock.binding_allows(&alice).unwrap(), Ok(id));
+        assert_eq!(
+            lock.binding_allows(&other).unwrap(),
+            Err(Refusal::UserMismatch)
+        );
+        fs::write(file.binding_path(), "{").unwrap();
+        assert_eq!(
+            lock.binding_allows(&alice).unwrap(),
+            Err(Refusal::BindingCorrupt)
+        );
+        fs::remove_file(file.binding_path()).unwrap();
+        fs::create_dir(file.binding_path()).unwrap();
+        assert!(file.binding_allows(&alice).is_err());
     }
 
     #[test]

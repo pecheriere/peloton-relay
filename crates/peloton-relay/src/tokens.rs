@@ -690,8 +690,81 @@ impl Shared {
         if ready.persist != Persist::Saved || !self.file_changed(ready).await {
             return;
         }
+        let user = ready.state.user_id.clone();
         let loaded = self.snapshot(held).await;
+        // A valid or refused state settles the binding question; otherwise the
+        // credential in memory is checked against the binding on its own.
+        let settled = matches!(loaded, Ok(Snapshot::Valid(..) | Snapshot::Refused(_)));
         inner.apply_external(&self.account, loaded);
+        if !settled {
+            self.recheck_binding(inner, held, &user).await;
+        }
+    }
+
+    /// Keeps the credential of `user` in memory only while the binding,
+    /// confirmed under the state lock if it refuses, still names `user`;
+    /// otherwise drops it (fail closed, also when the binding is unreadable).
+    async fn recheck_binding(&self, inner: &mut Inner, held: Option<&StateLock>, user: &PelotonId) {
+        if !matches!(inner.phase, Phase::Ready(_)) {
+            return;
+        }
+        match self.binding_allows(held, user).await {
+            Ok(Ok(id)) => {
+                if let Phase::Ready(ready) = &mut inner.phase {
+                    // This version is checked: do not re-read it on every call.
+                    ready.binding_id = id;
+                }
+            }
+            Ok(Err(refusal)) => {
+                inner.phase = Phase::Empty;
+                inner
+                    .reported
+                    .load_problem(&self.account, LoadProblem::Refused(refusal));
+            }
+            Err(err) => {
+                inner.phase = Phase::Empty;
+                inner
+                    .reported
+                    .load_problem(&self.account, LoadProblem::Unreadable(err.kind()));
+            }
+        }
+    }
+
+    /// Checks the binding against `user`, under `held` if the caller holds
+    /// the state lock; an unlocked refusal is confirmed under the lock, as in
+    /// [`Self::snapshot`].
+    async fn binding_allows(
+        &self,
+        held: Option<&StateLock>,
+        user: &PelotonId,
+    ) -> io::Result<Result<FileId, Refusal>> {
+        if let Some(lock) = held {
+            let lock = lock.clone();
+            let user = user.clone();
+            return blocking(move || lock.binding_allows(&user))
+                .await
+                .and_then(|r| r);
+        }
+        let store = self.store.clone();
+        let unlocked_user = user.clone();
+        let checked = blocking(move || store.binding_allows(&unlocked_user))
+            .await
+            .and_then(|r| r);
+        if !matches!(checked, Ok(Err(_))) {
+            return checked;
+        }
+        match self.lock_file().await {
+            Ok(lock) => {
+                let user = user.clone();
+                blocking(move || lock.binding_allows(&user))
+                    .await
+                    .and_then(|r| r)
+            }
+            Err(err) => {
+                tracing::warn!(event = "state_lock_failed", account = %self.account, cause = ?err, "cannot lock the state file to confirm that its binding refuses the credential");
+                checked
+            }
+        }
     }
 
     /// Reads the state file checked against the binding, under `held` if the
@@ -724,19 +797,16 @@ impl Shared {
     /// or saved, or the binding is not the version that allowed it.
     async fn file_changed(&self, ready: &Ready) -> bool {
         let store = self.store.clone();
-        let current =
-            blocking(move || Ok::<_, io::Error>((store.current_id()?, store.binding_id()?)))
-                .await
-                .and_then(|r| r);
-        match current {
-            // A missing state file has nothing to adopt; a missing binding is a change.
-            Ok((state, binding)) => {
-                state.is_some_and(|id| ready.file_id != Some(id))
-                    || binding != Some(ready.binding_id)
-            }
-            // Unreadable: nothing to adopt, and every save checks the binding.
-            Err(_) => false,
-        }
+        let Ok((state, binding)) = blocking(move || (store.current_id(), store.binding_id())).await
+        else {
+            // The check itself did not run: fail closed, re-read.
+            return true;
+        };
+        // A missing or unreadable state file has nothing to adopt; a binding
+        // that is missing, unreadable or another version is a change.
+        let state_changed = matches!(state, Ok(Some(id)) if ready.file_id != Some(id));
+        let binding_changed = !matches!(binding, Ok(Some(id)) if id == ready.binding_id);
+        state_changed || binding_changed
     }
 
     /// Takes the state file lock without blocking an async worker.
