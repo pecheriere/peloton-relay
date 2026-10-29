@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/peloton", "crates/peloton-relay", "crates/peloton-relay-login"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.94"
 license = "MIT OR Apache-2.0"
@@ -15,7 +15,7 @@ base64 = "0.23"
 clap = { version = "4", features = ["derive"] }
 http-body-util = "0.1"
 muda = { version = "0.21", default-features = false }
-peloton = { path = "crates/peloton", version = "0.2.0" }
+peloton = { path = "crates/peloton", version = "0.3.0" }
 proptest = "1.12.0"
 rand = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }

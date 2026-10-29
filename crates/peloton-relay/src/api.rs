@@ -359,7 +359,7 @@ pub fn catch_panics() -> CatchPanicLayer<fn(Box<dyn Any + Send + 'static>) -> Re
 #[openapi(
     info(
         title = "Peloton relay",
-        description = "Relay of a Peloton account: its profile, workouts, metrics and classes, the on-demand class library, and the member's schedule and Stack, which it can also change.\n\nEvery error has an `ErrorBody`. Any path not listed here answers 404 `not_found`, any method a listed path does not list answers 405 `method_not_allowed`, and a request the relay fails to handle answers 500 `internal_error`. Writes (tag `peloton-write`) change the member's account; a proxy in front of the relay can authorise them separately from reads.\n\nExample: find a 20-min low-impact ride and schedule it Monday 08:00 Europe/Berlin.\n\n1. `GET /v1/library/filters?category=cycling` and take the `id` of the class type named \"Low Impact\".\n2. `GET /v1/library?category=cycling&class_type=<that id>&duration=20` and pick a class `id`.\n3. `POST /v1/schedule` with `{\"class_id\": \"<class id>\", \"start_time\": \"2026-11-02T08:00:00+01:00\"}`: 08:00 on Monday 2 November 2026 in Europe/Berlin, whose offset that day is +01:00 (always send the offset in effect on that day). The answer holds the class's `scheduled_id`.\n4. `GET /v1/schedule` lists it; `PATCH /v1/schedule/{scheduled_id}` moves it (and gives it a new `scheduled_id`), `DELETE` removes it.\n\nEvery route except `/healthz` and `/readyz` serves one Peloton account, named by the `X-Peloton-Account` request header. The proxy in front of the relay sets that header from the caller's identity; clients cannot choose it. A request without a configured account answers 403 `forbidden`."
+        description = "Relay of a Peloton account: its profile, workouts, metrics and classes, the on-demand class library, and the member's schedule and Stack, which it can also change.\n\nEvery error has an `ErrorBody`. Any path not listed here answers 404 `not_found` (to a request naming a configured account; others answer 403 `forbidden`), any method a listed path does not list answers 405 `method_not_allowed`, and a request the relay fails to handle answers 500 `internal_error`. Writes (tag `peloton-write`) change the member's account; a proxy in front of the relay can authorise them separately from reads.\n\nExample: find a 20-min low-impact ride and schedule it Monday 08:00 Europe/Berlin.\n\n1. `GET /v1/library/filters?category=cycling` and take the `id` of the class type named \"Low Impact\".\n2. `GET /v1/library?category=cycling&class_type=<that id>&duration=20` and pick a class `id`.\n3. `POST /v1/schedule` with `{\"class_id\": \"<class id>\", \"start_time\": \"2026-11-02T08:00:00+01:00\"}`: 08:00 on Monday 2 November 2026 in Europe/Berlin, whose offset that day is +01:00 (always send the offset in effect on that day). The answer holds the class's `scheduled_id`.\n4. `GET /v1/schedule` lists it; `PATCH /v1/schedule/{scheduled_id}` moves it (and gives it a new `scheduled_id`), `DELETE` removes it.\n\nEvery route except `/healthz`, `/readyz` and `/openapi.json` serves one Peloton account, named by the `X-Peloton-Account` request header. The proxy in front of the relay sets that header from the caller's identity; clients cannot choose it. A request without a configured account answers 403 `forbidden`."
     ),
     modifiers(&AccountRequirement),
     paths(
@@ -888,7 +888,7 @@ struct Status {
         (status = 200, description = "The credential owner's profile.", body = Profile),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -910,7 +910,7 @@ async fn me(
         (status = 200, description = "One page of the member's workouts, newest first.", body = WorkoutPage),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -933,7 +933,7 @@ async fn workouts(
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 404, description = "`not_found`: no such workout of the credential's owner.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -960,7 +960,7 @@ async fn workout(
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 404, description = "`not_found`: no such workout of the credential's owner.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -988,7 +988,7 @@ async fn metrics(
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 404, description = "`not_found`: no such class.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -1011,7 +1011,7 @@ async fn class(
         (status = 200, description = "One page of on-demand classes matching the query.", body = LibraryPage),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -1034,7 +1034,7 @@ async fn library(
         (status = 200, description = "The filters the library search accepts.", body = LibraryFilters),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -1064,7 +1064,7 @@ async fn library_filters(
         (status = 200, description = "The member's scheduled classes.", body = ScheduleList),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -1092,7 +1092,7 @@ async fn schedule(
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 404, description = "`not_found`: no such scheduled class, or it is no longer on the schedule (removed, or moved to a new id).", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -1123,7 +1123,7 @@ async fn scheduled(
         (status = 404, description = "`not_found`: Peloton has no such on-demand class.", body = ErrorBody),
         (status = 422, description = "`cannot_schedule`: Peloton refused, e.g. a conflict or a time outside its window; the message is Peloton's explanation.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected; whether the write happened is unknown, so read before retrying.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -1173,7 +1173,7 @@ async fn schedule_add(
         (status = 404, description = "`not_found`: no such scheduled class.", body = ErrorBody),
         (status = 422, description = "`cannot_schedule`: Peloton refused, e.g. a conflict or a time outside its window; the message is Peloton's explanation.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected; whether the write happened is unknown, so read before retrying.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -1215,7 +1215,7 @@ async fn schedule_move(
         (status = 404, description = "`not_found`: no such scheduled class.", body = ErrorBody),
         (status = 422, description = "`cannot_schedule`: Peloton refused to remove the class; the message is Peloton's explanation.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected; whether the write happened is unknown, so read before retrying.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -1247,7 +1247,7 @@ async fn schedule_remove(
         (status = 200, description = "The Stack as it is.", body = StackView),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -1275,7 +1275,7 @@ async fn stack(
         (status = 400, description = "`invalid_input`: a path, query or body value is malformed or out of range, the query has a parameter, or the body has an unknown field.", body = ErrorBody),
         (status = 409, description = "`already_in_stack`: the class is already in the Stack; nothing was written.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected; whether the write happened is unknown, so read before retrying.", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -1314,7 +1314,7 @@ async fn stack_add(
         (status = 400, description = "`invalid_input`: a path, query or body value is malformed or out of range, the query has a parameter, or the body has an unknown field.", body = ErrorBody),
         (status = 404, description = "`not_found`: the class is not in the Stack; nothing was written.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected, or the Stack holds an item the relay cannot write back faithfully (nothing is written then).", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )
@@ -1348,7 +1348,7 @@ async fn stack_remove(
         (status = 204, description = "The write succeeded but reading the Stack back failed; `GET /v1/stack` to see it."),
         (status = 400, description = "`invalid_input`: a value is malformed, a class is named twice, there are more than 100, the query has a parameter, or the body has an unknown field.", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected, or the Stack holds an item the relay cannot write back faithfully (nothing is written then).", body = ErrorBody),
-        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
+        (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential for this account; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))
         )
     )

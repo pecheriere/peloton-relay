@@ -1,7 +1,7 @@
 # peloton-relay
 
-A small HTTP relay for a single Peloton account. The relay holds the Peloton
-credential and exposes a handful of typed endpoints, so that agents, scripts and
+A small HTTP relay for one or more Peloton accounts. The relay holds each
+account's Peloton credential and exposes a handful of typed endpoints, so that agents, scripts and
 dashboards can read workout data, search the class library and plan rides
 (schedule classes and manage the Stack) without ever seeing the credential.
 
@@ -13,6 +13,9 @@ The server is one static binary that runs as an unprivileged user in a
 All responses are JSON. The OpenAPI 3.1 description is served at `/openapi.json`;
 it lists every parameter and enum value and walks through one example (find a
 20-minute low-impact ride and schedule it for Monday 08:00).
+
+Every route except `/healthz`, `/readyz` and `/openapi.json` serves one account,
+named by the `X-Peloton-Account` request header (see [Accounts](#accounts)).
 
 ### Reads
 
@@ -30,7 +33,7 @@ it lists every parameter and enum value and walks through one example (find a
 | `GET /v1/stack` | The Stack (the queue of classes that plays on the bike) in play order, with class summaries and total time. |
 | `GET /openapi.json` | The OpenAPI description. |
 | `GET /healthz` | Liveness probe. |
-| `GET /readyz` | Readiness: a usable Peloton credential is held. |
+| `GET /readyz` | Readiness: the server is up. It never consults credentials. |
 
 ### Writes
 
@@ -97,14 +100,80 @@ Errors have the body `{"error": "<code>", "message": "<text>"}`:
 | Status | `error` | Meaning |
 |--------|---------|---------|
 | 400 | `invalid_input` | A path, query or body value is malformed or out of range. |
+| 403 | `forbidden` | The request does not name an account this relay serves (no `X-Peloton-Account` header, or an account that is not configured). Checked before anything else, including routing and validation. |
 | 404 | `not_found` | The resource, or the route, does not exist (including a class that is not in the Stack). |
 | 405 | `method_not_allowed` | The route exists but not for this method. |
 | 409 | `already_in_stack` | The class is already in the Stack. |
 | 422 | `cannot_schedule` | Peloton refused to schedule the class; the message is Peloton's explanation. |
 | 500 | `internal_error` | The relay failed while handling the request. |
 | 502 | `upstream_error` | Peloton failed or returned something unexpected. After a write, whether it happened is unknown: read before retrying. |
-| 503 | `not_authenticated` | The relay holds no usable Peloton credential; see [Bootstrap](#bootstrap). |
+| 503 | `not_authenticated` | The relay holds no usable Peloton credential for this account; see [Bootstrap](#bootstrap). |
 | 503 | `upstream_rate_limited` | Peloton is rate limiting the relay; a `Retry-After` header is set. |
+
+## Accounts
+
+The relay serves the accounts listed in `PELOTON_RELAY_ACCOUNTS`, a
+comma-separated list of distinct names (no spaces, no empty items). An account
+name is 1 to 16 lowercase ASCII letters, chosen by the deployment (for example
+`alice,bob`); it is not derived from the Peloton username.
+
+Each request names its account in the `X-Peloton-Account` header. A request
+that names no configured account answers 403 `forbidden`, for every path but
+`/healthz`, `/readyz` and `/openapi.json` (unmatched paths included), before any
+parameter or body is validated and before Peloton is contacted. The header is set by the
+proxy in front of the relay, not by clients (see [Security model](#security-model)).
+
+The state directory holds one directory per account:
+
+```
+<PELOTON_RELAY_STATE_DIR>/
+  .bindings.lock          cross-account lock for the bindings
+  alice/                  0700
+    state.json            0600, the account's token set
+    binding.json          0600, {"user_id": "<32 hex>"}
+    .state.json.lock      0600, serialises seed, bind and token refresh
+  bob/
+    ...
+```
+
+`binding.json` records which Peloton user the account belongs to. The rules:
+
+- `seed` binds an account to the Peloton user of the credential it stores.
+- A Peloton user is bound to at most one account; seeding the same user into a
+  second account is refused, even with `--rebind`.
+- An account bound to one user refuses a credential of another user unless
+  `seed` is run with `--rebind`.
+- The server refuses a state file whose user does not match the binding
+  (logged as `state_refused`) and keeps the account unauthenticated.
+
+Seed an account (see [Bootstrap](#bootstrap)):
+
+```sh
+... | docker exec -i <container> /peloton-relay seed --account alice [--rebind]
+```
+
+On success it prints:
+
+```
+account "alice": bound to Peloton user <username> (id …00f2)
+```
+
+with `(no username)` in place of `<username>` when Peloton reports none, and the
+id shown as its last four hex digits. When `--rebind` changed the user, it
+first prints `account "alice": was bound to Peloton user id …<last 4 hex>`.
+
+**Upgrading from 0.2.x.** Earlier releases kept a single `state.json` directly
+in the state directory, and the server refuses to start while that file is
+there. Move it into its account's directory and bind the account to the user of
+that state file:
+
+```sh
+mkdir -m 0700 <state dir>/alice
+mv <state dir>/state.json <state dir>/alice/state.json
+docker exec <container> /peloton-relay bind --account alice
+```
+
+Set `PELOTON_RELAY_ACCOUNTS` before starting 0.3.0; it has no default.
 
 ## Security model
 
@@ -134,10 +203,16 @@ Errors have the body `{"error": "<code>", "message": "<text>"}`:
 - **The credential stays in the relay.** Tokens live in a state file inside the
   relay's state directory, are refreshed by the relay, and are never returned by
   the API, written to logs or error messages, or passed on a command line.
-- **No authentication of its own.** The API has no login. Anyone who can reach
-  the listening port can read the account's workout data and change its
-  schedule and Stack, so bind it to a private interface or put it behind a
-  network boundary or authenticating proxy. Do not expose it to the internet.
+- **No authentication of its own.** The API has no login. The relay trusts the
+  `X-Peloton-Account` header, so it must be reachable only through a proxy that
+  sets that header from the caller's authenticated identity and drops any copy
+  the client sent. Anyone who can reach the listening port directly can choose
+  any configured account, read its workout data and change its schedule and
+  Stack, so bind it to a private interface or put it behind a network boundary
+  and an authenticating proxy. Do not expose it to the internet.
+- **One Peloton user per account.** The binding keeps an account's state file
+  from holding another user's credential, and a Peloton user from serving two
+  accounts (see [Accounts](#accounts)).
 - **Minimal image.** Static musl binary, no shell, no package manager, no CA
   bundle (TLS trust anchors are compiled in via rustls and `webpki-roots`),
   running as UID/GID 65532.
@@ -168,20 +243,23 @@ suits a Compose or Kubernetes health check (`["CMD", "/peloton-relay",
 
 ## Bootstrap
 
-The relay needs a Peloton token set before `/readyz` turns ready. The login
+Each account needs its own Peloton token set before the relay can answer for it
+(without one, its `/v1` routes answer 503 `not_authenticated`; `/readyz` only
+reports that the server is up). The login
 helper obtains one through the real Peloton web login (so passwords and 2FA are
 handled by Peloton's own page) and prints it as JSON on stdout. It is a macOS
 tool and is not part of the image. On a Mac:
 
 ```sh
 cargo run --release -p peloton-relay-login | \
-  ssh <host> sudo docker exec -i <container> /peloton-relay seed
+  ssh <host> sudo docker exec -i <container> /peloton-relay seed --account <name>
 ```
 
-`seed` reads the token set from stdin, verifies it with Peloton and stores it in
-the state directory. The tokens never touch a command line or a disk outside the
+`seed` reads the token set from stdin, verifies it with Peloton, binds the
+account to the credential's Peloton user and stores it in the account's
+directory. The tokens never touch a command line or a disk outside the
 state directory. `seed` and the server's token refresh take turns on a lock file
-(`.state.json.lock`, 0600, next to `state.json`), so neither overwrites the
+(`.state.json.lock`, 0600, in the account's directory next to `state.json`), so neither overwrites the
 other: a seed that lands first is used by the refresh, and a seed that arrives
 during a refresh waits for it (up to a minute, then it fails and can be run
 again). Seed right after logging in: a token set whose access token has
@@ -210,16 +288,23 @@ traffic; repeat the bootstrap only if Peloton invalidates the refresh token.
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `PELOTON_RELAY_LISTEN` | `0.0.0.0:8080` | Socket address the server binds. |
-| `PELOTON_RELAY_STATE_DIR` | `/state` | Directory holding `state.json`; must be writable by the container user. |
+| `PELOTON_RELAY_ACCOUNTS` | none, required | Comma-separated account names served by this relay; see [Accounts](#accounts). |
+| `PELOTON_RELAY_STATE_DIR` | `/state` | Directory holding one directory per account; must be writable by the container user. |
 
-Logs are JSON lines on stdout. A failed Peloton authentication is logged once
+Logs are JSON lines on stdout. Every event about a credential or a write
+carries an `account` field with the account name; Peloton user ids appear only
+as their last four hex digits (`user="…00f2"`), and usernames never. A failed Peloton authentication is logged once
 per transition into the failed state as `event="peloton_auth_failed"`. When
 Peloton rejects an access token the relay has just refreshed after a 401, it
 logs `event="peloton_unauthorized_after_refresh"` once and forces at most one
 refresh per 10 minutes, rather than rotating the credential on every request.
 A failure to save refreshed tokens is logged once per streak as
 `event="state_save_failed"`, and the next successful save as
-`event="state_save_recovered"`.
+`event="state_save_recovered"`. A state file that does not match its account's
+binding is refused with `event="state_refused"`; `event="account_rebound"` marks
+the server picking up a seed that moved an account to another Peloton user; a request that names no
+configured account logs `event="account_refused"` (the name only when it is a
+valid account name).
 Each write logs `event="peloton_write"` (see [Security model](#security-model)).
 A panic is logged as `event="panic"` with its source location only.
 Every request gets a fresh id, returned as the `x-request-id` header (an id sent
