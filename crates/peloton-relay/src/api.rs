@@ -792,6 +792,9 @@ async fn schedule(
 }
 
 /// One class on the member's schedule.
+///
+/// Only a class the schedule still lists is found: after a remove, and for
+/// the old id after a move, the id answers 404.
 #[utoipa::path(
     get,
     path = "/v1/schedule/{scheduled_id}",
@@ -799,7 +802,7 @@ async fn schedule(
     responses(
         (status = 200, body = ScheduledClassView),
         (status = 400, description = "`invalid_input`: a path or query value is malformed, or the query has an unknown parameter.", body = ErrorBody),
-        (status = 404, description = "`not_found`: no such scheduled class.", body = ErrorBody),
+        (status = 404, description = "`not_found`: no such scheduled class, or it is no longer on the schedule (removed, or moved to a new id).", body = ErrorBody),
         (status = 502, description = "`upstream_error`: Peloton failed or answered something unexpected.", body = ErrorBody),
         (status = 503, description = "`not_authenticated`: the relay holds no usable Peloton credential; or `upstream_rate_limited`: Peloton is rate limiting the relay.", body = ErrorBody,
             headers(("Retry-After" = u64, description = "Seconds to wait; only with `upstream_rate_limited`, when Peloton said."))

@@ -69,6 +69,9 @@ anything is sent to Peloton.
 - `GET /v1/schedule` lists every item Peloton reports in the window, each with a
   `kind`: `on_demand` for a scheduled class, otherwise Peloton's own type name
   (such items carry no class details).
+- `GET /v1/schedule/{scheduled_id}` answers only for a class still on the
+  schedule: after a remove, and for the old id after a move, it answers 404
+  `not_found`.
 
 ### Library filters
 
