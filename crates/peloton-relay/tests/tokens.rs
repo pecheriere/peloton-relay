@@ -1988,3 +1988,181 @@ async fn credential_events_carry_the_account() {
         }
     }
 }
+
+/// Lines of the case `case` that log `state_refused` with `reason` for alice.
+fn refusals(output: &str, case: &str, reason: &str) -> usize {
+    output
+        .lines()
+        .filter(|line| line.contains(case) && line.contains("state_refused"))
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|json| json["account"] == ACCOUNT && json["reason"] == reason)
+        .count()
+}
+
+#[tokio::test]
+async fn pending_save_does_not_overwrite_a_rebound_account() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    refresh_mock("old-refresh")
+        .respond_with(rotated_tokens())
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(
+        &state("old-access", "old-refresh", Duration::minutes(30)),
+        LOCK_WAIT,
+    )
+    .unwrap();
+    let tokens = manager(dir.path(), &server);
+
+    async {
+        // The refreshed tokens of the old user cannot be saved yet.
+        make_read_only(dir.path());
+        let withheld = tokens.bearer().await;
+        make_writable(dir.path());
+        assert!(matches!(withheld, Err(NotAuthenticated)));
+
+        // A seed rebinds the account to another user and saves their state.
+        let seeding = file.lock(LOCK_WAIT).unwrap();
+        seeding.bind(&other_user()).unwrap();
+        seeding
+            .save(&state_of(
+                &other_user(),
+                "other-access",
+                "other-refresh",
+                Duration::hours(48),
+            ))
+            .unwrap();
+        drop(seeding);
+
+        // Saving works again, but the old user's tokens are dropped, not
+        // written; the rebound account's credential is used.
+        for _ in 0..2 {
+            let (access, owner) = tokens.bearer().await.unwrap();
+            assert_eq!(access.expose_secret(), "other-access");
+            assert_eq!(owner, other_user());
+            let on_disk = file.load().unwrap().unwrap();
+            assert_eq!(on_disk.user_id, other_user());
+            assert_eq!(
+                on_disk.tokens.refresh_token.expose_secret(),
+                "other-refresh"
+            );
+        }
+    }
+    .instrument(tracing::info_span!("case", name = "pending_rebound"))
+    .await;
+
+    let output = logs.contents();
+    assert_eq!(
+        refusals(&output, "pending_rebound", "user_mismatch"),
+        1,
+        "{output}"
+    );
+    assert_eq!(
+        logged(&output, "pending_rebound", "account_rebound"),
+        1,
+        "{output}"
+    );
+    assert!(
+        !fs::read_to_string(&file.path)
+            .unwrap()
+            .contains("rotated-refresh")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refresh_refuses_to_save_under_another_users_binding() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    refresh_mock("old-refresh")
+        .respond_with(rotated_tokens().set_delay(StdDuration::from_millis(500)))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(
+        &state("old-access", "old-refresh", Duration::minutes(30)),
+        LOCK_WAIT,
+    )
+    .unwrap();
+    let tokens = Arc::new(manager(dir.path(), &server));
+
+    async {
+        let refreshing = tokio::spawn(
+            {
+                let tokens = Arc::clone(&tokens);
+                async move { tokens.bearer().await }
+            }
+            .in_current_span(),
+        );
+        // While the token request is in flight, a writer that ignores the
+        // state lock binds the account to another user.
+        tokio::time::sleep(StdDuration::from_millis(200)).await;
+        assert!(!refreshing.is_finished());
+        fs::write(
+            file.binding_path(),
+            serde_json::json!({ "user_id": OTHER_USER }).to_string(),
+        )
+        .unwrap();
+
+        assert!(matches!(refreshing.await.unwrap(), Err(NotAuthenticated)));
+        assert!(!tokens.is_ready());
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+    }
+    .instrument(tracing::info_span!("case", name = "refresh_rebound"))
+    .await;
+
+    let on_disk = file.load().unwrap().unwrap();
+    assert_eq!(on_disk.tokens.refresh_token.expose_secret(), "old-refresh");
+    let output = logs.contents();
+    assert_eq!(
+        refusals(&output, "refresh_rebound", "user_mismatch"),
+        1,
+        "{output}"
+    );
+}
+
+#[tokio::test]
+async fn binding_only_change_is_noticed() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(
+        &state("old-access", "old-refresh", Duration::hours(48)),
+        LOCK_WAIT,
+    )
+    .unwrap();
+    let tokens = manager(dir.path(), &server);
+
+    async {
+        tokens.bearer().await.unwrap();
+        // Only the binding changes: the state file is the version already loaded.
+        file.lock(LOCK_WAIT).unwrap().bind(&other_user()).unwrap();
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+        assert!(!tokens.is_ready());
+
+        // Bound back to the user of the state: it is used again.
+        file.lock(LOCK_WAIT).unwrap().bind(&user()).unwrap();
+        let (access, _) = tokens.bearer().await.unwrap();
+        assert_eq!(access.expose_secret(), "old-access");
+
+        // A removed binding is noticed too.
+        fs::remove_file(file.binding_path()).unwrap();
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+    }
+    .instrument(tracing::info_span!("case", name = "binding_only"))
+    .await;
+    assert_eq!(refresh_calls(&server).await, 0);
+
+    let output = logs.contents();
+    assert_eq!(
+        refusals(&output, "binding_only", "user_mismatch"),
+        1,
+        "{output}"
+    );
+    assert_eq!(refusals(&output, "binding_only", "unbound"), 1, "{output}");
+}

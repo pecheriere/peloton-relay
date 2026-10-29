@@ -45,7 +45,7 @@ use tracing::Instrument as _;
 use tracing::instrument::WithSubscriber as _;
 
 use crate::account::{AccountName, user_suffix};
-use crate::store::{FileId, Refusal, Snapshot, State, StateFile, StateLock, StoreError};
+use crate::store::{FileId, Refusal, Snapshot, State, StateFile, StateLock, StoreError, Version};
 
 /// Refresh this long before the access token expires.
 pub const DEFAULT_REFRESH_MARGIN: Duration = Duration::from_hours(1);
@@ -145,7 +145,9 @@ enum Phase {
     #[default]
     Empty,
     /// A credential that has not been rejected.
-    Ready(Ready),
+    ///
+    /// Boxed: a credential is much larger than the other phases.
+    Ready(Box<Ready>),
     /// The refresh token was rejected; waits for a seed with a different one.
     Failed { dead_refresh: SecretString },
 }
@@ -158,6 +160,8 @@ struct Ready {
     backoff: Option<Backoff>,
     /// The state file version this state came from or was saved as.
     file_id: Option<FileId>,
+    /// The binding version that allowed this state.
+    binding_id: FileId,
     /// An external change was ignored because `state` is not saved yet (logged).
     external_ignored: bool,
     /// Set when the current access token came from a refresh forced by a 401.
@@ -165,12 +169,13 @@ struct Ready {
 }
 
 impl Ready {
-    fn new(state: State, file_id: FileId) -> Self {
+    fn new(state: State, version: Version) -> Self {
         Self {
             state,
             persist: Persist::Saved,
             backoff: None,
-            file_id: Some(file_id),
+            file_id: Some(version.state),
+            binding_id: version.binding,
             external_ignored: false,
             reactive: None,
         }
@@ -189,6 +194,17 @@ struct Reactive {
 /// Whether another refresh forced by a 401 is allowed at `now`.
 fn cooldown_elapsed(last: Instant, now: Instant) -> bool {
     now.saturating_duration_since(last) >= REACTIVE_REFRESH_COOLDOWN
+}
+
+/// What [`Shared::persist`] did with the tokens in memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Persisted {
+    /// On disk (now or already).
+    Saved,
+    /// Not written; retried on the next call.
+    Failed,
+    /// Not written: the binding no longer names their user (logged).
+    Refused,
 }
 
 /// Whether the in-memory state is on disk.
@@ -252,8 +268,8 @@ impl Inner {
 
     /// Applies a fresh read of the state file while not ready.
     fn apply_loaded(&mut self, account: &AccountName, loaded: io::Result<Snapshot>) {
-        let (state, id) = match loaded {
-            Ok(Snapshot::Valid(state, id)) => (state, id),
+        let (state, version) = match loaded {
+            Ok(Snapshot::Valid(state, version)) => (state, version),
             Ok(Snapshot::Missing) => {
                 return self.reported.load_problem(account, LoadProblem::Missing);
             }
@@ -286,7 +302,7 @@ impl Inner {
             "loaded Peloton credential from the state file"
         );
         self.reported.credential_installed();
-        self.phase = Phase::Ready(Ready::new(state, id));
+        self.phase = Phase::Ready(Box::new(Ready::new(state, version)));
     }
 
     /// Adopts a state file that another process replaced while ready.
@@ -295,7 +311,7 @@ impl Inner {
             return;
         }
         match loaded {
-            Ok(Snapshot::Valid(state, id)) => {
+            Ok(Snapshot::Valid(state, version)) => {
                 self.accept_user(account, &state.user_id);
                 tracing::info!(
                     event = "state_reloaded",
@@ -303,7 +319,7 @@ impl Inner {
                     user = %user_suffix(&state.user_id),
                     "state file was replaced; using the new credential"
                 );
-                self.phase = Phase::Ready(Ready::new(state, id));
+                self.phase = Phase::Ready(Box::new(Ready::new(state, version)));
                 self.reported.credential_installed();
             }
             Ok(Snapshot::Corrupt(id)) => {
@@ -645,11 +661,18 @@ impl Shared {
                 tracing::warn!(
                     event = "state_external_change_ignored",
                     account = %self.account,
-                    "state file was replaced while refreshed tokens are unsaved; keeping the refreshed tokens"
+                    "state file or binding was replaced while refreshed tokens are unsaved; keeping the refreshed tokens unless the binding refuses them"
                 );
             }
             match self.lock_file().await {
-                Ok(lock) => self.persist(ready, &mut inner.reported, &lock).await,
+                Ok(lock) => {
+                    if self.persist(ready, &mut inner.reported, &lock).await == Persisted::Refused {
+                        // The tokens are dropped; what the file holds now is what counts.
+                        inner.phase = Phase::Empty;
+                        let loaded = self.snapshot(Some(&lock)).await;
+                        inner.apply_loaded(&self.account, loaded);
+                    }
+                }
                 Err(err) => inner.reported.save_failed(&self.account, &err),
             }
             return;
@@ -697,13 +720,22 @@ impl Shared {
         }
     }
 
-    /// Whether the file on disk is not the version `ready` came from or saved.
+    /// Whether the state file on disk is not the version `ready` came from
+    /// or saved, or the binding is not the version that allowed it.
     async fn file_changed(&self, ready: &Ready) -> bool {
         let store = self.store.clone();
-        match blocking(move || store.current_id()).await.and_then(|r| r) {
-            Ok(Some(id)) => ready.file_id != Some(id),
-            // Missing or unreadable: nothing to adopt.
-            Ok(None) | Err(_) => false,
+        let current =
+            blocking(move || Ok::<_, io::Error>((store.current_id()?, store.binding_id()?)))
+                .await
+                .and_then(|r| r);
+        match current {
+            // A missing state file has nothing to adopt; a missing binding is a change.
+            Ok((state, binding)) => {
+                state.is_some_and(|id| ready.file_id != Some(id))
+                    || binding != Some(ready.binding_id)
+            }
+            // Unreadable: nothing to adopt, and every save checks the binding.
+            Err(_) => false,
         }
     }
 
@@ -755,7 +787,10 @@ impl Shared {
                 ready.reactive = None;
                 ready.persist = Persist::Pending;
                 tracing::info!(event = "peloton_token_refreshed", account = %self.account, expires_at = %ready.state.tokens.expires_at, "refreshed the Peloton access token");
-                self.persist(ready, &mut inner.reported, &lock).await;
+                if self.persist(ready, &mut inner.reported, &lock).await == Persisted::Refused {
+                    inner.phase = Phase::Empty;
+                    return false;
+                }
                 true
             }
             Err(err) if is_terminal(err) => {
@@ -775,25 +810,41 @@ impl Shared {
     }
 
     /// Writes refreshed tokens to the state file, under `lock`, if they are
-    /// not there yet.
-    async fn persist(&self, ready: &mut Ready, reported: &mut Reported, lock: &StateLock) {
+    /// not there yet and the binding still names their user.
+    ///
+    /// On [`Persisted::Refused`] the caller drops the tokens (fail closed):
+    /// the account now belongs to another user, or to none.
+    async fn persist(
+        &self,
+        ready: &mut Ready,
+        reported: &mut Reported,
+        lock: &StateLock,
+    ) -> Persisted {
         if ready.persist == Persist::Saved {
-            return;
+            return Persisted::Saved;
         }
         let lock = lock.clone();
         let state = ready.state.clone();
-        match blocking(move || lock.save_with_id(&state))
+        match blocking(move || lock.save_bound(&state))
             .await
             .map_err(StoreError::Io)
             .and_then(|r| r)
         {
-            Ok(id) => {
+            Ok(Ok(id)) => {
                 ready.file_id = Some(id);
                 ready.external_ignored = false;
                 ready.persist = Persist::Saved;
                 reported.save_succeeded(&self.account);
+                Persisted::Saved
             }
-            Err(err) => reported.save_failed(&self.account, &err),
+            Ok(Err(refusal)) => {
+                reported.load_problem(&self.account, LoadProblem::Refused(refusal));
+                Persisted::Refused
+            }
+            Err(err) => {
+                reported.save_failed(&self.account, &err);
+                Persisted::Failed
+            }
         }
     }
 }
