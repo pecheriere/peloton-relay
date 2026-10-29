@@ -6,9 +6,10 @@ use std::collections::HashSet;
 use std::future;
 use std::sync::Arc;
 
-use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request, State};
+use axum::extract::{FromRequest, FromRequestParts, MatchedPath, Path, Query, Request, State};
 use axum::http::request::Parts;
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderName, HeaderValue, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get};
 use axum::{Json, Router};
@@ -17,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime, UtcOffset};
 use tower_http::catch_panic::CatchPanicLayer;
+use tracing::Instrument as _;
 use utoipa::openapi::RefOr;
 use utoipa::openapi::schema::{ObjectBuilder, Schema, Type};
 use utoipa::{IntoParams, OpenApi, ToSchema};
@@ -82,7 +84,7 @@ pub struct AppState {
 
 /// Builds the router for the relay's API.
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let routes = Router::new()
         .route("/v1/me", get(me))
         .route("/v1/workouts", get(workouts))
         .route("/v1/workouts/{id}", get(workout))
@@ -101,9 +103,59 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .fallback(|| async { ApiError::NotFound })
-        .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed })
+        .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed });
+    request_handling(routes).with_state(state)
+}
+
+/// Wraps `routes` in the relay's request handling.
+///
+/// Each request runs in a span with its id, method and matched route (never
+/// the query string or the path's own ids) and is answered with an
+/// `x-request-id` header. A panicking handler is answered with 500 (see
+/// [`catch_panics`]) inside that span, so the panic's log line carries the
+/// request's id and route too.
+///
+/// Public only so that the integration tests can wrap their own routes.
+#[doc(hidden)]
+pub fn request_handling<S: Clone + Send + Sync + 'static>(routes: Router<S>) -> Router<S> {
+    routes
         .layer(catch_panics())
-        .with_state(state)
+        .layer(middleware::from_fn(request_context))
+}
+
+/// Header carrying the id the relay gives each request.
+const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
+
+/// The `route` logged for a request that matched no route, so that a log line
+/// never holds the path of an arbitrary request.
+const UNMATCHED_ROUTE: &str = "unmatched";
+
+/// Gives the request a fresh id, returned as `x-request-id`, and runs it in a
+/// span with that id, its method and its matched route (the path template,
+/// e.g. `/v1/workouts/{id}`), so that every log line of the handler, such as
+/// an upstream failure, carries them.
+///
+/// An id sent by the client is ignored. The span holds neither the query
+/// string nor the path's own ids.
+async fn request_context(request: Request, next: Next) -> Response {
+    let id = HeaderValue::from_str(&format!("{:032x}", rand::random::<u128>())).ok();
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or(UNMATCHED_ROUTE, MatchedPath::as_str);
+    // An error-level span, so that it stays enabled (and its fields reach the
+    // log lines) under any `RUST_LOG` that enables the warnings logged in it.
+    let span = tracing::error_span!(
+        "request",
+        method = %request.method(),
+        route,
+        request_id = id.as_ref().and_then(|id| id.to_str().ok()),
+    );
+    let mut response = next.run(request).instrument(span).await;
+    if let Some(id) = id {
+        response.headers_mut().insert(REQUEST_ID_HEADER, id);
+    }
+    response
 }
 
 /// Answers a request whose handler panicked with 500 `internal_error`.

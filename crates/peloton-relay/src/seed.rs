@@ -2,6 +2,7 @@
 
 use std::io::Read;
 
+use peloton::body::read_limited;
 use peloton::endpoints::PLATFORM_HEADER;
 use peloton::oauth::TokenSet;
 use peloton::upstream::Me;
@@ -102,5 +103,8 @@ async fn fetch_me(
             SeedError::Unexpected { status }
         });
     }
-    response.json().await.map_err(|_| SeedError::Upstream)
+    let body = read_limited(response)
+        .await
+        .map_err(|_| SeedError::Upstream)?;
+    serde_json::from_slice(&body).map_err(|_| SeedError::Upstream)
 }

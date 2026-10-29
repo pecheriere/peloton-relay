@@ -2050,6 +2050,7 @@ dependencies = [
  "clap",
  "http-body-util",
  "peloton",
+ "rand 0.9.5",
  "reqwest",
  "secrecy",
  "serde",

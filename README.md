@@ -215,6 +215,12 @@ logs `event="peloton_unauthorized_after_refresh"` once and forces at most one
 refresh per 10 minutes, rather than rotating the credential on every request.
 Each write logs `event="peloton_write"` (see [Security model](#security-model)).
 A panic is logged as `event="panic"` with its source location only.
+Every request gets a fresh id, returned as the `x-request-id` header (an id sent
+by the client is ignored), and its log lines carry the id, the method and the
+matched route template (never the query string or the path's own ids) in their
+`span` field. Responses from Peloton and its token endpoint are read up to
+8 MiB; a larger one fails the request with 502 `upstream_error` (or the token
+refresh or seed with an error).
 
 ## Building
 

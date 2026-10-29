@@ -15,6 +15,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use peloton::body::{BodyError, MAX_RESPONSE_BODY_BYTES, read_limited};
 use peloton::endpoints::{self, GRAPHQL_URL, PLATFORM_HEADER};
 use peloton::graphql::{Op, ops};
 use peloton::ids::{OnDemandClassId, PelotonId, ScheduledClassId};
@@ -69,6 +70,9 @@ pub enum UpstreamError {
         /// Path of the field that failed, e.g. `data[0].id`.
         path: String,
     },
+    /// The response body is larger than [`MAX_RESPONSE_BODY_BYTES`].
+    #[error("upstream response body is larger than {MAX_RESPONSE_BODY_BYTES} bytes")]
+    BodyTooLarge,
     /// The request could not be built, sent, or its response read.
     #[error("upstream request failed")]
     Transport,
@@ -98,6 +102,7 @@ impl fmt::Debug for UpstreamError {
                 f.debug_struct("Upstream").field("status", status).finish()
             }
             Self::Decode { path } => f.debug_struct("Decode").field("path", path).finish(),
+            Self::BodyTooLarge => f.write_str("BodyTooLarge"),
             Self::Transport => f.write_str("Transport"),
             Self::GraphQl => f.write_str("GraphQl"),
             Self::CannotSchedule { .. } => f.debug_struct("CannotSchedule").finish_non_exhaustive(),
@@ -829,10 +834,7 @@ async fn interpret<T: DeserializeOwned>(response: reqwest::Response) -> Result<T
             });
         }
     }
-    let body = response.bytes().await.map_err(|err| {
-        tracing::warn!(timeout = err.is_timeout(), "reading upstream body failed");
-        UpstreamError::Transport
-    })?;
+    let body = read_body(response).await?;
     serde_path_to_error::deserialize(&mut serde_json::Deserializer::from_slice(&body)).map_err(
         |err| {
             // The inner error can quote body content; only the path is safe.
@@ -841,6 +843,23 @@ async fn interpret<T: DeserializeOwned>(response: reqwest::Response) -> Result<T
             UpstreamError::Decode { path }
         },
     )
+}
+
+/// The body of `response`, at most [`MAX_RESPONSE_BODY_BYTES`] long.
+async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, UpstreamError> {
+    read_limited(response).await.map_err(|err| match err {
+        BodyError::TooLarge => {
+            tracing::warn!(
+                limit = MAX_RESPONSE_BODY_BYTES,
+                "upstream response body exceeds the size limit"
+            );
+            UpstreamError::BodyTooLarge
+        }
+        BodyError::Transport { timeout } => {
+            tracing::warn!(timeout, "reading upstream body failed");
+            UpstreamError::Transport
+        }
+    })
 }
 
 #[cfg(test)]

@@ -613,6 +613,7 @@ mod tests {
         }
         assert!(!is_terminal(AuthError::Transport));
         assert!(!is_terminal(AuthError::Decode));
+        assert!(!is_terminal(AuthError::BodyTooLarge));
     }
 
     #[test]

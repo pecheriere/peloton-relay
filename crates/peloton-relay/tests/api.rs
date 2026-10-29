@@ -702,6 +702,117 @@ async fn cannot_schedule_is_422_with_pelotons_message() {
 }
 
 #[tokio::test]
+async fn oversized_upstream_body_is_upstream_error() {
+    use axum::response::IntoResponse as _;
+    use peloton_relay::error::ApiError;
+    use peloton_relay::upstream::UpstreamError;
+
+    let response = ApiError::from(UpstreamError::BodyTooLarge).into_response();
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap()["error"],
+        "upstream_error"
+    );
+}
+
+/// The id the relay gave the request that answered with `headers`.
+fn request_id(headers: &axum::http::HeaderMap) -> String {
+    headers["x-request-id"].to_str().unwrap().to_owned()
+}
+
+/// The JSON log lines of the request `id`.
+fn request_logs(id: &str) -> Vec<Value> {
+    common::captured_logs()
+        .contents()
+        .lines()
+        .filter(|line| line.contains(id))
+        .map(parse)
+        .collect()
+}
+
+#[tokio::test]
+async fn upstream_failure_log_carries_the_route_and_request_id() {
+    let logs = common::captured_logs();
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let app = app(&dir, &server, true);
+    for (uri, route) in [
+        (format!("/v1/workouts/{WORKOUT}"), "/v1/workouts/{id}"),
+        ("/v1/workouts?limit=7".to_owned(), "/v1/workouts"),
+    ] {
+        let (status, headers, _) = get(&app, &uri).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY, "{uri}");
+        let id = request_id(&headers);
+        let lines = request_logs(&id);
+        let warning = lines
+            .iter()
+            .find(|line| line["message"] == "upstream request failed")
+            .unwrap_or_else(|| panic!("no upstream warning for {id}: {}", logs.contents()));
+        assert_eq!(warning["level"], "WARN");
+        assert_eq!(warning["span"]["route"], route);
+        assert_eq!(warning["span"]["request_id"], id);
+        assert_eq!(warning["span"]["method"], "GET");
+        // The span holds the route template and nothing else of the
+        // request: no query string and no id from the path.
+        let line = warning.to_string();
+        assert!(!line.contains(WORKOUT), "{line}");
+        assert!(!line.contains("limit=7"), "{line}");
+    }
+}
+
+#[tokio::test]
+async fn panic_log_and_500_carry_the_request_id_and_route() {
+    use axum::routing::get;
+
+    // Installs the capture before anything logs.
+    common::captured_logs();
+    let app = peloton_relay::api::request_handling(Router::new().route("/boom/{id}", get(boom)));
+    let (status, headers, _) =
+        get_with_span(&app, "/boom/zq7-sentinel?q=1", "panic_request_context").await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    let id = request_id(&headers);
+    let panic_line = request_logs(&id)
+        .into_iter()
+        .find(|line| line["event"] == "handler_panicked")
+        .unwrap_or_else(|| panic!("no panic log for {id}"));
+    assert_eq!(panic_line["span"]["route"], "/boom/{id}");
+    assert_eq!(panic_line["span"]["request_id"], id);
+    let line = panic_line.to_string();
+    assert!(
+        !line.contains("zq7-sentinel") && !line.contains("q=1"),
+        "{line}"
+    );
+}
+
+#[tokio::test]
+async fn every_request_gets_its_own_request_id() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let app = app(&dir, &server, true);
+    let mut ids = Vec::new();
+    for uri in ["/healthz", "/healthz", "/nowhere"] {
+        let request = Request::get(uri)
+            .header("x-request-id", "client-chosen-id")
+            .body(Body::empty())
+            .unwrap();
+        let (_, headers, _) = send(&app, request).await;
+        ids.push(request_id(&headers));
+    }
+    for id in &ids {
+        assert_eq!(id.len(), 32, "{id}");
+        assert!(id.bytes().all(|b| b.is_ascii_hexdigit()), "{id}");
+    }
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), 3);
+}
+
+#[tokio::test]
 async fn graphql_failure_is_upstream_error() {
     use axum::response::IntoResponse as _;
     use peloton_relay::error::ApiError;
