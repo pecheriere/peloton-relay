@@ -1,14 +1,13 @@
 //! `capture`: save raw Peloton responses to disk for fixture building.
 
-use std::fs::{self, DirBuilder, OpenOptions};
-use std::io::Write as _;
-use std::os::unix::fs::{
-    DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _,
-};
+use std::fs::{self, DirBuilder};
+use std::io::{self, Write as _};
+use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
 use std::path::{Component, Path, PathBuf};
 
 use peloton::endpoints;
 use peloton::ids::PelotonId;
+use rustix::fs::{Mode, OFlags};
 use secrecy::SecretString;
 use serde::Deserialize;
 
@@ -129,31 +128,30 @@ pub(crate) fn prepare_dir(dir: &Path) -> Result<(), String> {
 /// written: new files are created with it, and an existing file is
 /// restricted before it is truncated.
 ///
-/// A symbolic link is refused (`O_NOFOLLOW`), and so is a file with several
-/// hard links, so a planted link cannot redirect the capture or have another
-/// file truncated and re-permissioned.
+/// A symbolic link is refused (`O_NOFOLLOW`), and so is anything but a
+/// regular file with a single link, so a planted link cannot redirect the
+/// capture or have another file truncated and re-permissioned. The file is
+/// opened with `O_NONBLOCK`, so a planted FIFO cannot block the open, and
+/// switched back to blocking once it is known to be a regular file.
 fn create_private(path: &Path) -> Result<fs::File, String> {
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(|e| format!("could not write {}: {e}", path.display()))?;
-    let meta = file
-        .metadata()
-        .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    let failed = |e: io::Error| format!("could not write {}: {e}", path.display());
+    let flags =
+        OFlags::WRONLY | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let file = fs::File::from(
+        rustix::fs::open(path, flags, Mode::RUSR | Mode::WUSR).map_err(|e| failed(e.into()))?,
+    );
+    let meta = file.metadata().map_err(failed)?;
     if !meta.is_file() || meta.nlink() > 1 {
         return Err(format!(
             "refusing to write {}: not a regular file with a single link",
             path.display()
         ));
     }
+    let status = rustix::fs::fcntl_getfl(&file).map_err(|e| failed(e.into()))?;
+    rustix::fs::fcntl_setfl(&file, status - OFlags::NONBLOCK).map_err(|e| failed(e.into()))?;
     file.set_permissions(fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("could not secure {}: {e}", path.display()))?;
-    file.set_len(0)
-        .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    file.set_len(0).map_err(failed)?;
     Ok(file)
 }
 
@@ -364,6 +362,29 @@ mod tests {
         assert!(create_private(&link).is_err());
 
         assert_eq!(fs::read(&target).expect("read"), b"keep me");
+    }
+
+    #[test]
+    fn create_private_refuses_a_fifo_without_blocking() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("me.json");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .expect("run mkfifo");
+        assert!(made.success(), "mkfifo failed");
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let opened = path.clone();
+        std::thread::spawn(move || {
+            let refused = create_private(&opened).is_err();
+            sender.send(refused).expect("send result");
+        });
+        let refused = receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("create_private blocked on a FIFO");
+
+        assert!(refused);
     }
 
     #[test]
