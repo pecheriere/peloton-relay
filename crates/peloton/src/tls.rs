@@ -22,7 +22,9 @@ fn root_certificates() -> reqwest::Result<Vec<Certificate>> {
 /// A client builder that trusts only the compiled-in root certificates.
 ///
 /// Every HTTP client in the workspace starts from this builder; clippy
-/// rejects `reqwest::Client::builder` and `reqwest::Client::new` elsewhere.
+/// rejects `reqwest::Client::builder`, `reqwest::Client::new` and
+/// `reqwest::get` elsewhere. `Default` on `Client` or `ClientBuilder` cannot
+/// be banned by path, so it is not covered and must not be used.
 ///
 /// # Errors
 ///
