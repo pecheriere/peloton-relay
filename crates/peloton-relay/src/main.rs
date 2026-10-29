@@ -68,8 +68,17 @@ async fn serve() -> Result<(), String> {
     let http = http_client().map_err(|err| format!("cannot build the HTTP client: {err}"))?;
     let auth_base = Url::parse(&format!("https://{AUTH_DOMAIN}")).map_err(|err| err.to_string())?;
     let api_base = Url::parse(API_BASE).map_err(|err| err.to_string())?;
+    // The first configured account, until the server serves them all.
+    let account = config
+        .accounts
+        .names()
+        .first()
+        .cloned()
+        .ok_or("PELOTON_RELAY_ACCOUNTS names no account")?;
+    let store = config.accounts.state_file(&account);
     let tokens = Arc::new(TokenManager::new(
-        config.state_file(),
+        account,
+        store,
         AuthClient::new(http.clone(), auth_base),
         DEFAULT_REFRESH_MARGIN,
     ));

@@ -7,6 +7,7 @@ use std::time::Duration as StdDuration;
 
 use peloton::ids::PelotonId;
 use peloton::oauth::TokenSet;
+use peloton_relay::account::{AccountName, Accounts};
 use peloton_relay::store::{State, StateFile};
 use secrecy::SecretString;
 use time::{Duration, OffsetDateTime};
@@ -15,6 +16,9 @@ use tracing_subscriber::fmt::MakeWriter;
 
 /// The credential owner: the member the scrubbed fixtures belong to.
 pub const USER: &str = "000000000000000000000000000000f2";
+
+/// The account the tests' token managers serve.
+pub const ACCOUNT: &str = "alice";
 
 /// How long a test waits for the state file lock.
 pub const LOCK_WAIT: StdDuration = StdDuration::from_secs(5);
@@ -34,10 +38,31 @@ pub fn state(access: &str, refresh: &str, expires_in: Duration) -> State {
     }
 }
 
+pub fn account(name: &str) -> AccountName {
+    name.parse().unwrap()
+}
+
+/// The state file in `dir`, with the account bound to [`user`] when `dir`
+/// exists and has no binding yet, so the state the tests write is used.
 pub fn state_file(dir: &Path) -> StateFile {
-    StateFile {
+    let file = StateFile {
         path: dir.join("state.json"),
+    };
+    if dir.is_dir() && !file.binding_path().exists() {
+        file.lock(LOCK_WAIT).unwrap().bind(&user()).unwrap();
     }
+    file
+}
+
+/// The state file of account `name` under `root`: creates its directory
+/// (0700) and binds the account to `user`.
+pub fn account_state_file(root: &Path, name: &str, user: &PelotonId) -> StateFile {
+    let name = account(name);
+    let accounts = Accounts::new(root.to_path_buf(), vec![name.clone()]).unwrap();
+    accounts.ensure_dir(&name).unwrap();
+    let file = accounts.state_file(&name);
+    file.lock(LOCK_WAIT).unwrap().bind(user).unwrap();
+    file
 }
 
 /// The HTTP client the relay uses in production: no redirects, bounded

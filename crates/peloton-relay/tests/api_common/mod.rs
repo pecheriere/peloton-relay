@@ -16,7 +16,7 @@ use time::{Duration, OffsetDateTime};
 use tower::ServiceExt as _;
 use url::Url;
 
-use crate::common::{LOCK_WAIT, http, state, state_file};
+use crate::common::{ACCOUNT, LOCK_WAIT, account, http, state, state_file};
 
 /// The access token the relay under test holds.
 pub const ACCESS: &str = "access-secret-1";
@@ -48,6 +48,7 @@ pub fn relay(
     }
     let auth = peloton::oauth::AuthClient::new(http(), Url::parse(&server.uri()).unwrap());
     let tokens = Arc::new(TokenManager::new(
+        account(ACCOUNT),
         state_file(dir.path()),
         auth,
         StdDuration::from_secs(3600),

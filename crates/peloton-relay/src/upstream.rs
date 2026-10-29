@@ -35,6 +35,7 @@ use time::format_description::well_known::Rfc3339;
 use tokio::sync::Semaphore;
 use url::Url;
 
+use crate::account::AccountName;
 use crate::tokens::TokenManager;
 
 /// Default bound on concurrent upstream requests.
@@ -194,6 +195,12 @@ impl Peloton {
             tokens,
             permits: Semaphore::new(max_in_flight.max(1)),
         }
+    }
+
+    /// The account whose credential every call uses.
+    #[must_use]
+    pub fn account(&self) -> &AccountName {
+        self.tokens.account()
     }
 
     /// Sends GraphQL operations to `url` instead of [`GRAPHQL_URL`]; any query
@@ -670,7 +677,10 @@ impl Peloton {
         }
         let body: T = interpret(response).await?;
         if rejected(&body) {
-            tracing::info!("upstream refused the token in its answer");
+            tracing::info!(
+                account = %self.account(),
+                "upstream refused the token in its answer"
+            );
             return Ok((token, owner, None));
         }
         Ok((token, owner, Some(body)))

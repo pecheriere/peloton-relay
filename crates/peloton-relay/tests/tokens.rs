@@ -8,9 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration as StdDuration, Instant};
 
+use peloton::ids::PelotonId;
 use peloton::oauth::AuthClient;
 use peloton_relay::seed::run_seed;
-use peloton_relay::store::StoreError;
+use peloton_relay::store::{State, StateFile, StoreError};
 use peloton_relay::tokens::{
     DEFAULT_STATE_LOCK_WAIT, MonotonicClock, NotAuthenticated, REACTIVE_REFRESH_COOLDOWN,
     TokenManager,
@@ -25,13 +26,15 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 mod common;
 
-use common::{LOCK_WAIT, captured_logs, state, state_file, user};
+use common::{
+    ACCOUNT, LOCK_WAIT, USER, account, account_state_file, captured_logs, state, state_file, user,
+};
 
 const MARGIN: StdDuration = StdDuration::from_secs(3600);
 
 fn manager(dir: &Path, server: &MockServer) -> TokenManager {
     let auth = AuthClient::new(common::http(), Url::parse(&server.uri()).unwrap());
-    TokenManager::new(state_file(dir), auth, MARGIN)
+    TokenManager::new(account(ACCOUNT), state_file(dir), auth, MARGIN)
 }
 
 fn refresh_mock(refresh_token: &str) -> wiremock::MockBuilder {
@@ -76,7 +79,7 @@ fn save_is_atomic_and_0600() {
         .map(|e| e.unwrap().file_name())
         .collect();
     entries.sort();
-    assert_eq!(entries, [".state.json.lock", "state.json"]);
+    assert_eq!(entries, [".state.json.lock", "binding.json", "state.json"]);
     let lock = fs::metadata(dir.path().join(".state.json.lock")).unwrap();
     assert_eq!(lock.permissions().mode() & 0o777, 0o600);
 
@@ -827,7 +830,14 @@ fn manager_waiting(
     lock_wait: StdDuration,
 ) -> TokenManager {
     let auth = AuthClient::new(common::http(), auth_base);
-    TokenManager::with_timing(state_file(dir), auth, MARGIN, clock.clock(), lock_wait)
+    TokenManager::with_timing(
+        account(ACCOUNT),
+        state_file(dir),
+        auth,
+        MARGIN,
+        clock.clock(),
+        lock_wait,
+    )
 }
 
 /// Moves `clock` forward by `by` once `after` has passed, from another thread.
@@ -1638,4 +1648,343 @@ async fn new_seed_after_a_failed_streak_claims_no_recovery() {
         0,
         "{output}"
     );
+}
+
+/// Another Peloton user than [`user`].
+const OTHER_USER: &str = "0000000000000000000000000000b0b2";
+
+fn other_user() -> PelotonId {
+    OTHER_USER.parse().unwrap()
+}
+
+/// [`state`] of `owner` instead of [`user`].
+fn state_of(owner: &PelotonId, access: &str, refresh: &str, expires_in: Duration) -> State {
+    State {
+        user_id: owner.clone(),
+        ..state(access, refresh, expires_in)
+    }
+}
+
+/// A state file of [`user`] in `dir` with no binding (unlike [`state_file`]).
+fn unbound_state_file(dir: &Path) -> StateFile {
+    let file = StateFile {
+        path: dir.join("state.json"),
+    };
+    file.save(
+        &state("old-access", "old-refresh", Duration::hours(48)),
+        LOCK_WAIT,
+    )
+    .unwrap();
+    file
+}
+
+/// Calls `bearer()` three times within the case span `case`, expecting
+/// `NotAuthenticated` each time and no token endpoint call, and checks that
+/// exactly one `state_refused` with `reason` was logged for account alice.
+async fn assert_refused(dir: &Path, case: &'static str, reason: &str) {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(rotated_tokens())
+        .expect(0)
+        .mount(&server)
+        .await;
+    // Not `manager`: its `state_file` would bind the account.
+    let tokens = TokenManager::new(
+        account(ACCOUNT),
+        StateFile {
+            path: dir.join("state.json"),
+        },
+        AuthClient::new(common::http(), server_url(&server)),
+        MARGIN,
+    );
+    async {
+        for _ in 0..3 {
+            assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+            assert!(!tokens.is_ready());
+        }
+    }
+    .instrument(tracing::info_span!("case", name = case))
+    .await;
+
+    let output = logs.contents();
+    let refused: Vec<serde_json::Value> = output
+        .lines()
+        .filter(|line| line.contains(case) && line.contains("state_refused"))
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(refused.len(), 1, "{output}");
+    assert_eq!(refused[0]["event"], "state_refused");
+    assert_eq!(refused[0]["level"], "ERROR");
+    assert_eq!(refused[0]["account"], ACCOUNT);
+    assert_eq!(refused[0]["reason"], reason);
+    for secret in ["old-access", "old-refresh", USER, OTHER_USER] {
+        assert!(!output.contains(secret), "log leaks {secret}: {output}");
+    }
+}
+
+#[tokio::test]
+async fn unbound_state_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    unbound_state_file(dir.path());
+    assert_refused(dir.path(), "refused_unbound", "unbound").await;
+}
+
+#[tokio::test]
+async fn mismatched_state_is_not_loaded() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = unbound_state_file(dir.path());
+    file.lock(LOCK_WAIT).unwrap().bind(&other_user()).unwrap();
+    assert_refused(dir.path(), "refused_mismatch", "user_mismatch").await;
+}
+
+#[tokio::test]
+async fn corrupt_binding_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = unbound_state_file(dir.path());
+    fs::write(file.binding_path(), "{").unwrap();
+    assert_refused(dir.path(), "refused_corrupt", "binding_corrupt").await;
+}
+
+#[tokio::test]
+async fn ready_manager_drops_a_replaced_mismatched_state() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(
+        &state("old-access", "old-refresh", Duration::hours(48)),
+        LOCK_WAIT,
+    )
+    .unwrap();
+    let tokens = manager(dir.path(), &server);
+
+    async {
+        tokens.bearer().await.unwrap();
+        assert!(tokens.is_ready());
+        let lock = file.lock(LOCK_WAIT).unwrap();
+        lock.bind(&other_user()).unwrap();
+        lock.save(&state("new-access", "new-refresh", Duration::hours(48)))
+            .unwrap();
+        drop(lock);
+        // Fail closed: neither the new state nor the old credential is used.
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+        assert!(!tokens.is_ready());
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+    }
+    .instrument(tracing::info_span!("case", name = "ready_mismatch"))
+    .await;
+    assert_eq!(refresh_calls(&server).await, 0);
+
+    let output = logs.contents();
+    assert_eq!(
+        logged(&output, "ready_mismatch", "\"reason\":\"user_mismatch\""),
+        1,
+        "{output}"
+    );
+    assert_eq!(
+        logged(&output, "ready_mismatch", "state_refused"),
+        1,
+        "{output}"
+    );
+}
+
+#[tokio::test]
+async fn rebound_state_is_adopted_and_audited() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(
+        &state("old-access", "old-refresh", Duration::hours(48)),
+        LOCK_WAIT,
+    )
+    .unwrap();
+    let tokens = manager(dir.path(), &server);
+
+    async {
+        tokens.bearer().await.unwrap();
+        let lock = file.lock(LOCK_WAIT).unwrap();
+        lock.bind(&other_user()).unwrap();
+        lock.save(&state_of(
+            &other_user(),
+            "other-access",
+            "other-refresh",
+            Duration::hours(48),
+        ))
+        .unwrap();
+        drop(lock);
+        let (access, owner) = tokens.bearer().await.unwrap();
+        assert_eq!(access.expose_secret(), "other-access");
+        assert_eq!(owner, other_user());
+    }
+    .instrument(tracing::info_span!("case", name = "rebound"))
+    .await;
+    assert_eq!(refresh_calls(&server).await, 0);
+
+    let output = logs.contents();
+    let events: Vec<serde_json::Value> = output
+        .lines()
+        .filter(|line| line.contains("\"rebound\""))
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let names: Vec<&str> = events
+        .iter()
+        .map(|event| event["event"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["state_loaded", "account_rebound", "state_reloaded"],
+        "{output}"
+    );
+    assert_eq!(events[0]["user"], "\u{2026}00f2");
+    assert_eq!(events[1]["level"], "WARN");
+    assert_eq!(events[1]["account"], ACCOUNT);
+    assert_eq!(events[1]["previous_user"], "\u{2026}00f2");
+    assert_eq!(events[1]["user"], "\u{2026}b0b2");
+    assert_eq!(events[2]["account"], ACCOUNT);
+    assert_eq!(events[2]["user"], "\u{2026}b0b2");
+    for secret in [USER, OTHER_USER] {
+        assert!(!output.contains(secret), "log leaks {secret}: {output}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refusal_seen_mid_seed_is_rechecked_under_the_lock() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = state_file(dir.path());
+    file.save(
+        &state("old-access", "old-refresh", Duration::hours(48)),
+        LOCK_WAIT,
+    )
+    .unwrap();
+    let tokens = Arc::new(manager(dir.path(), &server));
+
+    async {
+        // A seed for another user, between its binding and its state write.
+        let seeding = file.lock(LOCK_WAIT).unwrap();
+        seeding.bind(&other_user()).unwrap();
+        let reading = tokio::spawn(
+            {
+                let tokens = Arc::clone(&tokens);
+                async move { tokens.bearer().await }
+            }
+            .in_current_span(),
+        );
+        tokio::time::sleep(StdDuration::from_millis(300)).await;
+        assert!(
+            !reading.is_finished(),
+            "the refusal was not rechecked under the lock"
+        );
+        seeding
+            .save(&state_of(
+                &other_user(),
+                "other-access",
+                "other-refresh",
+                Duration::hours(48),
+            ))
+            .unwrap();
+        drop(seeding);
+
+        let (access, owner) = reading.await.unwrap().unwrap();
+        assert_eq!(access.expose_secret(), "other-access");
+        assert_eq!(owner, other_user());
+    }
+    .instrument(tracing::info_span!("case", name = "mid_seed"))
+    .await;
+
+    let output = logs.contents();
+    assert_eq!(logged(&output, "mid_seed", "state_refused"), 0, "{output}");
+    assert_eq!(logged(&output, "mid_seed", "state_loaded"), 1, "{output}");
+}
+
+#[tokio::test]
+async fn credential_events_carry_the_account() {
+    const EVENTS: [&str; 6] = [
+        "state_missing",
+        "state_loaded",
+        "peloton_refresh_retry",
+        "peloton_token_refreshed",
+        "peloton_auth_failed",
+        "state_save_failed",
+    ];
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    refresh_mock("first-refresh")
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    refresh_mock("first-refresh")
+        .respond_with(rotated_tokens())
+        .mount(&server)
+        .await;
+    refresh_mock("rotated-refresh")
+        .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+            "error": "invalid_grant",
+        })))
+        .mount(&server)
+        .await;
+    refresh_mock("seeded-refresh")
+        .respond_with(third_tokens())
+        .mount(&server)
+        .await;
+    let root = tempfile::tempdir().unwrap();
+    let file = account_state_file(root.path(), "bob", &user());
+    let dir = file.path.parent().unwrap().to_path_buf();
+    let clock = TestClock::new();
+    let tokens = TokenManager::with_timing(
+        account("bob"),
+        file.clone(),
+        AuthClient::new(common::http(), server_url(&server)),
+        MARGIN,
+        clock.clock(),
+        LOCK_WAIT,
+    );
+    assert_eq!(tokens.account().as_str(), "bob");
+
+    async {
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+        file.save(
+            &state("first-access", "first-refresh", Duration::minutes(30)),
+            LOCK_WAIT,
+        )
+        .unwrap();
+        // Loaded and due: the first refresh fails transiently.
+        let (access, _) = tokens.bearer().await.unwrap();
+        assert_eq!(access.expose_secret(), "first-access");
+        clock.advance(StdDuration::from_secs(3600));
+        let (access, _) = tokens.bearer().await.unwrap();
+        assert_eq!(access.expose_secret(), "new-access");
+        // A forced refresh finds the rotated refresh token rejected.
+        assert!(!tokens.unauthorized(&access).await);
+        // A new seed is due at once, but its rotated tokens cannot be saved.
+        file.save(
+            &state("seeded-access", "seeded-refresh", Duration::minutes(30)),
+            LOCK_WAIT,
+        )
+        .unwrap();
+        make_read_only(&dir);
+        let withheld = tokens.bearer().await;
+        make_writable(&dir);
+        assert!(matches!(withheld, Err(NotAuthenticated)));
+    }
+    .instrument(tracing::info_span!("case", name = "bob_events"))
+    .await;
+
+    let output = logs.contents();
+    for event in EVENTS {
+        let lines: Vec<serde_json::Value> = output
+            .lines()
+            .filter(|line| line.contains("bob_events"))
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .filter(|json| json["event"] == event)
+            .collect();
+        assert!(!lines.is_empty(), "no {event}: {output}");
+        for json in lines {
+            assert_eq!(json["account"], "bob", "{json}");
+        }
+    }
 }

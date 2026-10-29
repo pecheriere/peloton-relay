@@ -86,12 +86,51 @@ impl FileId {
     }
 }
 
-/// One read of the state file.
+/// One read of the state file, checked against the binding.
 #[derive(Debug)]
 pub(crate) enum Snapshot {
     Missing,
     Corrupt(FileId),
+    /// A well-formed state the binding does not allow.
+    Refused(Refusal),
+    /// A well-formed state of the bound user.
     Valid(State, FileId),
+}
+
+/// Why a well-formed state is not used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Refusal {
+    /// The account has no binding yet.
+    Unbound,
+    /// The state belongs to another Peloton user than the bound one.
+    UserMismatch,
+    /// The binding file does not parse.
+    BindingCorrupt,
+}
+
+impl Refusal {
+    /// The `reason` logged for this refusal.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Unbound => "unbound",
+            Self::UserMismatch => "user_mismatch",
+            Self::BindingCorrupt => "binding_corrupt",
+        }
+    }
+}
+
+/// One read of the state file alone.
+enum StateRead {
+    Missing,
+    Corrupt(FileId),
+    Valid(State, FileId),
+}
+
+/// One read of the binding file.
+enum BindingRead {
+    Missing,
+    Corrupt,
+    Bound(Binding),
 }
 
 /// The JSON file holding the [`State`].
@@ -108,22 +147,46 @@ impl StateFile {
     ///
     /// [`StoreError::Corrupt`] when the file is empty or does not parse,
     /// [`StoreError::Io`] when it cannot be read. A missing file is `Ok(None)`.
+    ///
+    /// Does not check the binding (see [`Self::read_binding`]).
     pub fn load(&self) -> Result<Option<State>, StoreError> {
-        match self.snapshot().map_err(StoreError::Io)? {
-            Snapshot::Missing => Ok(None),
-            Snapshot::Corrupt(_) => Err(StoreError::Corrupt),
-            Snapshot::Valid(state, _) => Ok(Some(state)),
+        match self.read_state().map_err(StoreError::Io)? {
+            StateRead::Missing => Ok(None),
+            StateRead::Corrupt(_) => Err(StoreError::Corrupt),
+            StateRead::Valid(state, _) => Ok(Some(state)),
         }
     }
 
-    /// Reads the state together with the identity of the version read.
+    /// Reads the state together with the identity of the version read, and
+    /// the binding: a well-formed state counts only when the account is bound
+    /// to its user.
     ///
-    /// Takes no lock: the file is only ever replaced by a rename, so a read
-    /// sees one whole version. A corrupt file is a [`Snapshot`], not an error.
+    /// Takes no lock: each file is only ever replaced by a rename, so a read
+    /// sees one whole version of it. A writer replaces the two files one after
+    /// the other under the state lock, so a [`Snapshot::Refused`] read here
+    /// may fall between its writes; [`StateLock::snapshot`] cannot. Corrupt
+    /// files are a [`Snapshot`], not an error.
     pub(crate) fn snapshot(&self) -> io::Result<Snapshot> {
+        let (state, id) = match self.read_state()? {
+            StateRead::Missing => return Ok(Snapshot::Missing),
+            StateRead::Corrupt(id) => return Ok(Snapshot::Corrupt(id)),
+            StateRead::Valid(state, id) => (state, id),
+        };
+        Ok(match self.binding_read()? {
+            BindingRead::Missing => Snapshot::Refused(Refusal::Unbound),
+            BindingRead::Corrupt => Snapshot::Refused(Refusal::BindingCorrupt),
+            BindingRead::Bound(binding) if binding.user_id == state.user_id => {
+                Snapshot::Valid(state, id)
+            }
+            BindingRead::Bound(_) => Snapshot::Refused(Refusal::UserMismatch),
+        })
+    }
+
+    /// Reads the state file alone.
+    fn read_state(&self) -> io::Result<StateRead> {
         let mut file = match File::open(&self.path) {
             Ok(file) => file,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Snapshot::Missing),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(StateRead::Missing),
             Err(err) => return Err(err),
         };
         let id = FileId::of(&file.metadata()?);
@@ -131,8 +194,8 @@ impl StateFile {
         file.read_to_end(&mut bytes)?;
         // The parse error is dropped on purpose: its message can quote file content.
         Ok(match serde_json::from_slice(&bytes) {
-            Ok(state) => Snapshot::Valid(state, id),
-            Err(_) => Snapshot::Corrupt(id),
+            Ok(state) => StateRead::Valid(state, id),
+            Err(_) => StateRead::Corrupt(id),
         })
     }
 
@@ -202,15 +265,25 @@ impl StateFile {
     /// keys, [`StoreError::Io`] when it cannot be read. A missing file is
     /// `Ok(None)`.
     pub fn read_binding(&self) -> Result<Option<Binding>, StoreError> {
+        match self.binding_read().map_err(StoreError::Io)? {
+            BindingRead::Missing => Ok(None),
+            BindingRead::Corrupt => Err(StoreError::Corrupt),
+            BindingRead::Bound(binding) => Ok(Some(binding)),
+        }
+    }
+
+    /// Reads the binding file.
+    fn binding_read(&self) -> io::Result<BindingRead> {
         let bytes = match fs::read(self.binding_path()) {
             Ok(bytes) => bytes,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => return Err(StoreError::Io(err)),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(BindingRead::Missing),
+            Err(err) => return Err(err),
         };
         // The parse error is dropped on purpose: its message can quote file content.
-        serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|_| StoreError::Corrupt)
+        Ok(match serde_json::from_slice(&bytes) {
+            Ok(binding) => BindingRead::Bound(binding),
+            Err(_) => BindingRead::Corrupt,
+        })
     }
 
     fn dir(&self) -> Result<&Path, StoreError> {
@@ -282,6 +355,12 @@ impl StateLock {
         })
         .map_err(|err| StoreError::Io(err.into()))?;
         write_atomic(&self.store.binding_path(), &json).map(|_| ())
+    }
+
+    /// [`StateFile::snapshot`], read under the lock: consistent with writers,
+    /// which replace the binding and the state while holding it.
+    pub(crate) fn snapshot(&self) -> io::Result<Snapshot> {
+        self.store.snapshot()
     }
 
     /// [`Self::save`], returning the identity of the version written.
@@ -475,7 +554,133 @@ mod tests {
 
     use std::ffi::OsStr;
 
-    use super::{is_temp_name, lock_name, temp_name, write_synced};
+    use std::time::Duration;
+
+    use peloton::ids::PelotonId;
+    use peloton::oauth::TokenSet;
+    use secrecy::SecretString;
+    use time::OffsetDateTime;
+
+    use super::{
+        Refusal, Snapshot, State, StateFile, is_temp_name, lock_name, temp_name, write_synced,
+    };
+
+    const WAIT: Duration = Duration::from_secs(5);
+
+    fn user(last: &str) -> PelotonId {
+        format!("0123456789abcdef0123456789ab{last}")
+            .parse()
+            .unwrap()
+    }
+
+    fn state_for(user: &PelotonId) -> State {
+        State {
+            tokens: TokenSet {
+                access_token: SecretString::from("access"),
+                refresh_token: SecretString::from("refresh"),
+                expires_at: OffsetDateTime::now_utc() + time::Duration::hours(48),
+            },
+            user_id: user.clone(),
+        }
+    }
+
+    /// A state file for `user` in a fresh directory, not bound yet.
+    fn unbound(user: &PelotonId) -> (tempfile::TempDir, StateFile) {
+        let dir = tempfile::tempdir().unwrap();
+        let file = StateFile {
+            path: dir.path().join("state.json"),
+        };
+        file.save(&state_for(user), WAIT).unwrap();
+        (dir, file)
+    }
+
+    fn refusal(snapshot: &Snapshot) -> Option<Refusal> {
+        match snapshot {
+            Snapshot::Refused(refusal) => Some(*refusal),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn bound_state_is_valid() {
+        let alice = user("00a1");
+        let (_dir, file) = unbound(&alice);
+        file.lock(WAIT).unwrap().bind(&alice).unwrap();
+
+        for snapshot in [
+            file.snapshot().unwrap(),
+            file.lock(WAIT).unwrap().snapshot().unwrap(),
+        ] {
+            let Snapshot::Valid(state, _) = snapshot else {
+                panic!("not valid: {snapshot:?}");
+            };
+            assert_eq!(state.user_id, alice);
+        }
+    }
+
+    /// The three ways a binding refuses a well-formed state, each checked
+    /// with `read`.
+    fn check_refusals(read: impl Fn(&StateFile) -> Snapshot) {
+        let alice = user("00a1");
+        let other = user("00b2");
+
+        let (_dir, file) = unbound(&alice);
+        assert_eq!(refusal(&read(&file)), Some(Refusal::Unbound));
+
+        file.lock(WAIT).unwrap().bind(&other).unwrap();
+        assert_eq!(refusal(&read(&file)), Some(Refusal::UserMismatch));
+
+        for corrupt in [
+            "",
+            "{",
+            "{}",
+            r#"{"user_id":"0123"}"#,
+            r#"{"user_id":"0123456789abcdef0123456789ab00a1","x":1}"#,
+        ] {
+            fs::write(file.binding_path(), corrupt).unwrap();
+            assert_eq!(
+                refusal(&read(&file)),
+                Some(Refusal::BindingCorrupt),
+                "{corrupt}"
+            );
+        }
+
+        // The binding is only consulted for a well-formed state.
+        fs::write(&file.path, "{").unwrap();
+        assert!(matches!(read(&file), Snapshot::Corrupt(_)));
+        fs::remove_file(&file.path).unwrap();
+        assert!(matches!(read(&file), Snapshot::Missing));
+    }
+
+    #[test]
+    fn snapshot_refuses_unbound_mismatched_and_corrupt_bindings() {
+        check_refusals(|file| file.snapshot().unwrap());
+        assert_eq!(Refusal::Unbound.as_str(), "unbound");
+        assert_eq!(Refusal::UserMismatch.as_str(), "user_mismatch");
+        assert_eq!(Refusal::BindingCorrupt.as_str(), "binding_corrupt");
+    }
+
+    #[test]
+    fn locked_snapshot_matches_unlocked() {
+        check_refusals(|file| file.lock(WAIT).unwrap().snapshot().unwrap());
+    }
+
+    #[test]
+    fn unreadable_binding_is_an_io_error() {
+        let alice = user("00a1");
+        let (_dir, file) = unbound(&alice);
+        // A directory in place of the binding file cannot be read.
+        fs::create_dir(file.binding_path()).unwrap();
+        assert!(file.snapshot().is_err());
+        assert!(file.lock(WAIT).unwrap().snapshot().is_err());
+    }
+
+    #[test]
+    fn load_ignores_the_binding() {
+        let alice = user("00a1");
+        let (_dir, file) = unbound(&alice);
+        assert_eq!(file.load().unwrap().unwrap().user_id, alice);
+    }
 
     #[test]
     fn temp_names_match_only_their_own_pattern() {

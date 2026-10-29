@@ -17,11 +17,15 @@ use url::Url;
 use wiremock::matchers::{header, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+#[allow(
+    dead_code,
+    reason = "shared by several test crates, each using a subset of the helpers"
+)]
 mod common;
 mod gated;
 mod raw_http;
 
-use common::{LOCK_WAIT, captured_logs, http, state, state_file};
+use common::{ACCOUNT, LOCK_WAIT, account, captured_logs, http, state, state_file};
 use gated::GatedServer;
 
 const WORKOUT: &str = "fedcba9876543210fedcba9876543210";
@@ -59,7 +63,12 @@ fn client_at(dir: &tempfile::TempDir, uri: &str, access: Option<&str>) -> Peloto
             .unwrap();
     }
     let auth = peloton::oauth::AuthClient::new(http(), Url::parse(uri).unwrap());
-    let tokens = TokenManager::new(state_file(dir.path()), auth, StdDuration::from_secs(3600));
+    let tokens = TokenManager::new(
+        account(ACCOUNT),
+        state_file(dir.path()),
+        auth,
+        StdDuration::from_secs(3600),
+    );
     let api = Url::parse(&format!("{uri}/api")).unwrap();
     Peloton::new(http(), api, Arc::new(tokens), 4)
 }
