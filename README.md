@@ -512,15 +512,23 @@ below. A release tag (`v1.2.3`) publishes the image only after those checks and
 the dependency age check pass on the tagged commit, and only if that commit is
 on `main`. No test or CI job talks to Peloton.
 
+Every pull request is also checked by [zizmor](https://docs.zizmor.sh), which
+audits the workflows themselves (pinned actions, token permissions, template
+injection, cache poisoning), and by CodeQL. `cargo deny check advisories` runs
+every night on `main`, so a newly published advisory shows up there before it
+fails an unrelated pull request, and OpenSSF Scorecard reports weekly. Dependabot
+proposes updates once they are 7 days old. Report a vulnerability privately as
+described in [SECURITY.md](SECURITY.md).
+
 ### Dependency age
 
 Every crate version in `Cargo.lock` must have been published on crates.io at
-least 14 days before it is added, so a compromised or broken release has time to
+least 7 days before it is added, so a compromised or broken release has time to
 be noticed and yanked. On each pull request,
 [`.github/scripts/crate_age.py`](.github/scripts/crate_age.py) compares
 `Cargo.lock` with the base branch's, looks up the publish date of every registry
 crate version that is new or changed, and fails the build for one younger than
-14 days. Unchanged versions are never looked up, so a pull request that leaves
+7 days. Unchanged versions are never looked up, so a pull request that leaves
 `Cargo.lock` alone makes no request to crates.io; a lookup that fails fails the
 check rather than skipping the crate. The release workflow runs the same check
 against the previous release tag (or against nothing for the first release), so
@@ -528,7 +536,7 @@ a tag never ships a version that skipped it, even one pushed straight to `main`.
 
 The one exception is the oldest release that fixes a security advisory. List it
 in [`.github/crate-age-allow.toml`](.github/crate-age-allow.toml), one entry per
-crate version, with a reason that names the RUSTSEC advisory:
+crate version, with a reason that names the advisory (RUSTSEC or GHSA):
 
 ```toml
 [[allow]]
