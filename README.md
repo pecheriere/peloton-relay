@@ -506,9 +506,41 @@ docker build -t peloton-relay .             # the image
 ```
 
 CI runs `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`,
-`cargo deny check` and an arm64 and amd64 image build. A release tag (`v1.2.3`)
-publishes the image only after those checks pass on the tagged commit, and only
-if that commit is on `main`. No test or CI job talks to Peloton.
+`cargo deny check` and an arm64 and amd64 image build, and on pull requests the
+dependency age check below. A release tag (`v1.2.3`) publishes the image only
+after those checks pass on the tagged commit, and only if that commit is on
+`main`. No test or CI job talks to Peloton.
+
+### Dependency age
+
+Every crate version in `Cargo.lock` must have been published on crates.io at
+least 14 days before it is added, so a compromised or broken release has time to
+be noticed and yanked. On each pull request,
+[`.github/scripts/crate_age.py`](.github/scripts/crate_age.py) compares
+`Cargo.lock` with the base branch's, looks up the publish date of every registry
+crate version that is new or changed, and fails the build for one younger than
+14 days. Unchanged versions are never looked up, so a pull request that leaves
+`Cargo.lock` alone makes no request to crates.io; a lookup that fails fails the
+check rather than skipping the crate.
+
+The one exception is the oldest release that fixes a security advisory. List it
+in [`.github/crate-age-allow.toml`](.github/crate-age-allow.toml), one entry per
+crate version, with the reason:
+
+```toml
+[[allow]]
+name = "webpki-root-certs"
+version = "1.0.10"
+reason = "Oldest release without RUSTSEC-2026-0383"
+```
+
+An entry covers that exact version only. Once its version leaves `Cargo.lock`
+the entry is stale and fails the check, so it is removed with the update that
+replaces the crate. To run the check locally against `main`:
+
+```sh
+python3 -I .github/scripts/crate_age.py --base main
+```
 
 ## Caveat
 

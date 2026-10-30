@@ -35,6 +35,29 @@ jobs:
           arguments: --target aarch64-apple-darwin
           command: check
 
+  crate-age:
+    # Compares Cargo.lock with the PR's base, so it only runs on pull requests:
+    # main and release tags only ever receive lockfiles a PR already checked.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Lint and test the CI scripts
+        run: |
+          python3 -m venv "$RUNNER_TEMP/lint"
+          "$RUNNER_TEMP/lint/bin/pip" install --quiet --require-hashes --only-binary :all: \
+            -r .github/requirements-lint.txt
+          "$RUNNER_TEMP/lint/bin/ruff" check .github/scripts
+          "$RUNNER_TEMP/lint/bin/ruff" format --check .github/scripts
+          python3 -I -m unittest discover -s .github/scripts -p 'test_*.py'
+      - name: Refuse crate versions published less than 14 days ago
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 -I .github/scripts/crate_age.py --base "$BASE_SHA"
+
   login-macos:
     runs-on: macos-latest
     steps:
