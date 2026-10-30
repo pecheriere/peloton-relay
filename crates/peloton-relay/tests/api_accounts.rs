@@ -249,7 +249,7 @@ async fn probes_and_openapi_need_no_account() {
     mount_no_upstream(&server).await;
     let dir = tempfile::tempdir().unwrap();
     let unseeded = relay_with(&dir, &server, NOW, &[("alice", None, &user_a())]);
-    for app in [unseeded, router_of(Vec::new(), NOW)] {
+    for app in [unseeded, router_of(dir.path(), Vec::new(), NOW)] {
         for uri in ["/healthz", "/readyz", "/openapi.json"] {
             let (status, _, body) = send(&app, request_as(None, "GET", uri, None)).await;
             assert_eq!(status, StatusCode::OK, "{uri}: {body}");
@@ -336,7 +336,7 @@ async fn one_accounts_dead_refresh_leaves_the_other_working() {
         &user_b(),
         4,
     );
-    let app = router_of(vec![alice, bob], NOW);
+    let app = router_of(dir.path(), vec![alice, bob], NOW);
 
     for _ in 0..2 {
         let (status, _, body) = send(&app, request_as(Some("alice"), "GET", "/v1/me", None)).await;
@@ -541,7 +541,7 @@ async fn slow_upstream_of_one_account_does_not_block_another() {
             1,
         ),
     ];
-    let app = router_of(contexts, NOW);
+    let app = router_of(dir.path(), contexts, NOW);
 
     let alice: Vec<_> = (0..2)
         .map(|_| spawn_send(&app, request_as(Some("alice"), "GET", "/v1/me", None)))

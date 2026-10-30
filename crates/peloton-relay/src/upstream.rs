@@ -203,6 +203,24 @@ impl Peloton {
         self.tokens.account()
     }
 
+    /// The manager of the account's credential.
+    #[must_use]
+    pub fn tokens(&self) -> &Arc<TokenManager> {
+        &self.tokens
+    }
+
+    /// The HTTP client every call uses.
+    #[must_use]
+    pub fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
+
+    /// The base URL of the REST API.
+    #[must_use]
+    pub fn api_base(&self) -> &Url {
+        &self.api_base
+    }
+
     /// Sends GraphQL operations to `url` instead of [`GRAPHQL_URL`]; any query
     /// string `url` carries is replaced by the operation's.
     #[must_use]

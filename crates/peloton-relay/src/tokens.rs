@@ -97,7 +97,7 @@ impl MonotonicClock {
         Self(Arc::new(now))
     }
 
-    fn now(&self) -> Instant {
+    pub(crate) fn now(&self) -> Instant {
         (self.0)()
     }
 }
@@ -743,6 +743,21 @@ impl TokenManager {
     #[must_use]
     pub fn is_ready(&self) -> bool {
         self.shared.ready.load(Ordering::Acquire)
+    }
+
+    /// The Peloton user the account is bound to, read from its binding file.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Corrupt`] when the binding does not parse,
+    /// [`StoreError::Io`] when it cannot be read.
+    pub async fn bound_user(&self) -> Result<Option<PelotonId>, StoreError> {
+        let store = self.shared.store.clone();
+        blocking(move || store.read_binding())
+            .await
+            .map_err(StoreError::Io)
+            .and_then(|r| r)
+            .map(|binding| binding.map(|binding| binding.user_id))
     }
 
     /// The credential's health, last refresh, expiry and recent problems, as

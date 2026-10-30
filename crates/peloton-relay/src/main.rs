@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand};
 use peloton::endpoints::API_BASE;
 use peloton::oauth::{AUTH_DOMAIN, AuthClient};
 use peloton_relay::account::{AccountName, Accounts};
+use peloton_relay::admin::AdminState;
 use peloton_relay::api::{AccountContext, AccountRegistry, AppState, Clock, router};
 use peloton_relay::config::{Config, http_client};
 use peloton_relay::seed::{run_bind, run_seed};
@@ -120,6 +121,10 @@ async fn serve() -> Result<(), String> {
     let app = router(AppState {
         accounts: Arc::new(accounts),
         clock: Clock::system(),
+        admin: Arc::new(AdminState::new(
+            config.accounts.root().to_owned(),
+            config.public_url.clone(),
+        )),
     });
 
     let listener = TcpListener::bind(config.listen)
