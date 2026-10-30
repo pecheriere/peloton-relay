@@ -15,7 +15,7 @@ use url::Url;
 
 use crate::account::{AccountName, Accounts, user_suffix};
 use crate::config::ACCOUNTS_VAR;
-use crate::store::{State, StateLock, StoreError};
+use crate::store::{PeerConflict, State, StateLock, StoreError, peer_conflict};
 
 /// Upper bound for the token JSON read from the input.
 const MAX_INPUT_BYTES: u64 = 64 * 1024;
@@ -312,23 +312,20 @@ fn check_others(
     account: &AccountName,
     user: &PelotonId,
 ) -> Result<(), SeedError> {
-    for other in accounts.names().iter().filter(|other| *other != account) {
-        match accounts.state_file(other).read_binding() {
-            Ok(Some(binding)) if binding.user_id == *user => {
-                return Err(SeedError::UserBoundElsewhere {
-                    account: other.clone(),
-                });
-            }
-            Ok(_) => {}
-            Err(source) => {
-                return Err(SeedError::BindingUnreadable {
-                    account: other.clone(),
-                    source,
-                });
-            }
-        }
+    match peer_conflict(&accounts.peers_of(account), user) {
+        None => Ok(()),
+        Some((other, PeerConflict::BoundElsewhere)) => Err(SeedError::UserBoundElsewhere {
+            account: other.clone(),
+        }),
+        Some((other, PeerConflict::Corrupt)) => Err(SeedError::BindingUnreadable {
+            account: other.clone(),
+            source: StoreError::Corrupt,
+        }),
+        Some((other, PeerConflict::Unreadable(err))) => Err(SeedError::BindingUnreadable {
+            account: other.clone(),
+            source: StoreError::Io(err),
+        }),
     }
-    Ok(())
 }
 
 /// The user `account` is bound to, read under its state lock. An unreadable

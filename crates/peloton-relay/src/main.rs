@@ -90,7 +90,9 @@ async fn serve() -> Result<(), String> {
     let mut managers = Vec::new();
     for account in config.accounts.names() {
         if let Err(err) = config.accounts.ensure_dir(account) {
-            // Not fatal: the account stays unauthenticated, the others serve.
+            // Not fatal: the account stays unauthenticated and the others
+            // serve, unless its path makes the binding unreadable: they then
+            // refuse their state too (`peer_binding_unreadable`).
             tracing::error!(
                 event = "account_dir_unusable",
                 account = %account,
@@ -101,6 +103,7 @@ async fn serve() -> Result<(), String> {
         let tokens = Arc::new(TokenManager::new(
             account.clone(),
             config.accounts.state_file(account),
+            config.accounts.peers_of(account),
             AuthClient::new(http.clone(), auth_base.clone()),
             DEFAULT_REFRESH_MARGIN,
         ));

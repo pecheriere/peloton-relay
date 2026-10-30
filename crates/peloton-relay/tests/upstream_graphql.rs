@@ -89,6 +89,7 @@ fn client_at(dir: &tempfile::TempDir, uri: &str, http: reqwest::Client) -> Pelot
     let tokens = TokenManager::new(
         account(ACCOUNT),
         state_file(dir.path()),
+        Vec::new(),
         auth,
         StdDuration::from_secs(3600),
     );

@@ -66,6 +66,7 @@ fn client_at(dir: &tempfile::TempDir, uri: &str, access: Option<&str>) -> Peloto
     let tokens = TokenManager::new(
         account(ACCOUNT),
         state_file(dir.path()),
+        Vec::new(),
         auth,
         StdDuration::from_secs(3600),
     );

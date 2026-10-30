@@ -120,6 +120,16 @@ impl Accounts {
         }
     }
 
+    /// The names and state files of every configured account but `name`.
+    #[must_use]
+    pub fn peers_of(&self, name: &AccountName) -> Vec<(AccountName, StateFile)> {
+        self.names
+            .iter()
+            .filter(|other| *other != name)
+            .map(|other| (other.clone(), self.state_file(other)))
+            .collect()
+    }
+
     /// Takes the cross-account lock `<root>/.bindings.lock`, waiting at most
     /// `wait`. Writers take it after the account's state lock; the server
     /// never takes it.
@@ -238,6 +248,14 @@ mod tests {
         assert_eq!(
             accounts.legacy_state_file().to_str(),
             Some("/state/state.json")
+        );
+        let peers = accounts.peers_of(&name("bob"));
+        assert_eq!(
+            peers
+                .iter()
+                .map(|(peer, file)| (peer.as_str(), file.path.to_str()))
+                .collect::<Vec<_>>(),
+            [("alice", Some("/state/alice/state.json"))]
         );
     }
 
