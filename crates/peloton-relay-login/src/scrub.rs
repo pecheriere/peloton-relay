@@ -19,7 +19,8 @@
 //!     "þ", "œ", "æ" as "th", "oe", "ae"), so "Élodie" also erases "ELODIE"
 //!     and "ｅｌｏｄｉｅ", and "Łukasz" erases "Lukasz";
 //!   - a string of fewer than 3 characters (counted as written, composed,
-//!     so a spacing vowel sign counts) is never erased, unless it is written
+//!     so a spacing vowel sign counts, and without invisible format
+//!     characters) is never erased, unless it is written
 //!     in a script without spaces between words (see below); one that folds
 //!     to 3 characters or fewer only as a whole word or glued to digits
 //!     ("Ben123", "`ben_2024`"; "ben" leaves "benefits" and "Bento" alone,
@@ -48,17 +49,24 @@
 //!     a single character is never erased. Such text has no word boundary to
 //!     look for, and publishing a name costs more than erasing an ordinary
 //!     word that holds it, so a name "ゆら" also erases "ゆらゆら"
-//!     ("swaying"). The unspaced part of a mixed word is noted on its own
-//!     ("梓潮" of "梓潮Rivo"), and so are a first and a last name in such a
-//!     script joined, in either order, as each is often one character;
+//!     ("swaying"). A name that folds to one letter (a Thai or Burmese
+//!     syllable whose vowel is a mark: "ปู" folds to "ป") is matched with its
+//!     marks instead, anywhere, on whole syllables ("ปูดี" is erased, "ป",
+//!     "ปา" and "ปู่" are not): that one letter alone would erase most text of
+//!     its script, and these scripts glue words together, so a name kept to
+//!     whole words would leak. The unspaced part of a mixed word is noted on
+//!     its own ("梓潮" of "梓潮Rivo"), and the words of a name, or a first
+//!     and a last name, in such a script are also noted joined, in either
+//!     order, as each part is often one character ("柏 沅" as "柏沅");
 //!   - an object key is erased only when it is the whole string, as keys are
 //!     schema: `max_value` and `power_zone` stay for names "Max" and "Zone";
 //!     keys of one object that would end up equal ("Max" and "MAX") get
 //!     distinct suffixes ("redacted", "redacted-2"), so no value is lost;
-//!   - a string with percent-encoded UTF-8 or JSON `\uXXXX` escapes (with
-//!     surrogate pairs) is also matched decoded (up to three times over, for
-//!     "%25C3%2589lodie" or "%5Cu3086"), and a match erases the whole encoded
-//!     span ("%C3%89lodie", "elodie%40example.com", "\u3086\u3089");
+//!   - a string with percent-encoded UTF-8 or JSON escapes (`\uXXXX` with
+//!     surrogate pairs, `\\`, `\n`, …) is also matched decoded (up to three
+//!     times over, for "%25C3%2589lodie", "%5Cu3086" or "\\u3086"), keys
+//!     included, and a match erases the whole encoded span ("%C3%89lodie",
+//!     "elodie%40example.com", "\u3086\u3089");
 //!   - invisible format characters (soft hyphens, zero-width joiners and
 //!     spaces, bidi controls) are skipped when matching, but still mark the
 //!     word boundary they did ("Elo\u{ad}die", "elodie\u{200b}martin");
@@ -103,6 +111,7 @@
 //!   library fields (bookmarked, times taken, taken by friends) are reset;
 //! - everything else, notably all measured metric series, is kept as is.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::fs;
@@ -160,6 +169,8 @@ const HANGUL_VOWELS: std::ops::RangeInclusive<char> = '\u{1161}'..='\u{1175}';
 const HANGUL_FINALS: std::ops::RangeInclusive<char> = '\u{11a8}'..='\u{11c2}';
 /// Katakana letters that have a hiragana twin [`KANA_OFFSET`] below them.
 const KATAKANA: std::ops::RangeInclusive<char> = '\u{30a1}'..='\u{30f6}';
+/// Katakana iteration marks ("ヽ", "ヾ"), twins of "ゝ" and "ゞ".
+const KATAKANA_ITERATION: std::ops::RangeInclusive<char> = '\u{30fd}'..='\u{30fe}';
 const KANA_OFFSET: u32 = 0x60;
 /// Length of a JSON `\uXXXX` escape.
 const ESCAPE_LEN: usize = 6;
@@ -587,26 +598,43 @@ impl Scrubber {
             let Value::String(text) = child else { continue };
             if PERSON_WORDS.contains(&key.as_str()) {
                 self.note_sensitive(text);
-                for word in text.split(|c: char| !is_word_char(c)) {
+                let words: Vec<&str> = text
+                    .split(|c: char| !is_word_char(c))
+                    .filter(|word| !word.is_empty())
+                    .collect();
+                for word in &words {
                     self.note_sensitive(word);
                     for run in script_runs(word) {
                         self.note_sensitive(run);
                     }
                 }
+                if key == "name" {
+                    self.note_joined(&words);
+                }
             } else if PERSON_WHOLE.contains(&key.as_str()) {
                 self.note_sensitive(text);
             }
         }
-        // A name in an unspaced script is written without a space between
-        // its parts, which often have one character each (a family name and
-        // a given name), so it is also noted joined, in either order.
         if let (Some(Value::String(first)), Some(Value::String(last))) =
             (map.get("first_name"), map.get("last_name"))
         {
-            for joined in [format!("{last}{first}"), format!("{first}{last}")] {
-                if is_unspaced(&fold_case(&joined)) {
-                    self.note_sensitive(&joined);
-                }
+            self.note_joined(&[last.trim(), first.trim()]);
+        }
+    }
+
+    /// Notes the parts of a name joined, in their order and reversed, when
+    /// they are in an unspaced script: such a name is written without a space
+    /// between its parts, which often have one character each (a family name
+    /// and a given name, "柏" and "沅" written "柏沅").
+    fn note_joined(&mut self, parts: &[&str]) {
+        if parts.len() < 2 {
+            return;
+        }
+        let forward = parts.concat();
+        let backward: String = parts.iter().rev().copied().collect();
+        for joined in [forward, backward] {
+            if is_unspaced(&fold_case(&joined)) {
+                self.note_sensitive(&joined);
             }
         }
     }
@@ -814,10 +842,11 @@ impl Scrubber {
             return replaced;
         }
         let mapped = self.ids_in(key);
-        let decoded = Unescaped::new(&mapped).map(|d| fold_case(&d.text));
-        if self.sensitive.contains(&fold_case(&mapped))
-            || decoded.is_some_and(|d| self.sensitive.contains(&d))
-        {
+        let is_name = |text: &str| {
+            self.sensitive.contains(&fold_case(text))
+                || self.sensitive.contains(&fold_keeping_marks(text).collect())
+        };
+        if is_name(&mapped) || decodings(&mapped).iter().any(|layer| is_name(&layer.text)) {
             REDACTED.to_owned()
         } else {
             mapped
@@ -1147,17 +1176,25 @@ fn has_opaque_token(text: &str) -> bool {
 /// the text as written (composed, so a decomposed "É" is one character and a
 /// spacing vowel sign counts), not on its folded form, which drops marks: a
 /// three letter Devanagari name folds to two characters but is still a name.
-/// An unspaced string must also fold to [`MIN_UNSPACED_LEN`] characters, as
-/// it matches anywhere: a Thai consonant and its vowel mark fold to one
-/// letter, which would erase most Thai text.
+/// Invisible format characters (see [`is_default_ignorable`]) do not count.
+/// An unspaced string that folds to a single letter (a Thai or Burmese
+/// syllable whose vowel is a mark) keeps its marks (see
+/// [`fold_keeping_marks`]) and is matched with them ([`NeedleKind::Marked`]).
 fn sensitive_form(text: &str) -> Option<String> {
     let folded = fold_case(text);
-    let long_enough = if is_unspaced(&folded) {
-        text.nfc().count() >= MIN_UNSPACED_LEN && folded.chars().count() >= MIN_UNSPACED_LEN
+    let unspaced = is_unspaced(&folded);
+    let min = if unspaced {
+        MIN_UNSPACED_LEN
     } else {
-        text.nfc().count() >= MIN_SENSITIVE_LEN
+        MIN_SENSITIVE_LEN
     };
-    long_enough.then_some(folded)
+    if text.nfc().filter(|c| !is_default_ignorable(*c)).count() < min {
+        return None;
+    }
+    if unspaced && folded.chars().count() < MIN_UNSPACED_LEN {
+        return Some(fold_keeping_marks(text).collect());
+    }
+    Some(folded)
 }
 
 /// Whether `folded` is made only of letters of [`UNSPACED_SCRIPTS`] (or
@@ -1253,6 +1290,20 @@ fn fold_case(text: &str) -> String {
         .collect()
 }
 
+/// `text` folded like [`fold_case`], except that its combining marks are
+/// kept, in canonical order after the letter they belong to: "ปู" stays
+/// "ปู" where [`fold_case`] gives "ป".
+fn fold_keeping_marks(text: &str) -> impl Iterator<Item = char> + '_ {
+    text.nfd()
+        .filter(|c| !is_default_ignorable(*c))
+        .flat_map(|c| {
+            is_combining_mark(c)
+                .then_some(c)
+                .into_iter()
+                .chain(fold_char(c))
+        })
+}
+
 fn fold_char(c: char) -> impl Iterator<Item = char> {
     c.nfkd()
         .filter(|d| !is_folded_away(*d))
@@ -1263,9 +1314,10 @@ fn fold_char(c: char) -> impl Iterator<Item = char> {
         .map(hiragana)
 }
 
-/// The hiragana twin of a katakana letter ("ア" is "あ"), or `c` itself.
+/// The hiragana twin of a katakana letter or iteration mark ("ア" is "あ",
+/// "ヽ" is "ゝ"), or `c` itself.
 fn hiragana(c: char) -> char {
-    if KATAKANA.contains(&c) {
+    if KATAKANA.contains(&c) || KATAKANA_ITERATION.contains(&c) {
         char::from_u32(u32::from(c) - KANA_OFFSET).unwrap_or(c)
     } else {
         c
@@ -1306,14 +1358,7 @@ fn spell_out(c: char) -> [Option<char>; 2] {
 /// erases the whole encoded span. Each form is folded once.
 fn erase_words(text: &str, needles: &[String]) -> String {
     let mut spans = match_spans(text, needles);
-    let mut layers: Vec<Unescaped> = Vec::new();
-    while layers.len() < MAX_DECODINGS {
-        let source = layers.last().map_or(text, |layer| layer.text.as_str());
-        let Some(decoded) = Unescaped::new(source) else {
-            break;
-        };
-        layers.push(decoded);
-    }
+    let layers = decodings(text);
     for (depth, layer) in layers.iter().enumerate() {
         spans.extend(
             match_spans(&layer.text, needles)
@@ -1342,32 +1387,104 @@ fn erase_words(text: &str, needles: &[String]) -> String {
     out
 }
 
+/// `text` decoded again and again while that changes it (see [`Unescaped`]),
+/// up to [`MAX_DECODINGS`] times, each layer decoded from the one before.
+fn decodings(text: &str) -> Vec<Unescaped> {
+    let mut layers: Vec<Unescaped> = Vec::new();
+    while layers.len() < MAX_DECODINGS {
+        let source = layers.last().map_or(text, |layer| layer.text.as_str());
+        let Some(decoded) = Unescaped::new(source) else {
+            break;
+        };
+        layers.push(decoded);
+    }
+    layers
+}
+
 /// The byte ranges of `text` matched by `needles` (see [`erase_words`]),
 /// unsorted and possibly overlapping.
 fn match_spans(text: &str, needles: &[String]) -> Vec<(usize, usize)> {
     let folded = FoldedText::new(text);
+    // Folded with its marks only when a needle needs it.
+    let marked = OnceCell::new();
     let mut spans = Vec::new();
     for needle in needles.iter().filter(|n| !n.is_empty()) {
         let kind = NeedleKind::of(needle);
-        let mut at = 0;
-        while let Some(found) = folded.folded[at..].find(needle.as_str()) {
-            let start = at + found;
-            at = start
-                + folded.folded[start..]
-                    .chars()
-                    .next()
-                    .map_or(1, char::len_utf8);
-            if let Some(span) = folded.span(start, needle.len(), kind) {
-                spans.push(span);
+        if kind == NeedleKind::Marked {
+            // A match with the marks is also one without them.
+            let letters: String = needle.chars().filter(|c| !is_combining_mark(*c)).collect();
+            if !folded.folded.contains(&letters) {
+                continue;
             }
+        }
+        let marks =
+            (kind == NeedleKind::Marked).then(|| marked.get_or_init(|| MarkedText::new(text)));
+        let haystack = marks.map_or(folded.folded.as_str(), |m| m.folded.as_str());
+        let mut at = 0;
+        while let Some(found) = haystack[at..].find(needle.as_str()) {
+            let start = at + found;
+            at = start + haystack[start..].chars().next().map_or(1, char::len_utf8);
+            let span = match marks {
+                Some(marks) => marks.span(&folded, start, needle.len()),
+                None => folded.span(start, needle.len(), kind),
+            };
+            spans.extend(span);
         }
     }
     spans
 }
 
-/// A text with its percent-encoded UTF-8 and its JSON `\uXXXX` escapes
-/// decoded, and the way back to the original. Percent sequences that are not
-/// valid UTF-8, and escapes of a lone surrogate, are kept as they were.
+/// A text folded with its combining marks (see [`fold_keeping_marks`]), for
+/// [`NeedleKind::Marked`] needles.
+#[derive(Debug)]
+struct MarkedText {
+    folded: String,
+    /// For every byte of `folded`, the base character it came from, counted
+    /// as in [`FoldedText`].
+    origins: Vec<usize>,
+}
+
+impl MarkedText {
+    fn new(text: &str) -> Self {
+        let mut folded = String::with_capacity(text.len());
+        let mut origins = Vec::with_capacity(text.len());
+        let mut starts = text
+            .char_indices()
+            .filter(|(_, c)| !is_combining_mark(*c))
+            .map(|(offset, _)| offset)
+            .peekable();
+        let mut base = 0;
+        while let Some(start) = starts.next() {
+            let end = starts.peek().copied().unwrap_or(text.len());
+            for f in fold_keeping_marks(&text[start..end]) {
+                folded.push(f);
+                origins.extend(std::iter::repeat_n(base, f.len_utf8()));
+            }
+            base += 1;
+        }
+        Self { folded, origins }
+    }
+
+    /// The byte range of `text` to erase for the needle of `len` bytes found
+    /// at byte `start` of the folded text, or `None` unless the match covers
+    /// whole base characters with all their marks ("ปู" is not in "ปู่").
+    fn span(&self, text: &FoldedText, start: usize, len: usize) -> Option<(usize, usize)> {
+        let first = *self.origins.get(start)?;
+        let last = *self.origins.get(start + len.checked_sub(1)?)?;
+        let whole = start
+            .checked_sub(1)
+            .and_then(|before| self.origins.get(before))
+            != Some(&first)
+            && self.origins.get(start + len) != Some(&last);
+        whole.then(|| (text.offset(first), text.offset(last + 1)))
+    }
+}
+
+/// A text with its percent-encoded UTF-8 and its JSON escapes (`\uXXXX`,
+/// `\\`, `\n`, …) decoded, and the way back to the original. Percent
+/// sequences that are not valid UTF-8, and escapes of a lone surrogate, are
+/// kept as they were. A doubly escaped `\\u3086` decodes to `\u3086`, which
+/// the next layer decodes.
 #[derive(Debug)]
 struct Unescaped {
     text: String,
@@ -1379,7 +1496,7 @@ struct Unescaped {
 
 impl Unescaped {
     /// `None` when `text` has neither a `%XX` sequence that decodes to UTF-8
-    /// nor a `\uXXXX` escape of a character.
+    /// nor a JSON escape.
     fn new(text: &str) -> Option<Self> {
         let mut decoded = String::with_capacity(text.len());
         let mut chars = Vec::new();
@@ -1446,8 +1563,22 @@ impl Unescaped {
 }
 
 /// The character a JSON escape at byte `at` of `text` stands for, and the
-/// length of the escape: `\uXXXX`, or two of them for a surrogate pair.
+/// length of the escape: `\uXXXX`, two of them for a surrogate pair, or a
+/// backslash and one character (`\\`, `\"`, `\/`, `\b`, `\f`, `\n`, `\r`,
+/// `\t`).
 fn escaped_char(text: &str, at: usize) -> Option<(char, usize)> {
+    let simple = match text.get(at..)?.strip_prefix('\\')?.chars().next()? {
+        c @ ('"' | '\\' | '/') => Some(c),
+        'b' => Some('\u{8}'),
+        'f' => Some('\u{c}'),
+        'n' => Some('\n'),
+        'r' => Some('\r'),
+        't' => Some('\t'),
+        _ => None,
+    };
+    if let Some(c) = simple {
+        return Some((c, 2));
+    }
     let unit = escaped_unit(text, at)?;
     if let Some(Ok(c)) = char::decode_utf16([unit]).next() {
         return Some((c, ESCAPE_LEN));
@@ -1616,7 +1747,7 @@ impl<'a> FoldedText<'a> {
             return false;
         }
         match kind {
-            NeedleKind::Unspaced => return true,
+            NeedleKind::Unspaced | NeedleKind::Marked => return true,
             NeedleKind::Short => return self.hard_cuts[start] && self.hard_cuts[end],
             NeedleKind::Long => {}
         }
@@ -1710,13 +1841,22 @@ enum NeedleKind {
     Short,
     /// Also inside longer words, between boundaries.
     Long,
-    /// Only letters of [`UNSPACED_SCRIPTS`]: anywhere.
+    /// Only letters of [`UNSPACED_SCRIPTS`], at least [`MIN_UNSPACED_LEN`]
+    /// of them: anywhere.
     Unspaced,
+    /// With combining marks, which folding never leaves: an unspaced name
+    /// that folds to one letter (see [`sensitive_form`]), matched with its
+    /// marks anywhere, on whole base characters.
+    Marked,
 }
 
 impl NeedleKind {
+    /// An unspaced needle of one letter without its marks is short: matched
+    /// anywhere, it would erase that letter from all text of its script.
     fn of(needle: &str) -> Self {
-        if is_unspaced(needle) {
+        if needle.chars().any(is_combining_mark) {
+            Self::Marked
+        } else if is_unspaced(needle) && needle.chars().count() >= MIN_UNSPACED_LEN {
             Self::Unspaced
         } else if needle.chars().count() < MIN_SUBSTRING_LEN {
             Self::Short
@@ -1787,8 +1927,8 @@ fn is_boundary(before: Option<char>, after: Option<char>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        FoldedText, ScrubError, ScrubParams, erase_words, fold_case, has_opaque_token, is_boundary,
-        is_month_buckets, is_unspaced, is_uuid, run, scrub_files, sensitive_form,
+        FoldedText, NeedleKind, ScrubError, ScrubParams, erase_words, fold_case, has_opaque_token,
+        is_boundary, is_month_buckets, is_uuid, run, scrub_files, sensitive_form,
     };
     use crate::report;
     use proptest::prelude::*;
@@ -2227,6 +2367,111 @@ mod tests {
     }
 
     #[test]
+    fn names_folding_to_one_letter_are_erased_with_their_marks() {
+        let files = vec![(
+            "me.json".to_owned(),
+            json!({
+                "user": {"username": "u_x1", "name": "\u{e1b}\u{e39}", "last_name": "\u{1019}\u{1031}"},
+                "feed": [
+                    "\u{e1b}\u{e39} \u{e04}",
+                    "\u{e1b}\u{e39}1",
+                    "\u{e1b}\u{e39}\u{e14}\u{e35}",
+                    "\u{e04}\u{e38}\u{e13}\u{e1b}\u{e39}\u{e04}\u{e23}\u{e31}\u{e1a}",
+                    "\u{1019}\u{1031}\u{101e}\u{100a}\u{103a}",
+                    "\u{e1b}\u{e32} \u{e1b} \u{e1b}\u{e1b}\u{e1b} \u{e1b}\u{e39}\u{e48}"
+                ],
+                "data": {"\u{e1b}\u{e39}": 1}
+            }),
+        )];
+        let output = scrub_files(files, PARAMS);
+        assert_eq!(
+            output[0].1["feed"],
+            json!([
+                "redacted \u{e04}",
+                "redacted1",
+                "redacted\u{e14}\u{e35}",
+                "\u{e04}\u{e38}\u{e13}redacted\u{e04}\u{e23}\u{e31}\u{e1a}",
+                "redacted\u{101e}\u{100a}\u{103a}",
+                "\u{e1b}\u{e32} \u{e1b} \u{e1b}\u{e1b}\u{e1b} \u{e1b}\u{e39}\u{e48}"
+            ])
+        );
+        assert_eq!(output[0].1["data"], json!({"redacted": 1}));
+    }
+
+    #[test]
+    fn words_of_an_unspaced_name_are_erased_joined() {
+        let files = vec![
+            (
+                "ride.json".to_owned(),
+                json!({
+                    "instructor": {"username": "coach_x", "name": "\u{67cf} \u{6c85}"},
+                    "description": "\u{4eca}\u{5929}\u{67cf}\u{6c85}\u{8001}\u{5e2b}, \u{6c85}\u{67cf}"
+                }),
+            ),
+            (
+                "me.json".to_owned(),
+                json!({
+                    "user": {"username": "u_x1", "first_name": "\u{6c50} ", "last_name": "\u{3000}\u{82d3}"},
+                    "feed": ["\u{82d3}\u{6c50}\u{5148}\u{751f}"]
+                }),
+            ),
+        ];
+        let output = scrub_files(files, PARAMS);
+        assert_eq!(
+            output[0].1["description"],
+            "\u{4eca}\u{5929}redacted\u{8001}\u{5e2b}, redacted"
+        );
+        assert_eq!(output[1].1["feed"], json!(["redacted\u{5148}\u{751f}"]));
+    }
+
+    #[test]
+    fn nested_json_escapes_are_decoded() {
+        let needles = vec![fold_case("\u{3086}\u{3089}"), fold_case("\u{c9}lodie")];
+        assert_eq!(
+            erase_words(r"\\u3086\\u3089さん, x\nelodie", &needles),
+            r"redactedさん, x\nredacted"
+        );
+    }
+
+    #[test]
+    fn object_keys_are_decoded_as_often_as_values() {
+        let files = vec![(
+            "me.json".to_owned(),
+            json!({
+                "user": {"username": "u_x1", "name": "\u{3086}\u{3089}"},
+                "data": {"%5Cu3086%5Cu3089": 1, "%255Cu3086%255Cu3089": 2}
+            }),
+        )];
+        let output = scrub_files(files, PARAMS);
+        let data = output[0].1["data"].as_object().expect("object");
+        let mut keys: Vec<&str> = data.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["redacted", "redacted-2"]);
+    }
+
+    #[test]
+    fn invisible_characters_do_not_count_toward_a_name_length() {
+        let files = vec![(
+            "ride.json".to_owned(),
+            json!({
+                "instructor": {"first_name": "A\u{ad}l", "last_name": "Zorvic"},
+                "description": "Al rides with Zorvic"
+            }),
+        )];
+        let output = scrub_files(files, PARAMS);
+        assert_eq!(output[0].1["description"], "Al rides with redacted");
+    }
+
+    #[test]
+    fn katakana_iteration_marks_match_hiragana_ones() {
+        let needles = vec![fold_case("\u{3086}\u{3089}\u{309d}")];
+        assert_eq!(
+            erase_words("\u{30e6}\u{30e9}\u{30fd}\u{3055}\u{3093}", &needles),
+            "redacted\u{3055}\u{3093}"
+        );
+    }
+
+    #[test]
     fn unspaced_runs_of_mixed_script_names_are_erased_on_their_own() {
         let files = vec![(
             "me.json".to_owned(),
@@ -2482,7 +2727,11 @@ mod tests {
         let cjk = "\u{65e5}\u{672c}".repeat(400_000 / "\u{65e5}\u{672c}".len());
         let escaped = r"\u65e5\u672c".repeat(400_000 / r"\u65e5\u672c".len());
         let joined = "\u{65e5}\u{200d}\u{672c}".repeat(400_000 / "\u{65e5}\u{200d}\u{672c}".len());
-        for text in [latin, caps, cjk, escaped, joined] {
+        needles.extend(sensitive_form("\u{e1b}\u{e39}"));
+        let nested = r"\\u65e5\\u672c".repeat(400_000 / r"\\u65e5\\u672c".len());
+        let thai =
+            "\u{e1b}\u{e39}\u{e14}\u{e35}".repeat(400_000 / "\u{e1b}\u{e39}\u{e14}\u{e35}".len());
+        for text in [latin, caps, cjk, escaped, joined, nested, thai] {
             let started = std::time::Instant::now();
             erase_words(&text, &needles);
             let elapsed = started.elapsed();
@@ -2821,9 +3070,10 @@ mod tests {
             before in "[ ,a1\u{3001}\u{3055}\u{3093}\u{69d8}\u{8001}\u{5e2b}\u{c528}\u{b2d8}\u{c740}\u{e04}\u{200b}]{0,3}",
             after in "[ ,a1\u{3001}\u{3055}\u{3093}\u{69d8}\u{8001}\u{5e2b}\u{c528}\u{b2d8}\u{c740}\u{e04}\u{200b}]{0,3}",
         ) {
-            // A name of marks only, or one letter and a mark, is too short.
+            // A name of marks only is never erased, and one that folds to a
+            // single letter is matched with its marks (tested on its own).
             let folded = sensitive_form(&name).unwrap_or_default();
-            prop_assume!(is_unspaced(&folded));
+            prop_assume!(NeedleKind::of(&folded) == NeedleKind::Unspaced);
             let needles = vec![folded.clone()];
             let joined: String = name.chars().flat_map(|c| [c, '\u{200d}']).collect();
             let other_kana: String = name.chars().map(swap_kana).collect();
