@@ -506,10 +506,11 @@ docker build -t peloton-relay .             # the image
 ```
 
 CI runs `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`,
-`cargo deny check` and an arm64 and amd64 image build, and on pull requests the
-dependency age check below. A release tag (`v1.2.3`) publishes the image only
-after those checks pass on the tagged commit, and only if that commit is on
-`main`. No test or CI job talks to Peloton.
+`cargo deny check` (all against the committed `Cargo.lock`, with `--locked`) and
+an arm64 and amd64 image build, and on pull requests the dependency age check
+below. A release tag (`v1.2.3`) publishes the image only after those checks and
+the dependency age check pass on the tagged commit, and only if that commit is
+on `main`. No test or CI job talks to Peloton.
 
 ### Dependency age
 
@@ -521,11 +522,13 @@ be noticed and yanked. On each pull request,
 crate version that is new or changed, and fails the build for one younger than
 14 days. Unchanged versions are never looked up, so a pull request that leaves
 `Cargo.lock` alone makes no request to crates.io; a lookup that fails fails the
-check rather than skipping the crate.
+check rather than skipping the crate. The release workflow runs the same check
+against the previous release tag (or against nothing for the first release), so
+a tag never ships a version that skipped it, even one pushed straight to `main`.
 
 The one exception is the oldest release that fixes a security advisory. List it
 in [`.github/crate-age-allow.toml`](.github/crate-age-allow.toml), one entry per
-crate version, with the reason:
+crate version, with a reason that names the RUSTSEC advisory:
 
 ```toml
 [[allow]]
@@ -536,10 +539,13 @@ reason = "Oldest release without RUSTSEC-2026-0383"
 
 An entry covers that exact version only. Once its version leaves `Cargo.lock`
 the entry is stale and fails the check, so it is removed with the update that
-replaces the crate. To run the check locally against `main`:
+replaces the crate. To run the check locally on the working tree against `main`,
+or on one commit against another (reading `Cargo.lock` and the allow-list at
+`--head`):
 
 ```sh
 python3 -I .github/scripts/crate_age.py --base main
+python3 -I .github/scripts/crate_age.py --base v0.3.0 --head v0.4.0
 ```
 
 ## Caveat

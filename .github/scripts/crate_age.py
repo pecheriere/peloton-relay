@@ -3,16 +3,19 @@
 Compares the registry packages in Cargo.lock at a base revision with the working
 tree (or a head revision). Every crates.io version that is new or changed is looked
 up on crates.io, and one published less than 14 days ago fails the check unless
-.github/crate-age-allow.toml lists that exact version with a reason. An allow-list
-entry whose version is no longer in Cargo.lock is stale and fails the check too.
+.github/crate-age-allow.toml lists that exact version with the RUSTSEC advisory it
+fixes. An allow-list entry whose version is no longer in Cargo.lock is stale and
+fails the check too. With --head, Cargo.lock and the allow-list are both read at
+that revision; with --no-base, every version counts as new.
 
 Versions that did not change are never looked up, so a PR that leaves Cargo.lock
 alone makes no network request. A lookup that fails fails the check.
 
-Usage: crate_age.py --base REV [--head REV] [--allow-list PATH]
+Usage: crate_age.py (--base REV | --no-base) [--head REV]
 """
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -31,7 +34,7 @@ from typing import IO
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 LOCKFILE = "Cargo.lock"
-ALLOW_LIST = ROOT / ".github" / "crate-age-allow.toml"
+ALLOW_LIST = ".github/crate-age-allow.toml"
 MIN_AGE = timedelta(days=14)
 # Cargo records crates.io under this source whichever index protocol it used.
 CRATES_IO = "registry+https://github.com/rust-lang/crates.io-index"
@@ -41,6 +44,7 @@ REQUEST_INTERVAL = 1.0
 TIMEOUT = 30
 MAX_RESPONSE_BYTES = 1 << 20
 NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
+ADVISORY = re.compile(r"RUSTSEC-\d{4}-\d{4}")
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
 
 
@@ -127,8 +131,8 @@ def load_allow_list(text: str) -> dict[Crate, str]:
             raise ValueError(msg)
         crate = _crate(entry["name"], entry["version"])
         reason = entry["reason"]
-        if not isinstance(reason, str) or not reason.strip():
-            msg = f"allow-list: the entry for {crate} needs a reason"
+        if not isinstance(reason, str) or not ADVISORY.search(reason):
+            msg = f"allow-list: the reason for {crate} must name the RUSTSEC advisory it fixes"
             raise ValueError(msg)
         if crate in allowed:
             msg = f"allow-list: {crate} is listed twice"
@@ -215,8 +219,8 @@ class CratesIo:
         try:
             with self._opener(request, timeout=TIMEOUT) as reply:
                 body = reply.read(MAX_RESPONSE_BYTES + 1)
-        except OSError as err:
-            msg = f"request failed: {err}"
+        except (OSError, http.client.HTTPException) as err:
+            msg = f"request failed: {err!r}"
             raise PublishDateError(msg) from err
         finally:
             self._last = self._clock()
@@ -230,7 +234,7 @@ def _published(body: bytes, crate: Crate) -> datetime:
     """Return `version.created_at` from a crates.io version response for `crate`."""
     try:
         data = json.loads(body)
-    except ValueError as err:
+    except (ValueError, RecursionError) as err:
         msg = f"response is not JSON: {err}"
         raise PublishDateError(msg) from err
     version = data.get("version") if isinstance(data, dict) else None
@@ -267,26 +271,34 @@ def _git(*args: str) -> str:
         raise ValueError(msg) from err
 
 
-def lockfile_at(rev: str) -> str | None:
-    """Return Cargo.lock as it is at git `rev`, or None if it has none."""
+def file_at(rev: str, path: str) -> str | None:
+    """Return the file at `path` as it is at git `rev`, or None if `rev` has none."""
     if rev.startswith("-"):
         msg = f"invalid revision {rev!r}"
         raise ValueError(msg)
-    _git("rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}")
-    if not _git("ls-tree", "--name-only", rev, "--", LOCKFILE).strip():
+    try:
+        _git("rev-parse", "--verify", f"{rev}^{{commit}}")
+    except ValueError as err:
+        msg = f"unknown revision {rev!r}"
+        raise ValueError(msg) from err
+    if not _git("ls-tree", "--name-only", rev, "--", path).strip():
         return None
-    return _git("show", f"{rev}:{LOCKFILE}")
+    return _git("show", f"{rev}:{path}")
 
 
-def head_lockfile(rev: str | None) -> str:
-    """Return Cargo.lock at git `rev`, or from the working tree when `rev` is None."""
+def head_files(rev: str | None) -> tuple[str, str]:
+    """Return Cargo.lock and the allow-list at git `rev`, or in the working tree if None.
+
+    A revision from before the allow-list existed allows nothing.
+    """
     if rev is None:
-        return (ROOT / LOCKFILE).read_text(encoding="utf-8")
-    text = lockfile_at(rev)
-    if text is None:
+        lock = (ROOT / LOCKFILE).read_text(encoding="utf-8")
+        return lock, (ROOT / ALLOW_LIST).read_text(encoding="utf-8")
+    lock = file_at(rev, LOCKFILE)
+    if lock is None:
         msg = f"{rev} has no {LOCKFILE}"
         raise ValueError(msg)
-    return text
+    return lock, file_at(rev, ALLOW_LIST) or ""
 
 
 def user_agent() -> str:
@@ -307,15 +319,15 @@ def annotation(message: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     """Run the check and print its errors; return the exit status."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--base", required=True, help="git revision to compare against")
+    base_group = parser.add_mutually_exclusive_group(required=True)
+    base_group.add_argument("--base", help="git revision to compare against")
+    base_group.add_argument("--no-base", action="store_true", help="check every version")
     parser.add_argument("--head", help="git revision to check (default: the working tree)")
-    parser.add_argument("--allow-list", type=Path, default=ALLOW_LIST, help="exceptions file")
     args = parser.parse_args(argv)
 
     try:
-        base = lockfile_at(args.base)
-        head = head_lockfile(args.head)
-        allow_text = args.allow_list.read_text(encoding="utf-8")
+        base = None if args.no_base else file_at(args.base, LOCKFILE)
+        head, allow_text = head_files(args.head)
         errors = check(base, head, allow_text, CratesIo(user_agent()), datetime.now(UTC))
     except (ValueError, TypeError, OSError) as err:
         errors = [str(err)]

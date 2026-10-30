@@ -1,5 +1,6 @@
 """Unit tests for crate_age.py; none of them touch the network or git."""
 
+import http.client
 import io
 import json
 import unittest
@@ -97,10 +98,12 @@ class AllowListTest(unittest.TestCase):
 
     def test_reads_entries(self) -> None:
         """Each entry maps a crate version to its reason."""
-        text = allow_list(("webpki-root-certs", "1.0.10", "Oldest release fixing RUSTSEC-1"))
+        text = allow_list(
+            ("webpki-root-certs", "1.0.10", "Oldest release fixing RUSTSEC-2026-0383")
+        )
         self.assertEqual(
             crate_age.load_allow_list(text),
-            {Crate("webpki-root-certs", "1.0.10"): "Oldest release fixing RUSTSEC-1"},
+            {Crate("webpki-root-certs", "1.0.10"): "Oldest release fixing RUSTSEC-2026-0383"},
         )
 
     def test_an_empty_file_allows_nothing(self) -> None:
@@ -108,16 +111,21 @@ class AllowListTest(unittest.TestCase):
         self.assertEqual(crate_age.load_allow_list(""), {})
 
     def test_rejects_malformed_entries(self) -> None:
-        """A missing or blank reason, unknown keys, wrong types and duplicates are errors."""
+        """A reason without an advisory, unknown keys, wrong types and duplicates are errors."""
         cases = {
             "missing reason": '[[allow]]\nname = "a"\nversion = "1.0.0"\n',
             "blank reason": '[[allow]]\nname = "a"\nversion = "1.0.0"\nreason = "  "\n',
+            "no advisory": allow_list(("a", "1.0.0", "Fixes a security bug")),
+            "advisory id malformed": allow_list(("a", "1.0.0", "Fixes RUSTSEC-26-1")),
             "unknown key": '[[allow]]\nname = "a"\nversion = "1"\nreason = "r"\nuntil = "x"\n',
             "not a string": '[[allow]]\nname = "a"\nversion = 1\nreason = "r"\n',
             "unknown table": '[other]\nname = "a"\n',
             "allow not a list": 'allow = "a"\n',
-            "invalid name": allow_list(("a/b", "1.0.0", "r")),
-            "duplicate": allow_list(("a", "1.0.0", "r"), ("a", "1.0.0", "s")),
+            "invalid name": allow_list(("a/b", "1.0.0", "Fixes RUSTSEC-2026-0001")),
+            "duplicate": allow_list(
+                ("a", "1.0.0", "Fixes RUSTSEC-2026-0001"),
+                ("a", "1.0.0", "Fixes RUSTSEC-2026-0002"),
+            ),
             "not toml": "[[allow]\n",
         }
         for case, text in cases.items():
@@ -156,9 +164,9 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(lookup.calls, [Crate("bytes", "1.5.0"), Crate("serde", "1.0.1")])
 
     def test_a_new_version_younger_than_14_days_fails(self) -> None:
-        """A version published three days ago is refused, naming the date it becomes ok."""
-        base = lockfile(("serde", "1.0.0", CRATES_IO))
-        head = lockfile(("serde", "1.0.1", CRATES_IO))
+        """A crate added at a version published three days ago is refused, with its dates."""
+        base = lockfile(("tokio", "1.0.0", CRATES_IO))
+        head = lockfile(("tokio", "1.0.0", CRATES_IO), ("serde", "1.0.1", CRATES_IO))
         lookup = FakeLookup({Crate("serde", "1.0.1"): NEW})
         errors = crate_age.check(base, head, "", lookup, NOW)
         self.assertEqual(len(errors), 1)
@@ -195,7 +203,9 @@ class CheckTest(unittest.TestCase):
     def test_an_allow_listed_young_version_passes_without_a_lookup(self) -> None:
         """An exception covers its exact version and needs no network."""
         head = lockfile(("webpki-root-certs", "1.0.10", CRATES_IO))
-        allowed = allow_list(("webpki-root-certs", "1.0.10", "Oldest release fixing RUSTSEC-1"))
+        allowed = allow_list(
+            ("webpki-root-certs", "1.0.10", "Oldest release fixing RUSTSEC-2026-0383")
+        )
         lookup = FakeLookup({})
         self.assertEqual(crate_age.check(lockfile(), head, allowed, lookup, NOW), [])
         self.assertEqual(lookup.calls, [])
@@ -206,7 +216,9 @@ class CheckTest(unittest.TestCase):
             ("webpki-root-certs", "1.0.10", CRATES_IO),
             ("webpki-root-certs", "1.0.11", CRATES_IO),
         )
-        allowed = allow_list(("webpki-root-certs", "1.0.10", "Oldest release fixing RUSTSEC-1"))
+        allowed = allow_list(
+            ("webpki-root-certs", "1.0.10", "Oldest release fixing RUSTSEC-2026-0383")
+        )
         lookup = FakeLookup({Crate("webpki-root-certs", "1.0.11"): NEW})
         errors = crate_age.check(lockfile(), head, allowed, lookup, NOW)
         self.assertEqual(len(errors), 1)
@@ -216,7 +228,9 @@ class CheckTest(unittest.TestCase):
         """An exception whose version left Cargo.lock is stale and must be removed."""
         base = lockfile(("webpki-root-certs", "1.0.10", CRATES_IO))
         head = lockfile(("webpki-root-certs", "1.0.12", CRATES_IO))
-        allowed = allow_list(("webpki-root-certs", "1.0.10", "Oldest release fixing RUSTSEC-1"))
+        allowed = allow_list(
+            ("webpki-root-certs", "1.0.10", "Oldest release fixing RUSTSEC-2026-0383")
+        )
         lookup = FakeLookup({Crate("webpki-root-certs", "1.0.12"): OLD})
         errors = crate_age.check(base, head, allowed, lookup, NOW)
         self.assertEqual(len(errors), 1)
@@ -226,7 +240,9 @@ class CheckTest(unittest.TestCase):
     def test_an_allow_list_entry_still_in_an_unchanged_lockfile_passes(self) -> None:
         """An exception that has aged out stays valid while its version is locked."""
         text = lockfile(("webpki-root-certs", "1.0.10", CRATES_IO))
-        allowed = allow_list(("webpki-root-certs", "1.0.10", "Oldest release fixing RUSTSEC-1"))
+        allowed = allow_list(
+            ("webpki-root-certs", "1.0.10", "Oldest release fixing RUSTSEC-2026-0383")
+        )
         self.assertEqual(crate_age.check(text, text, allowed, FakeLookup({}), NOW), [])
 
     def test_a_failed_lookup_fails_and_the_others_are_still_checked(self) -> None:
@@ -241,6 +257,15 @@ class CheckTest(unittest.TestCase):
         self.assertIn("bytes 1.5.0", errors[0])
         self.assertIn("lookup of", errors[0])
         self.assertIn("serde 1.0.1", errors[1])
+
+
+class BrokenReply(io.BytesIO):
+    """A response whose body ends before its declared length."""
+
+    def read(self, size: int | None = -1) -> bytes:
+        """Fail the way http.client does on a truncated body."""
+        partial = b"{"
+        raise http.client.IncompleteRead(partial, size)
 
 
 def response(body: object) -> io.BytesIO:
@@ -309,7 +334,9 @@ class CratesIoTest(unittest.TestCase):
             "not found": not_found,
             "network": urllib.error.URLError("connection refused"),
             "timeout": TimeoutError("timed out"),
+            "incomplete read": BrokenReply(),
             "not json": io.BytesIO(b"<html>"),
+            "deeply nested json": io.BytesIO(b"[" * 200_000 + b"]" * 200_000),
             "no version": response({"errors": []}),
             "other version": response(version_body("serde", "1.0.2", "2026-01-01T00:00:00Z")),
             "other crate": response(version_body("serde_json", "1.0.1", "2026-01-01T00:00:00Z")),
