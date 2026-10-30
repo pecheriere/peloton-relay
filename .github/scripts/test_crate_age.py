@@ -1,12 +1,18 @@
-"""Unit tests for crate_age.py; none of them touch the network or git."""
+"""Unit tests for crate_age.py; none touch the network, and git only in temporary repos."""
 
+import contextlib
 import http.client
 import io
 import json
+import os
+import subprocess
+import tempfile
 import unittest
 import urllib.error
 from datetime import UTC, datetime, timedelta
 from email.message import Message
+from pathlib import Path
+from unittest import mock
 
 import crate_age
 from crate_age import Crate, CratesIo, PublishDateError
@@ -117,6 +123,8 @@ class AllowListTest(unittest.TestCase):
             "blank reason": '[[allow]]\nname = "a"\nversion = "1.0.0"\nreason = "  "\n',
             "no advisory": allow_list(("a", "1.0.0", "Fixes a security bug")),
             "advisory id malformed": allow_list(("a", "1.0.0", "Fixes RUSTSEC-26-1")),
+            "advisory id too long": allow_list(("a", "1.0.0", "Fixes RUSTSEC-2026-00011")),
+            "advisory id prefixed": allow_list(("a", "1.0.0", "Fixes XRUSTSEC-2026-0001")),
             "unknown key": '[[allow]]\nname = "a"\nversion = "1"\nreason = "r"\nuntil = "x"\n',
             "not a string": '[[allow]]\nname = "a"\nversion = 1\nreason = "r"\n',
             "unknown table": '[other]\nname = "a"\n',
@@ -353,6 +361,151 @@ class CratesIoTest(unittest.TestCase):
         self.replies.append(io.BytesIO(b" " * (crate_age.MAX_RESPONSE_BYTES + 1)))
         with self.assertRaisesRegex(PublishDateError, "larger than"):
             self.client()(Crate("serde", "1.0.1"))
+
+
+# The test repositories ignore the user's and the system's git configuration, so
+# commit signing, hooks and templates never apply to them.
+GIT_ENV = {
+    **os.environ,
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_AUTHOR_NAME": "alice",
+    "GIT_AUTHOR_EMAIL": "alice@example.com",
+    "GIT_COMMITTER_NAME": "alice",
+    "GIT_COMMITTER_EMAIL": "alice@example.com",
+}
+YOUNG_LOCK = lockfile(("webpki-root-certs", "1.0.10", CRATES_IO), ("peloton", "0.4.0", None))
+YOUNG_ALLOWED = allow_list(
+    ("webpki-root-certs", "1.0.10", "Oldest release fixing RUSTSEC-2026-0383")
+)
+
+
+class GitRepoTest(unittest.TestCase):
+    """Reading files from git revisions and running main() in a temporary repository."""
+
+    def setUp(self) -> None:
+        """Create an empty repository and point the script's ROOT at it."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.git("init", "--quiet")
+        patcher = mock.patch.object(crate_age, "ROOT", self.root)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # main() must never reach crates.io from these tests.
+        self.lookup = FakeLookup({Crate("webpki-root-certs", "1.0.10"): NEW})
+        client = mock.patch.object(crate_age, "CratesIo", return_value=self.lookup)
+        client.start()
+        self.addCleanup(client.stop)
+
+    def git(self, *args: str) -> str:
+        """Run git in the temporary repository."""
+        return subprocess.run(
+            ["git", *args],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=self.root,
+            env=GIT_ENV,
+        ).stdout
+
+    def write(self, files: dict[str, str | None]) -> None:
+        """Write (or, for None, delete) files in the working tree."""
+        for path, text in files.items():
+            target = self.root / path
+            if text is None:
+                target.unlink()
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8")
+
+    def commit(self, files: dict[str, str | None]) -> str:
+        """Commit `files` on top of the current tree and return the commit id."""
+        self.write(files)
+        self.git("add", "--all")
+        self.git("commit", "--quiet", "--allow-empty", "--message", "Change files")
+        return self.git("rev-parse", "HEAD").strip()
+
+    def run_main(self, *args: str) -> tuple[int, str]:
+        """Run the script's entry point and return its exit status and output."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = crate_age.main(list(args))
+        return status, out.getvalue()
+
+    def test_file_at_reads_a_file_at_a_revision(self) -> None:
+        """The file is read as committed, not as it is in the working tree."""
+        rev = self.commit({"Cargo.lock": "first"})
+        self.commit({"Cargo.lock": "second"})
+        self.assertEqual(crate_age.file_at(rev, "Cargo.lock"), "first")
+
+    def test_file_at_returns_none_for_a_file_the_revision_lacks(self) -> None:
+        """A missing file is None, not an error."""
+        rev = self.commit({"README.md": "hello"})
+        self.assertIsNone(crate_age.file_at(rev, "Cargo.lock"))
+
+    def test_file_at_refuses_unknown_and_option_like_revisions(self) -> None:
+        """An unknown revision is named in the error; one starting with - never reaches git."""
+        self.commit({"README.md": "hello"})
+        with self.assertRaisesRegex(ValueError, "unknown revision 'nope'"):
+            crate_age.file_at("nope", "Cargo.lock")
+        with self.assertRaisesRegex(ValueError, "invalid revision"):
+            crate_age.file_at("--output=x", "Cargo.lock")
+
+    def test_head_files_reads_the_working_tree_without_a_revision(self) -> None:
+        """Both files come from the working tree, uncommitted changes included."""
+        self.commit({"Cargo.lock": "committed", crate_age.ALLOW_LIST: "committed"})
+        self.write({"Cargo.lock": "lock", crate_age.ALLOW_LIST: "allow"})
+        self.assertEqual(crate_age.head_files(None), ("lock", "allow"))
+
+    def test_head_files_reads_both_files_at_a_revision(self) -> None:
+        """The allow-list comes from the same revision as the lockfile."""
+        rev = self.commit({"Cargo.lock": "lock", crate_age.ALLOW_LIST: "allow"})
+        self.write({"Cargo.lock": "other", crate_age.ALLOW_LIST: "other"})
+        self.assertEqual(crate_age.head_files(rev), ("lock", "allow"))
+
+    def test_head_files_without_an_allow_list_allows_nothing(self) -> None:
+        """A revision from before the allow-list existed has an empty one."""
+        rev = self.commit({"Cargo.lock": "lock"})
+        self.assertEqual(crate_age.head_files(rev), ("lock", ""))
+
+    def test_head_files_requires_a_lockfile(self) -> None:
+        """A head revision without Cargo.lock is an error."""
+        rev = self.commit({"README.md": "hello"})
+        with self.assertRaisesRegex(ValueError, "has no Cargo.lock"):
+            crate_age.head_files(rev)
+
+    def test_main_with_no_base_checks_every_version(self) -> None:
+        """--no-base looks up versions that are in the lockfile already."""
+        self.commit({"Cargo.lock": YOUNG_LOCK, crate_age.ALLOW_LIST: ""})
+        status, out = self.run_main("--no-base")
+        self.assertEqual(status, 1)
+        self.assertIn("webpki-root-certs 1.0.10 was published on", out)
+        self.assertEqual(self.lookup.calls, [Crate("webpki-root-certs", "1.0.10")])
+
+    def test_main_with_no_base_passes_allowed_versions(self) -> None:
+        """--no-base still honours the allow-list, without a lookup."""
+        self.commit({"Cargo.lock": YOUNG_LOCK, crate_age.ALLOW_LIST: YOUNG_ALLOWED})
+        status, _ = self.run_main("--no-base")
+        self.assertEqual(status, 0)
+        self.assertEqual(self.lookup.calls, [])
+
+    def test_main_reads_the_allow_list_at_head(self) -> None:
+        """--head uses that revision's allow-list, not the working tree's."""
+        base = self.commit({"Cargo.lock": lockfile(), crate_age.ALLOW_LIST: ""})
+        head = self.commit({"Cargo.lock": YOUNG_LOCK, crate_age.ALLOW_LIST: YOUNG_ALLOWED})
+        self.write({crate_age.ALLOW_LIST: ""})
+        self.assertEqual(self.run_main("--base", base, "--head", head), (0, mock.ANY))
+        status, out = self.run_main("--base", base)
+        self.assertEqual(status, 1)
+        self.assertIn("webpki-root-certs 1.0.10", out)
+
+    def test_main_reports_an_unknown_base_as_an_annotation(self) -> None:
+        """A bad revision fails with an annotation rather than a traceback."""
+        self.commit({"Cargo.lock": YOUNG_LOCK, crate_age.ALLOW_LIST: ""})
+        status, out = self.run_main("--base", "nope")
+        self.assertEqual(status, 1)
+        self.assertEqual(out, crate_age.annotation("unknown revision 'nope'") + "\n")
 
 
 class AnnotationTest(unittest.TestCase):

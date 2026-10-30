@@ -44,7 +44,7 @@ REQUEST_INTERVAL = 1.0
 TIMEOUT = 30
 MAX_RESPONSE_BYTES = 1 << 20
 NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
-ADVISORY = re.compile(r"RUSTSEC-\d{4}-\d{4}")
+ADVISORY = re.compile(r"\bRUSTSEC-\d{4}-\d{4}\b")
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
 
 

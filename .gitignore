@@ -1,3 +1,4 @@
 /target
 captures/
+.ruff_cache/
 __pycache__/

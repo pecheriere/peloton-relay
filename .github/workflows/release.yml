@@ -31,10 +31,11 @@ jobs:
       # checked again here. The first release has no previous tag and checks all.
       - name: Refuse crate versions published less than 14 days ago
         run: |
-          if previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>/dev/null); then
-            python3 -I .github/scripts/crate_age.py --base "$previous"
-          else
+          if [ -z "$(git tag --list 'v[0-9]*' --merged HEAD^)" ]; then
             python3 -I .github/scripts/crate_age.py --no-base
+          else
+            previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^)
+            python3 -I .github/scripts/crate_age.py --base "$previous"
           fi
 
   ci:

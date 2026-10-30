@@ -506,8 +506,8 @@ docker build -t peloton-relay .             # the image
 ```
 
 CI runs `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`,
-`cargo deny check` (all against the committed `Cargo.lock`, with `--locked`) and
-an arm64 and amd64 image build, and on pull requests the dependency age check
+`cargo deny check` (clippy, test and deny with `--locked`, so they use the
+committed `Cargo.lock` as is) and an arm64 and amd64 image build, and on pull requests the dependency age check
 below. A release tag (`v1.2.3`) publishes the image only after those checks and
 the dependency age check pass on the tagged commit, and only if that commit is
 on `main`. No test or CI job talks to Peloton.
