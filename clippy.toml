@@ -1,0 +1,8 @@
+# `Client::default`, `ClientBuilder::default` and derived `Default` impls cannot
+# be banned by path, so they are not covered here and must not be used.
+disallowed-methods = [
+    { path = "reqwest::Client::new", reason = "use peloton::tls::client_builder" },
+    { path = "reqwest::Client::builder", reason = "use peloton::tls::client_builder" },
+    { path = "reqwest::ClientBuilder::new", reason = "use peloton::tls::client_builder" },
+    { path = "reqwest::get", reason = "use peloton::tls::client_builder" },
+]

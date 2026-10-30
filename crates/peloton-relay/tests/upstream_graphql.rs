@@ -900,7 +900,8 @@ async fn writes_are_sent_once_on_timeout() {
         .expect(5)
         .mount(&server)
         .await;
-    let impatient = reqwest::Client::builder()
+    let impatient = peloton::tls::client_builder()
+        .unwrap()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(StdDuration::from_secs(5))
         .timeout(StdDuration::from_millis(100))

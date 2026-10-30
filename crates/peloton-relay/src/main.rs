@@ -286,7 +286,8 @@ fn error_chain(err: &dyn std::error::Error) -> String {
 
 async fn healthcheck() -> Result<(), String> {
     let config = Config::from_env().map_err(|err| err.to_string())?;
-    let client = reqwest::Client::builder()
+    let client = peloton::tls::client_builder()
+        .map_err(|err| format!("cannot build the HTTP client: {err}"))?
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(HEALTHCHECK_TIMEOUT)

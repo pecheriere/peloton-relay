@@ -113,7 +113,7 @@ impl Config {
 ///
 /// When the TLS backend cannot be initialised.
 pub fn http_client() -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder()
+    peloton::tls::client_builder()?
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)

@@ -5,4 +5,5 @@ pub mod endpoints;
 pub mod graphql;
 pub mod ids;
 pub mod oauth;
+pub mod tls;
 pub mod upstream;

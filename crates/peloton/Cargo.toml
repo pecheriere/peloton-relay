@@ -18,6 +18,7 @@ sha2.workspace = true
 thiserror.workspace = true
 time.workspace = true
 url.workspace = true
+webpki-root-certs.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
