@@ -36,6 +36,7 @@ tower-http = { version = "0.7.1", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 unicode-normalization = "0.1.26"
+unicode-script = "0.5.8"
 url = "2"
 utoipa = { version = "6", features = ["time"] }
 webpki-root-certs = "1.0.11"
