@@ -2295,6 +2295,7 @@ dependencies = [
  "unicode-normalization",
  "unicode-script",
  "url",
+ "wiremock",
  "wry",
 ]
 

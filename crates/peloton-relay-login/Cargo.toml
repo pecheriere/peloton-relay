@@ -32,6 +32,7 @@ wry.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 tempfile.workspace = true
+wiremock.workspace = true
 
 [lints]
 workspace = true
