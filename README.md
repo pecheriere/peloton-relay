@@ -203,6 +203,11 @@ Between steps 3 and 4 the account's `/v1` routes answer 503
 `not_authenticated` and the server logs `event="state_refused"` with
 `reason="unbound"`; both are expected and end once `bind` has run.
 
+**Upgrading from 0.3.x.** The state directory is unchanged: stop 0.3.x and start
+0.4.0 on the same directory. The [admin page](#admin-page) stays closed (403)
+until the proxy sets `X-Peloton-Admin: 1` for the operator; to renew sign-ins
+from it, also set `PELOTON_RELAY_PUBLIC_URL`.
+
 ## Admin page
 
 `GET /admin` is a small page for the operator: one card per account in
