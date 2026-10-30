@@ -48,6 +48,7 @@ cargo fmt --all --check
 cargo clippy --locked --workspace --exclude peloton-relay-login --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --exclude peloton-relay-login --all-features
 cargo deny --all-features --locked check
+uvx zizmor@1.31.1 .   # when a workflow or the Dependabot config changes
 # on macOS, for the login helper:
 cargo clippy --locked -p peloton-relay-login --all-targets --all-features -- -D warnings
 cargo test --locked -p peloton-relay-login --all-features

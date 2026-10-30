@@ -512,6 +512,14 @@ below. A release tag (`v1.2.3`) publishes the image only after those checks and
 the dependency age check pass on the tagged commit, and only if that commit is
 on `main`. No test or CI job talks to Peloton.
 
+Every pull request is also checked by [zizmor](https://docs.zizmor.sh), which
+audits the workflows themselves (pinned actions, token permissions, template
+injection, cache poisoning), and by CodeQL. `cargo deny check advisories` runs
+every night on `main`, so a newly published advisory shows up there before it
+fails an unrelated pull request, and OpenSSF Scorecard reports weekly. Dependabot
+proposes updates once they are 14 days old. Report a vulnerability privately as
+described in [SECURITY.md](SECURITY.md).
+
 ### Dependency age
 
 Every crate version in `Cargo.lock` must have been published on crates.io at
