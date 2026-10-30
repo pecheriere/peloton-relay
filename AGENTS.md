@@ -72,11 +72,11 @@ Rules:
   username or full Peloton user id in logs, errors or responses (logs carry the
   last four hex digits only). Login captures (`captures/`) are unscrubbed and
   personal; never commit them.
-- **Dependencies.** A crate version must have been published at least 14 days
+- **Dependencies.** A crate version must have been published at least 7 days
   before it lands in `Cargo.lock`, except the oldest release that fixes a
-  RUSTSEC advisory, listed in `.github/crate-age-allow.toml` (see
+  security advisory (RUSTSEC or GHSA), listed in `.github/crate-age-allow.toml` (see
   [Dependency age](README.md#dependency-age)). Commit the updated `Cargo.lock`.
-  GitHub Actions are pinned to a full commit SHA of a release at least 14 days
+  GitHub Actions are pinned to a full commit SHA of a release at least 7 days
   old.
 - **No dead code or TODO comments.** Delete what is unused; track open work as
   an issue.
@@ -86,7 +86,7 @@ Rules:
 ## Commits and pull requests
 
 - Commit subjects are plain imperative sentences, capitalised, with no prefix
-  (`Refuse crate versions published less than 14 days ago`).
+  (`Refuse crate versions published less than 7 days ago`).
 - Commits are signed, and `main` is changed only through pull requests that
   are squash-merged after CI passes.
 - This is a public repository. Examples use the account names `alice`, `bob`
