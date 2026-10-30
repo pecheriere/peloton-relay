@@ -29,6 +29,7 @@ pub const ACCESS: &str = "access-secret-1";
 pub const REFRESH: &str = "refresh-secret-1";
 
 /// A scrubbed fixture of the `peloton` crate.
+#[must_use]
 pub fn fixture(name: &str) -> String {
     std::fs::read_to_string(format!(
         "{}/../peloton/tests/fixtures/{name}",
@@ -84,6 +85,7 @@ pub const V1_ROUTES: &[(&str, &str)] = &[
 
 /// A body the write route `method` `uri` of [`V1_ROUTES`] accepts at a
 /// relay clock before 2030-01-07; `None` for a route that takes none.
+#[must_use]
 pub fn sample_body(method: &str, uri: &str) -> Option<serde_json::Value> {
     let start = "2030-01-07T12:00:00Z";
     match (method, uri) {
@@ -101,6 +103,7 @@ pub fn sample_body(method: &str, uri: &str) -> Option<serde_json::Value> {
 /// `/api`, GraphQL at `/graphql`) and at most `max_in_flight` upstream
 /// requests at once. Its state lives under `root`, bound to `user`; `tokens`
 /// (access, refresh) seeds it with a token set valid for 48 hours.
+#[must_use]
 pub fn account_context(
     root: &std::path::Path,
     server: &wiremock::MockServer,
@@ -120,6 +123,7 @@ pub fn account_context(
 
 /// The context of account `name`, never signed in: its directory exists
 /// under `root`, without a binding or a state file.
+#[must_use]
 pub fn unbound_context(
     root: &std::path::Path,
     server: &wiremock::MockServer,
@@ -201,6 +205,7 @@ pub fn relay_with(
 
 /// The context of account [`ACCOUNT`], its state file directly in `dir`;
 /// `seeded` gives it the tokens [`ACCESS`] and [`REFRESH`].
+#[must_use]
 pub fn alice(
     dir: &tempfile::TempDir,
     server: &wiremock::MockServer,
@@ -257,11 +262,13 @@ pub async fn send(app: &Router, request: Request<Body>) -> (StatusCode, HeaderMa
 }
 
 /// A request of [`ACCOUNT`] with a JSON body.
+#[must_use]
 pub fn with_json(method: &str, uri: &str, body: &serde_json::Value) -> Request<Body> {
     request_as(Some(ACCOUNT), method, uri, Some(body))
 }
 
 /// A request of [`ACCOUNT`] without a body.
+#[must_use]
 pub fn bare(method: &str, uri: &str) -> Request<Body> {
     request_as(Some(ACCOUNT), method, uri, None)
 }
@@ -274,6 +281,7 @@ pub fn assert_error(body: &str, code: &str) {
 }
 
 /// A scrubbed fixture of the `peloton` crate, as JSON.
+#[must_use]
 pub fn fixture_json(name: &str) -> serde_json::Value {
     serde_json::from_str(&fixture(name)).unwrap()
 }
@@ -301,12 +309,14 @@ pub async fn mount_op(
 }
 
 /// A `ViewUserStack` answer holding the one class of `stack_add.json`.
+#[must_use]
 pub fn stack_with_one_class() -> serde_json::Value {
     let added = fixture_json("stack_add.json");
     serde_json::json!({ "data": { "viewUserStack": added["data"]["addClassToStack"] } })
 }
 
 /// The scheduled-class id of `schedule_add.json` and its relay form.
+#[must_use]
 pub fn fixture_scheduled_id() -> (peloton::ids::ScheduledClassId, String) {
     let id: peloton::ids::ScheduledClassId =
         fixture_json("schedule_add.json")["data"]["addClassToSchedule"]["id"]

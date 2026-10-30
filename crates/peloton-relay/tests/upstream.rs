@@ -1,5 +1,6 @@
 //! Tests for the Peloton upstream client.
 
+use peloton_relay_test_support::{common, raw_http};
 use std::fs;
 use std::io::{Read as _, Write as _};
 use std::sync::Arc;
@@ -17,16 +18,10 @@ use url::Url;
 use wiremock::matchers::{header, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod common;
-mod gated;
-mod raw_http;
-
-use common::{ACCOUNT, LOCK_WAIT, account, captured_logs, http, state, state_file};
-use gated::GatedServer;
+use peloton_relay_test_support::common::{
+    ACCOUNT, LOCK_WAIT, account, captured_logs, http, state, state_file,
+};
+use peloton_relay_test_support::gated::GatedServer;
 
 const WORKOUT: &str = "fedcba9876543210fedcba9876543210";
 

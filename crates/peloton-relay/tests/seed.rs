@@ -1,11 +1,6 @@
 //! Tests for `peloton-relay seed` and `peloton-relay bind`.
 
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod common;
-
+use peloton_relay_test_support::common;
 use std::fs;
 use std::io::{self, Read};
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};

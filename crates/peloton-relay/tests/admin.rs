@@ -1,6 +1,7 @@
 //! Tests of the admin routes: the admin header, the page, revoking, and
 //! renewing a sign-in with a one-time code.
 
+use peloton_relay_test_support::common;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration as StdDuration, Instant};
 
@@ -21,23 +22,11 @@ use url::Url;
 use wiremock::matchers::{body_string_contains, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod common;
-
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod api_common;
-
-use api_common::{
+use peloton_relay_test_support::api::{
     V1_ROUTES, account_context, assert_error, request_as, router_with_admin, sample_body, send,
     unbound_context,
 };
-use common::{LOCK_WAIT, captured_logs};
+use peloton_relay_test_support::common::{LOCK_WAIT, captured_logs};
 
 const NOW: OffsetDateTime = datetime!(2030-01-01 00:00 UTC);
 const PUBLIC: &str = "https://relay.example.net";

@@ -2250,6 +2250,7 @@ dependencies = [
  "http-body-util",
  "maud",
  "peloton",
+ "peloton-relay-test-support",
  "rand",
  "reqwest",
  "secrecy",
@@ -2297,6 +2298,27 @@ dependencies = [
  "url",
  "wiremock",
  "wry",
+]
+
+[[package]]
+name = "peloton-relay-test-support"
+version = "0.4.0"
+dependencies = [
+ "axum",
+ "http-body-util",
+ "peloton",
+ "peloton-relay",
+ "reqwest",
+ "secrecy",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "wiremock",
 ]
 
 [[package]]

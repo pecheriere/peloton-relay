@@ -1,6 +1,7 @@
 //! Tests of what a token manager reports about its credential, and of
 //! revoking the credential.
 
+use peloton_relay_test_support::common;
 use std::fs;
 use std::path::Path;
 use std::time::Duration as StdDuration;
@@ -17,13 +18,9 @@ use url::Url;
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod common;
-
-use common::{ACCOUNT, LOCK_WAIT, account, account_state_file, state, state_file, user};
+use peloton_relay_test_support::common::{
+    ACCOUNT, LOCK_WAIT, account, account_state_file, state, state_file, user,
+};
 
 const MARGIN: StdDuration = StdDuration::from_secs(3600);
 
@@ -272,7 +269,7 @@ fn alice_with_bob(root: &Path, server: &MockServer) -> TokenManager {
 async fn a_user_bound_to_another_account_needs_sign_in() {
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
-    account_state_file(dir.path(), "bob", &user());
+    let _bob = account_state_file(dir.path(), "bob", &user());
     let tokens = alice_with_bob(dir.path(), &server);
 
     assert!(tokens.bearer().await.is_err());

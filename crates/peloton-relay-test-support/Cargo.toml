@@ -1,0 +1,32 @@
+[package]
+name = "peloton-relay-test-support"
+description = "Helpers shared by the relay's integration tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Only `peloton-relay` pulls this in, as a dev-dependency; nothing ships it.
+# deny.toml excludes this crate from the audit, so every dependency listed
+# here must also be a (dev-)dependency of `peloton-relay` or `peloton`, which
+# cargo deny still audits.
+[dependencies]
+axum.workspace = true
+http-body-util.workspace = true
+peloton.workspace = true
+peloton-relay.workspace = true
+reqwest.workspace = true
+secrecy.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["net", "sync", "time"] }
+tower = { workspace = true, features = ["util"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

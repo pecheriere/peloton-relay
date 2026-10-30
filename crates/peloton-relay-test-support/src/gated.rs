@@ -68,6 +68,7 @@ impl GatedServer {
     }
 
     /// The server's base URL.
+    #[must_use]
     pub fn uri(&self) -> String {
         format!("http://{}", self.addr)
     }
@@ -100,6 +101,7 @@ impl GatedServer {
     }
 
     /// The most requests the server held at once.
+    #[must_use]
     pub fn peak(&self) -> usize {
         self.peak.load(Ordering::SeqCst)
     }
