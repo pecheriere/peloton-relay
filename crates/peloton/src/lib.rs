@@ -1,5 +1,6 @@
 //! Shared Peloton OAuth, identifiers and API types.
 
+pub mod account;
 pub mod body;
 pub mod endpoints;
 pub mod graphql;
