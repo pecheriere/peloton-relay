@@ -38,29 +38,28 @@
 //!     either end is enough ("JEANLUC", "MARIECLAIRE", and "KINGDOM" for a
 //!     name "King"). Ordinary words are kept ("walking", "glove", "Kingdom",
 //!     "XKINGX" for "King" or "Love"); "iPhone" for a name "Phone" is erased;
-//!   - a string made only of letters of a script written without spaces
-//!     between words (Han, kana, Bopomofo, Yi, Tibetan, the scripts of
-//!     mainland and island Southeast Asia, and Hangul, whose particles and
-//!     honorifics are glued to the name) is erased from 2 characters on
-//!     (counted composed with compatibility, so a half-width "ｶﾞ" is one, like
-//!     "ガ"), and anywhere, even inside a run of the same script ("ゆらのさん")
-//!     and across spaces, dots and middle dots between its letters ("柏　沅",
-//!     "柏・沅" for "柏沅"), as long as it matches whole characters ("成功"
-//!     leaves "㍻功" alone), except that a Hangul name may carry one more
-//!     final consonant ("유날" for "유나를"); hiragana and katakana match each
-//!     other ("ユラ" for "ゆら"); a single character is never erased. Such
-//!     text has no word boundary to look for, and publishing a name costs
-//!     more than erasing an ordinary word that holds it, so a name "ゆら" also
-//!     erases "ゆらゆら" ("swaying") and "ゆ. ら". A name that folds to one
-//!     letter (a Thai or Burmese syllable whose vowel is a mark: "ปู" folds
-//!     to "ป") is matched with its marks instead (a mark typed twice in a row
-//!     counts once), anywhere, on whole syllables ("ปูดี" is erased, "ป",
-//!     "ปา" and "ปู่" are not): that one letter alone would erase most text of
-//!     its script, and these scripts glue words together, so a name kept to
-//!     whole words would leak. The unspaced part of a mixed word is noted on
-//!     its own ("梓潮" of "梓潮Rivo"), and every run of consecutive parts of
-//!     a name in such a script, from its words or its first and last name,
-//!     is also noted joined, in either order, as each part is often one
+//!   - a string made only of letters of a script written without spaces between
+//!     words (Han, kana, Bopomofo, Yi, Tibetan, the scripts of mainland and
+//!     island Southeast Asia, and Hangul, whose particles and honorifics are
+//!     glued to the name) is erased from 2 characters on (counted composed with
+//!     compatibility, so a half-width "ｶﾞ" is one, like "ガ"), and anywhere,
+//!     even inside a run of the same script ("ゆらのさん") and across spaces, dots,
+//!     middle dots and "+" between its letters ("柏　沅", "柏・沅", "柏+沅" for "柏沅"),
+//!     as long as it matches whole characters ("成功" leaves "㍻功" alone), except
+//!     that a Hangul name may carry one more final consonant ("유날" for "유나를");
+//!     hiragana and katakana match each other ("ユラ" for "ゆら"); a single
+//!     character is never erased. Such text has no word boundary to look for,
+//!     and publishing a name costs more than erasing an ordinary word that
+//!     holds it, so a name "ゆら" also erases "ゆらゆら" ("swaying") and "ゆ. ら". A
+//!     name that folds to one letter (a Thai or Burmese syllable whose vowel is
+//!     a mark: "ปู" folds to "ป") is matched with its marks instead (a mark
+//!     typed twice in a row counts once), anywhere, on whole syllables ("ปูดี"
+//!     is erased, "ป", "ปา" and "ปู่" are not): that one letter alone would
+//!     erase most text of its script, and these scripts glue words together, so
+//!     a name kept to whole words would leak. The unspaced part of a mixed word
+//!     is noted on its own ("梓潮" of "梓潮Rivo"), and every run of consecutive
+//!     parts of a name in such a script, from its words or its first and last
+//!     name, is also noted joined, in either order, as each part is often one
 //!     character ("柏 沅" as "柏沅" and "沅柏", "汐苓" of "柏原 汐 苓");
 //!   - an object key is erased only when it is the whole string, as keys are
 //!     schema: `max_value` and `power_zone` stay for names "Max" and "Zone";
@@ -857,7 +856,7 @@ impl Scrubber {
         let mapped = self.ids_in(key);
         let is_name = |text: &str| {
             self.sensitive.contains(&fold_case(text))
-                || self.sensitive.contains(&fold_keeping_marks(text).collect())
+                || sensitive_form(text).is_some_and(|form| self.sensitive.contains(&form))
         };
         if is_name(&mapped) || decodings(&mapped).iter().any(|layer| is_name(&layer.text)) {
             REDACTED.to_owned()
@@ -1218,9 +1217,10 @@ fn sensitive_form(text: &str) -> Option<String> {
 
 /// Whether the folded character `c` may stand between the parts of a name
 /// in an unspaced script: white space ("柏 沅", "柏　沅"), a dot or a middle
-/// dot ("柏・沅", "柏. 沅").
+/// dot ("柏・沅", "柏. 沅"), or a "+", a space in form encoding
+/// ("%E6%9F%8F+%E6%B2%85").
 fn is_name_separator(c: char) -> bool {
-    c.is_whitespace() || matches!(c, '.' | '\u{b7}' | '\u{2027}' | '\u{30fb}')
+    c.is_whitespace() || matches!(c, '.' | '+' | '\u{b7}' | '\u{2027}' | '\u{30fb}')
 }
 
 /// The words of a name field ("柏 沅" is "柏" and "沅").
@@ -2496,7 +2496,8 @@ mod tests {
                         "\u{67cf}\u{3000}\u{6c85}",
                         "\u{67cf}\u{30fb}\u{6c85}",
                         "\u{6c85} \u{67cf}\u{5b8c}\u{6210}\u{4e86}",
-                        "\u{67cf}. \u{6c85}"
+                        "\u{67cf}. \u{6c85}",
+                        "q=%E6%9F%8F+%E6%B2%85"
                     ]
                 }),
             ),
@@ -2504,7 +2505,8 @@ mod tests {
                 "ride.json".to_owned(),
                 json!({
                     "instructor": {"username": "coach_x", "name": "\u{6c50} \u{82d3}"},
-                    "description": "\u{82d3} \u{6c50}\u{5b8c}\u{6210}\u{4e86}, \u{6c50}\u{82d3}"
+                    "description": "\u{82d3} \u{6c50}\u{5b8c}\u{6210}\u{4e86}, \u{6c50}\u{82d3}",
+                    "data": {"\u{6c50} \u{82d3}": 1}
                 }),
             ),
         ];
@@ -2515,9 +2517,11 @@ mod tests {
                 "redacted",
                 "redacted",
                 "redacted\u{5b8c}\u{6210}\u{4e86}",
-                "redacted"
+                "redacted",
+                "q=redacted"
             ])
         );
+        assert_eq!(output[1].1["data"], json!({"redacted": 1}));
         assert_eq!(
             output[1].1["description"],
             "redacted\u{5b8c}\u{6210}\u{4e86}, redacted"
