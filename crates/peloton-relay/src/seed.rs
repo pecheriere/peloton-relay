@@ -9,6 +9,7 @@ use peloton::body::read_limited;
 use peloton::endpoints::PLATFORM_HEADER;
 use peloton::ids::PelotonId;
 use peloton::oauth::TokenSet;
+use peloton::text::shown;
 use peloton::upstream::Me;
 use secrecy::ExposeSecret as _;
 use url::Url;
@@ -124,16 +125,7 @@ impl fmt::Display for Seeded {
         }
         write!(f, "account \"{account}\": bound to Peloton user ")?;
         match &self.username {
-            Some(username) => {
-                for c in username.chars() {
-                    let shown = if is_unsafe_to_show(c) {
-                        char::REPLACEMENT_CHARACTER
-                    } else {
-                        c
-                    };
-                    fmt::Write::write_char(f, shown)?;
-                }
-            }
+            Some(username) => f.write_str(&shown(username))?,
             None => f.write_str("(no username)")?,
         }
         write!(f, " (id {})", user_suffix(&self.user_id))
@@ -160,10 +152,32 @@ impl fmt::Display for Bound {
     }
 }
 
-/// Reads a [`TokenSet`] from `input`, looks up its owner with `GET /me` on
-/// `api_base`, and stores it in `account`, bound to that owner.
+/// Reads a [`TokenSet`] from `input` and seeds `account` with it (see
+/// [`seed_tokens`]). An unconfigured account is refused before the input is
+/// read.
 ///
-/// An unconfigured account is refused before the input is read. Under the
+/// # Errors
+///
+/// See [`SeedError`].
+pub async fn run_seed(
+    input: impl Read,
+    accounts: &Accounts,
+    account: &AccountName,
+    rebind: bool,
+    http: &reqwest::Client,
+    api_base: &Url,
+    lock_wait: Duration,
+) -> Result<Seeded, SeedError> {
+    ensure_configured(accounts, account)?;
+    let tokens = read_tokens(input)?;
+    seed_tokens(tokens, accounts, account, rebind, http, api_base, lock_wait).await
+}
+
+/// Looks up the owner of `tokens` with `GET /me` on `api_base`, and stores
+/// them in `account`, bound to that owner: what `seed` and the admin API's
+/// `POST /admin/seed` both do.
+///
+/// An unconfigured account is refused before Peloton is called. Under the
 /// account's state lock, then the cross-account bindings lock, the seed is
 /// refused when the owner is bound to another account (even with `rebind`),
 /// when a binding it must check is unreadable, or when the account is bound
@@ -182,8 +196,8 @@ impl fmt::Display for Bound {
 /// # Errors
 ///
 /// See [`SeedError`].
-pub async fn run_seed(
-    input: impl Read,
+pub async fn seed_tokens(
+    tokens: TokenSet,
     accounts: &Accounts,
     account: &AccountName,
     rebind: bool,
@@ -192,7 +206,6 @@ pub async fn run_seed(
     lock_wait: Duration,
 ) -> Result<Seeded, SeedError> {
     ensure_configured(accounts, account)?;
-    let tokens = read_tokens(input)?;
     let me = fetch_me(http, api_base, &tokens).await?;
     let accounts = accounts.clone();
     let account = account.clone();
@@ -337,38 +350,6 @@ fn own_binding(lock: &StateLock, account: &AccountName) -> Result<Option<Peloton
             account: account.clone(),
             source,
         })
-}
-
-/// Whether `c` must not reach the terminal as is: a control character
-/// (`Cc`), a format character (`Cf`: bidi marks, embeddings, overrides and
-/// isolates, zero-width and invisible characters, tags), or a line or
-/// paragraph separator (`Zl`, `Zp`).
-fn is_unsafe_to_show(c: char) -> bool {
-    c.is_control()
-        || matches!(
-            c,
-            '\u{00ad}'
-                | '\u{0600}'..='\u{0605}'
-                | '\u{061c}'
-                | '\u{06dd}'
-                | '\u{070f}'
-                | '\u{0890}'..='\u{0891}'
-                | '\u{08e2}'
-                | '\u{180e}'
-                | '\u{200b}'..='\u{200f}'
-                | '\u{2028}'..='\u{202e}'
-                | '\u{2060}'..='\u{2064}'
-                | '\u{2066}'..='\u{206f}'
-                | '\u{feff}'
-                | '\u{fff9}'..='\u{fffb}'
-                | '\u{110bd}'
-                | '\u{110cd}'
-                | '\u{13430}'..='\u{1343f}'
-                | '\u{1bca0}'..='\u{1bca3}'
-                | '\u{1d173}'..='\u{1d17a}'
-                | '\u{e0001}'
-                | '\u{e0020}'..='\u{e007f}'
-        )
 }
 
 fn read_tokens(input: impl Read) -> Result<TokenSet, SeedError> {

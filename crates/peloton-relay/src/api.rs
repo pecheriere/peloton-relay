@@ -2,7 +2,9 @@
 //! and Stack, and validated, audit-logged writes to the schedule and Stack.
 //!
 //! Each request is served from the one account its `X-Peloton-Account`
-//! header names (see [`ACCOUNT_HEADER`]); any other is refused.
+//! header names (see [`ACCOUNT_HEADER`]); any other is refused. The admin
+//! routes under `/admin` (see [`crate::admin`]) take no account and are
+//! refused unless the request is marked as admin instead.
 
 use std::any::Any;
 use std::collections::btree_map::Entry;
@@ -28,6 +30,7 @@ use utoipa::openapi::{ContentBuilder, Ref, RefOr, ResponseBuilder};
 use utoipa::{IntoParams, Modify, OpenApi, ToSchema};
 
 use crate::account::AccountName;
+use crate::admin::{self, AdminState};
 use crate::error::{ApiError, ErrorBody};
 use crate::model::{
     ClassDetails, LIBRARY_DURATIONS_MIN, LibraryCategory, LibraryFilters, LibraryPage,
@@ -140,6 +143,11 @@ impl AccountRegistry {
     pub fn get(&self, name: &AccountName) -> Option<Arc<AccountContext>> {
         self.0.get(name).cloned()
     }
+
+    /// Every account's context, by name.
+    pub fn iter(&self) -> impl Iterator<Item = &Arc<AccountContext>> {
+        self.0.values()
+    }
 }
 
 /// Shared state of every handler.
@@ -147,8 +155,11 @@ impl AccountRegistry {
 pub struct AppState {
     /// The accounts requests are served from.
     pub accounts: Arc<AccountRegistry>,
-    /// The clock start times are checked against.
+    /// The clock start times are checked against, and the admin page's
+    /// times are shown against.
     pub clock: Clock,
+    /// The state of the admin routes.
+    pub admin: Arc<AdminState>,
 }
 
 /// Builds the router for the relay's API.
@@ -171,6 +182,7 @@ pub fn router(state: AppState) -> Router {
         .route("/openapi.json", get(spec))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .merge(admin::routes())
         .fallback(|| async { ApiError::NotFound })
         .method_not_allowed_fallback(|| async { ApiError::MethodNotAllowed });
     request_handling(routes, Arc::clone(&state.accounts)).with_state(state)
@@ -183,8 +195,9 @@ pub fn router(state: AppState) -> Router {
 /// `x-request-id` header. A panicking handler is answered with 500 (see
 /// [`catch_panics`]) inside that span, so the panic's log line carries the
 /// request's id and route too. Inside both, every request but those of the
-/// account-free paths must name an account of `accounts` (see
-/// [`require_account`]) before it reaches its route or a fallback.
+/// account-free paths and the admin paths must name an account of `accounts`
+/// (see [`require_account`]) before it reaches its route or a fallback; an
+/// admin path must be marked as admin instead (see [`admin::gate`]).
 ///
 /// Public only so that the integration tests can wrap their own routes.
 #[doc(hidden)]
@@ -296,12 +309,17 @@ fn named_account(
 /// of `accounts`, whose context it adds to the request's extensions (see
 /// [`Account`]) and whose name it records on the request span. Anything else
 /// is answered with 403 `forbidden` before routing, validation or any
-/// upstream call, and logged with the reason (see [`Refusal::log`]).
+/// upstream call, and logged with the reason (see [`Refusal::log`]). An admin
+/// path goes through [`admin::gate`] instead: the admin header, never the
+/// account header, decides.
 async fn require_account(
     State(accounts): State<Arc<AccountRegistry>>,
     mut request: Request,
     next: Next,
 ) -> Response {
+    if admin::is_admin_path(request.uri().path()) {
+        return admin::gate(request, next).await;
+    }
     if ACCOUNT_FREE_PATHS.contains(&request.uri().path()) {
         return next.run(request).await;
     }

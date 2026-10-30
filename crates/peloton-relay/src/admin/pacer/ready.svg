@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 150" role="img" aria-label="Pacer waving">
+        <ellipse cx="60" cy="142" rx="28" ry="4" fill="#E4E5EE"/>
+        <rect x="41" y="4" width="14" height="48" rx="7" fill="#E9E3FF" transform="rotate(-10 48 52)"/>
+        <rect x="45" y="11" width="6" height="34" rx="3" fill="#FFB3C1" transform="rotate(-10 48 52)"/>
+        <rect x="65" y="4" width="14" height="48" rx="7" fill="#E9E3FF" transform="rotate(10 72 52)"/>
+        <rect x="69" y="11" width="6" height="34" rx="3" fill="#FFB3C1" transform="rotate(10 72 52)"/>
+        <circle cx="83" cy="114" r="7" fill="#FFFFFF"/>
+        <path d="M42 96 Q30 90 30 77" stroke="#D9D0FF" stroke-width="7" fill="none" stroke-linecap="round"/>
+        <path d="M78 96 Q86 104 84 113" stroke="#D9D0FF" stroke-width="7" fill="none" stroke-linecap="round"/>
+        <rect x="40" y="84" width="40" height="42" rx="18" fill="#E9E3FF"/>
+        <path d="M40 92 H80 V108 A18 18 0 0 1 62 126 H58 A18 18 0 0 1 40 108 Z" fill="#6D4AFF"/>
+        <path d="M55 101 L60 106 L65 101" stroke="#FFFFFF" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="35" y="124" width="23" height="11" rx="5.5" fill="#FFFFFF" stroke="#BFC2D4" stroke-width="1.5"/><rect x="35" y="131.5" width="23" height="3.5" rx="1.75" fill="#15161F"/><circle cx="49.26" cy="128.62" r="1.6" fill="#FF7A59"/>
+        <rect x="62" y="124" width="23" height="11" rx="5.5" fill="#FFFFFF" stroke="#BFC2D4" stroke-width="1.5"/><rect x="62" y="131.5" width="23" height="3.5" rx="1.75" fill="#15161F"/><circle cx="76.26" cy="128.62" r="1.6" fill="#FF7A59"/>
+        <circle cx="60" cy="63" r="25" fill="#E9E3FF"/>
+        <rect x="36" y="49" width="48" height="8" rx="4" fill="#FF7A59"/>
+        <path d="M83 52 L95 46 M83 53 L96 58" stroke="#FF7A59" stroke-width="3.5" stroke-linecap="round"/>
+        <ellipse cx="51" cy="65" rx="2.8" ry="3.6" fill="#15161F"/><ellipse cx="69" cy="65" rx="2.8" ry="3.6" fill="#15161F"/>
+        <circle cx="44" cy="72" r="3.6" fill="#FFB3C1"/><circle cx="76" cy="72" r="3.6" fill="#FFB3C1"/>
+        <ellipse cx="60" cy="72" rx="3" ry="2.2" fill="#FF8FA3"/>
+        <path d="M56 76 Q58 78.5 60 76 Q62 78.5 64 76" stroke="#15161F" stroke-width="2" fill="none" stroke-linecap="round"/>
+</svg>

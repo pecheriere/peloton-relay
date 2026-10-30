@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 150" role="img" aria-label="Pacer resting">
+        <ellipse cx="60" cy="142" rx="30" ry="4" fill="#E4E5EE"/>
+        <rect x="41" y="12" width="14" height="44" rx="7" fill="#E9E3FF" transform="rotate(-62 48 56)"/>
+        <rect x="45" y="18" width="6" height="30" rx="3" fill="#FFB3C1" transform="rotate(-62 48 56)"/>
+        <rect x="65" y="12" width="14" height="44" rx="7" fill="#E9E3FF" transform="rotate(62 72 56)"/>
+        <rect x="69" y="18" width="6" height="30" rx="3" fill="#FFB3C1" transform="rotate(62 72 56)"/>
+        <rect x="40" y="86" width="40" height="40" rx="18" fill="#E9E3FF"/>
+        <path d="M40 94 H80 V108 A18 18 0 0 1 62 126 H58 A18 18 0 0 1 40 108 Z" fill="#8C8FA8"/>
+        <path d="M43 98 Q36 108 44 116" stroke="#D9D0FF" stroke-width="7" fill="none" stroke-linecap="round"/>
+        <path d="M77 98 Q84 108 76 116" stroke="#D9D0FF" stroke-width="7" fill="none" stroke-linecap="round"/>
+        <rect x="33" y="124" width="25" height="11" rx="5.5" fill="#FFFFFF" stroke="#BFC2D4" stroke-width="1.5"/><rect x="33" y="131.5" width="25" height="3.5" rx="1.75" fill="#15161F"/><circle cx="48.5" cy="128.62" r="1.6" fill="#FF7A59"/>
+        <rect x="62" y="124" width="25" height="11" rx="5.5" fill="#FFFFFF" stroke="#BFC2D4" stroke-width="1.5"/><rect x="62" y="131.5" width="25" height="3.5" rx="1.75" fill="#15161F"/><circle cx="77.5" cy="128.62" r="1.6" fill="#FF7A59"/>
+        <circle cx="60" cy="66" r="25" fill="#E9E3FF"/>
+        <rect x="36" y="52" width="48" height="8" rx="4" fill="#FF7A59"/>
+        <path d="M46 68 Q51 72 56 68 M64 68 Q69 72 74 68" stroke="#15161F" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+        <circle cx="44" cy="75" r="3.6" fill="#FFB3C1"/><circle cx="76" cy="75" r="3.6" fill="#FFB3C1"/>
+        <ellipse cx="60" cy="75" rx="3" ry="2.2" fill="#FF8FA3"/>
+        <path d="M57 79.5 H63" stroke="#15161F" stroke-width="2" stroke-linecap="round"/>
+        <path d="M92 14 H104 L92 28 H104 M80 30 H88 L80 39 H88" stroke="#E0A100" stroke-width="3.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use peloton::account::AccountName;
 use peloton::endpoints::{API_BASE, PLATFORM_HEADER};
 use peloton::graphql::{OpKind, op_url};
 use peloton::oauth::{
@@ -10,6 +11,7 @@ use peloton::oauth::{
 use secrecy::{ExposeSecret as _, SecretString};
 use url::Url;
 
+use crate::post;
 #[cfg(target_os = "macos")]
 use crate::window;
 
@@ -142,6 +144,24 @@ impl Session {
         Ok(self
             .runtime
             .block_on(self.auth.exchange_code(&code, &request))?)
+    }
+
+    /// Posts `tokens` to the relay at `to` (see [`post::post`]) and returns
+    /// its confirmation.
+    ///
+    /// # Errors
+    ///
+    /// See [`post::PostError`].
+    pub fn post(
+        &self,
+        to: &post::SeedUrl,
+        account: &AccountName,
+        code: &post::Code,
+        tokens: &TokenSet,
+    ) -> Result<String, post::PostError> {
+        let http = post::client()?;
+        self.runtime
+            .block_on(post::post(&http, to, account, code, tokens))
     }
 
     /// Trades a refresh token for a new token set.

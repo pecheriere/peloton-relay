@@ -10,6 +10,7 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use http_body_util::BodyExt as _;
 use peloton::ids::PelotonId;
 use peloton_relay::account::AccountName;
+use peloton_relay::admin::AdminState;
 use peloton_relay::api::{
     ACCOUNT_HEADER, AccountContext, AccountRegistry, AppState, Clock, router,
 };
@@ -117,6 +118,24 @@ pub fn account_context(
     context(server, account(name), file, max_in_flight)
 }
 
+/// The context of account `name`, never signed in: its directory exists
+/// under `root`, without a binding or a state file.
+pub fn unbound_context(
+    root: &std::path::Path,
+    server: &wiremock::MockServer,
+    name: &str,
+) -> AccountContext {
+    let accounts =
+        peloton_relay::account::Accounts::new(root.to_path_buf(), vec![account(name)]).unwrap();
+    accounts.ensure_dir(&account(name)).unwrap();
+    context(
+        server,
+        account(name),
+        accounts.state_file(&account(name)),
+        4,
+    )
+}
+
 fn context(
     server: &wiremock::MockServer,
     name: AccountName,
@@ -137,12 +156,28 @@ fn context(
     AccountContext::new(Arc::new(peloton))
 }
 
-/// The relay's router serving `contexts`, its clock stopped at `now`.
-pub fn router_of(contexts: Vec<AccountContext>, now: OffsetDateTime) -> Router {
+/// The relay's router serving `contexts`, its clock stopped at `now`, its
+/// admin routes on `admin`.
+pub fn router_with_admin(
+    contexts: Vec<AccountContext>,
+    now: OffsetDateTime,
+    admin: AdminState,
+) -> Router {
     router(AppState {
         accounts: Arc::new(AccountRegistry::new(contexts).unwrap()),
         clock: Clock::fixed(now),
+        admin: Arc::new(admin),
     })
+}
+
+/// The relay's router serving `contexts` from the state directory `root`,
+/// its clock stopped at `now`.
+pub fn router_of(
+    root: &std::path::Path,
+    contexts: Vec<AccountContext>,
+    now: OffsetDateTime,
+) -> Router {
+    router_with_admin(contexts, now, AdminState::new(root.to_owned(), None))
 }
 
 /// One account of [`relay_with`]: its name, the (access, refresh) tokens to
@@ -161,7 +196,7 @@ pub fn relay_with(
         .iter()
         .map(|(name, tokens, user)| account_context(dir.path(), server, name, *tokens, user, 4))
         .collect();
-    router_of(contexts, now)
+    router_of(dir.path(), contexts, now)
 }
 
 /// The context of account [`ACCOUNT`], its state file directly in `dir`;
@@ -189,7 +224,7 @@ pub fn relay(
     seeded: bool,
     now: OffsetDateTime,
 ) -> Router {
-    router_of(vec![alice(dir, server, seeded)], now)
+    router_of(dir.path(), vec![alice(dir, server, seeded)], now)
 }
 
 /// A request naming `account` (none when `None`), with `body` as JSON.

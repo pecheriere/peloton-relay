@@ -11,12 +11,14 @@ The server is one static binary that runs as an unprivileged user in a
 
 ## API
 
-All responses are JSON. The OpenAPI 3.1 description is served at `/openapi.json`;
+All responses are JSON (the [admin page](#admin-page) aside). The OpenAPI 3.1
+description is served at `/openapi.json`;
 it lists every parameter and enum value and walks through one example (find a
 20-minute low-impact ride and schedule it for Monday 08:00).
 
-Every route except `/healthz`, `/readyz` and `/openapi.json` serves one account,
-named by the `X-Peloton-Account` request header (see [Accounts](#accounts)).
+Every route except `/healthz`, `/readyz`, `/openapi.json` and the admin routes
+under `/admin` serves one account, named by the `X-Peloton-Account` request
+header (see [Accounts](#accounts)).
 
 ### Reads
 
@@ -120,8 +122,9 @@ name is 1 to 16 lowercase ASCII letters, chosen by the deployment (for example
 
 Each request names its account in the `X-Peloton-Account` header. A request
 that names no configured account answers 403 `forbidden`, for every path but
-`/healthz`, `/readyz` and `/openapi.json` (unmatched paths included), before any
-parameter or body is validated and before Peloton is contacted. The header is
+`/healthz`, `/readyz`, `/openapi.json` and those under `/admin` (unmatched paths
+included), before any parameter or body is validated and before Peloton is
+contacted. The header is
 set by the proxy in front of the relay, not by clients (see
 [Security model](#security-model)).
 
@@ -200,6 +203,136 @@ Between steps 3 and 4 the account's `/v1` routes answer 503
 `not_authenticated` and the server logs `event="state_refused"` with
 `reason="unbound"`; both are expected and end once `bind` has run.
 
+## Admin page
+
+`GET /admin` is a small page for the operator: one card per account in
+`PELOTON_RELAY_ACCOUNTS`, with its credential health (healthy, needs sign-in, or
+unreadable when the state or binding file cannot be read or refreshed tokens
+cannot be saved), when the relay last refreshed its access token and when that
+token expires, the Peloton user it is bound to (username and the last four hex
+digits of the id), and its recent credential problems (the last 8, kept in
+memory, as fixed messages). It never shows a token. Each time it is opened, the
+page first checks every account's credential the way the background check does.
+It works without JavaScript, apart from the Copy button and the live update
+while renewing; it loads nothing from elsewhere and follows the light or dark
+setting of the device.
+
+**Access.** Every path under `/admin` is served only when the request carries
+exactly one `X-Peloton-Admin` header whose value is `1`; anything else (no
+header, another value, the header twice) answers 403 `forbidden` before
+routing, and is logged as `event="admin_refused"` with the reason, never the
+value. The admin routes take no `X-Peloton-Account`, and `X-Peloton-Admin` never
+opens a `/v1` route. Like the account header, the admin header is set by the
+proxy in front of the relay, from an app capability that only the operator
+holds, and any copy the client sent is dropped (see
+[Security model](#security-model)). Every answer under `/admin` carries a strict
+`Content-Security-Policy` (`default-src 'none'`, the page's own inline script
+and style allowed by hash, `connect-src 'self'`, `form-action 'self'`,
+`frame-ancestors 'none'`, `base-uri 'none'`), `Cache-Control: no-store`,
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and
+`X-Frame-Options: DENY`.
+
+**Revoke.** *Revoke sign-in*, confirmed by a second *Really revoke* button,
+posts to `POST /admin/accounts/{name}/revoke`. It deletes the account's
+`state.json` under the account's lock, keeps `binding.json`, and drops the
+credential from the running relay, so the account's callers get 503
+`not_authenticated` at once, until it is signed in again (a request already in
+flight finishes with the token it had). It logs `event="account_revoked"` with
+the account and whether there was a state file to delete, then redirects to
+`/admin`, so reloading the page does not post again. Revoking makes the relay
+forget the credential; it does not invalidate it at Peloton: the refresh token
+stays valid there until it is rotated or expires, and so do copies of
+`state.json` in backups.
+
+**Renew or add.** *Renew sign-in* (or *Sign in* for an account that never had
+one) posts to `POST /admin/accounts/{name}/code`, which needs
+`PELOTON_RELAY_PUBLIC_URL`: without it the page says so and offers no button.
+The relay issues a one-time code for that account and answers with the command
+to run on the Mac, shown once with a Copy button (reloading that page posts the
+form again and issues a new code, which replaces the one shown):
+
+```sh
+peloton-relay-login --account bob --post-to https://relay.example.net/admin/seed --code <code>
+```
+
+The helper first names the relay the sign-in will go to and asks to continue
+(`--yes` skips the question; without a terminal to ask on and without `--yes`, it
+refuses), since a pasted command could name any host. It then opens the
+sign-in window and posts the token set with the code to
+`POST /admin/seed`, which runs the same checks as `seed` (`/me`, the account's
+binding, and refusing a Peloton user bound to another account; `--rebind` is not
+available there) and takes the credential into use without a restart. The page
+polls `GET /admin/accounts/{name}/status` and switches to *Signed in* once the
+account is healthy. The helper takes `--account`, `--post-to` and `--code`
+together or not at all; it refuses a `--post-to` that is not `https` to an IP
+address or a DNS name of letters, digits and hyphens (plain `http` only to a
+loopback address), never follows a redirect, prints the relay's
+confirmation line (or why the relay refused) on stderr, and never prints the
+code or the tokens. The code:
+
+- is 128 random bits, kept only as its SHA-256 digest (compared in constant
+  time), in memory: a restart invalidates it;
+- is valid for 10 minutes, for that one account; a new code for the account
+  replaces the old one;
+- is spent by a successful seed, and by a refusal of the binding (the account is
+  bound to another user, or the user to another account); a failure to reach
+  Peloton, a token Peloton rejects, a busy lock or a binding that cannot be
+  read leave it valid for a retry;
+- is never logged or put in an answer other than the page that issued it. It
+  is on the helper's command line, so it shows in the process list and the
+  shell history until it is spent or expires.
+
+After 5 wrong, expired or spent codes within 10 minutes, across all accounts,
+`POST /admin/seed` refuses every code with 429 `too_many_attempts` and a
+`Retry-After` until the oldest of those failures is 10 minutes old. A retry of a
+code that already succeeded counts too (for example when the helper gave up
+waiting for an answer the relay then sent); the status on the page shows whether
+it did.
+
+`POST /admin/seed` takes a JSON body (`Content-Type: application/json`, checked
+before the body is read; at most 64 KiB):
+
+```json
+{"account": "bob", "code": "<code>", "tokens": <the token set the helper prints for seed>}
+```
+
+and answers `{"account": "bob", "message": "<the line seed prints>"}`. Its
+outcomes are logged as `event="admin_seed"` with the account and `outcome` (`ok`
+or the error code), and refused codes as `event="admin_code_refused"`.
+
+The two page forms carry a CSRF token (an HMAC, under a key drawn at start, of
+the form and the account; a restart makes open pages stale) and are refused with
+403 `csrf_rejected` when it is missing or wrong, or when the browser reports the
+request as coming from another origin: `Sec-Fetch-Site` other than
+`same-origin`, or an `Origin` other than exactly the origin of
+`PELOTON_RELAY_PUBLIC_URL` (scheme, host and port), or, when that is unset, other
+than the request's own host. The page sends no referrer, so browsers send
+`Origin: null` with its forms; that passes only with
+`Sec-Fetch-Site: same-origin`. `POST /admin/seed` is not a browser form and needs
+no CSRF token: the code and the admin header authorise it. It refuses any
+request a browser sent (one with an `Origin` header, or a `Sec-Fetch-Site` other
+than `none`) with 403 `browser_request` before looking at the code, so no web
+page can spend or guess codes.
+
+| Status | `error` | Meaning |
+|--------|---------|---------|
+| 400 | `invalid_input` | The seed body is malformed. |
+| 403 | `forbidden` | The request is not marked as admin. |
+| 403 | `csrf_rejected` | A form's CSRF token or origin is wrong; reload the page. |
+| 403 | `browser_request` | A browser sent the request meant for the login helper. |
+| 403 | `invalid_code` | The code is wrong, expired, spent or for another account. |
+| 404 | `not_found` | No such account (or admin route). |
+| 409 | `not_configured` | Renewing needs `PELOTON_RELAY_PUBLIC_URL`. |
+| 409 | `bound_to_another_user` | The account is bound to another Peloton user. |
+| 409 | `user_bound_elsewhere` | The Peloton user is bound to another account. |
+| 409 | `binding_unreadable` | Another account's binding (or this one's) cannot be read, so the seed is refused; see the log. |
+| 413 | `payload_too_large` | The seed body exceeds 64 KiB. |
+| 415 | `unsupported_media_type` | The seed body is not `application/json`. |
+| 422 | `token_rejected` | Peloton rejected the posted access token; sign in again. |
+| 429 | `too_many_attempts` | Too many wrong codes; `Retry-After` says when to retry. |
+| 502 | `upstream_error` | Peloton failed to answer the `/me` check. |
+| 503 | `busy` | A seed or token refresh held the account's lock too long; retry. |
+
 ## Security model
 
 - **A fixed set of Peloton operations.** Reads: `GET /me`,
@@ -235,6 +368,13 @@ Between steps 3 and 4 the account's `/v1` routes answer 503
   any configured account, read its workout data and change its schedule and
   Stack, so bind it to a private interface or put it behind a network boundary
   and an authenticating proxy. Do not expose it to the internet.
+- **Admin access is separate.** The admin routes trust the
+  `X-Peloton-Admin: 1` header the same way: the proxy must set it only for the
+  operator (for example from an app capability of the gateway that only the
+  operator holds) and drop any copy the client sent. Anyone who can reach the
+  listening port directly can revoke and renew sign-ins, and with the code the
+  page shows, seed an account. The admin page never shows a token; signing in
+  stays in the login helper, so the relay never sees a Peloton password.
 - **One Peloton user per account.** The binding keeps an account's state file
   from holding another user's credential, and a Peloton user from serving two
   accounts (see [Accounts](#accounts)).
@@ -290,7 +430,10 @@ and a seed that arrives during a refresh waits for it (up to a minute, then it
 fails and can be run again). Seed right after logging in: a token set whose
 access token has already expired fails the check against `/me`; run the login
 again. For a login that only reports non-secret facts, run
-`cargo run --release -p peloton-relay-login -- check`.
+`cargo run --release -p peloton-relay-login -- check`. With
+`PELOTON_RELAY_PUBLIC_URL` set, the [admin page](#admin-page) gives a command
+that posts the token set to the relay over HTTPS instead of through
+`docker exec`.
 
 To check the schedule and Stack operations against a real account (for example
 after Peloton changes its web app), the helper has a spike:
@@ -315,6 +458,7 @@ traffic; repeat the bootstrap only if Peloton invalidates the refresh token.
 | `PELOTON_RELAY_LISTEN` | `0.0.0.0:8080` | Socket address the server binds. |
 | `PELOTON_RELAY_ACCOUNTS` | none, required | Comma-separated account names served by this relay; see [Accounts](#accounts). |
 | `PELOTON_RELAY_STATE_DIR` | `/state` | Directory holding one directory per account; must be writable by the container user. |
+| `PELOTON_RELAY_PUBLIC_URL` | none | The `https` origin the proxy serves the relay at (for example `https://relay.example.net`; no path, query or credentials), for the renew command of the [admin page](#admin-page). Renewing from the page is off when unset. |
 
 Logs are JSON lines on stdout. Every event about a credential or a write
 carries an `account` field with the account name; Peloton user ids appear only
@@ -337,6 +481,10 @@ the seed's own output goes to the operator's terminal, not to the log. A
 request that names no configured account logs `event="account_refused"` (the
 name only when it is a valid account name).
 Each write logs `event="peloton_write"` (see [Security model](#security-model)).
+The admin routes log `admin_refused`, `admin_form_refused`, `admin_code_issued`,
+`admin_code_refused`, `admin_seed`, `account_revoked` and
+`account_revoke_failed` (see
+[Admin page](#admin-page)); none carries a code or a token.
 A panic is logged as `event="panic"` with its source location only.
 Every request gets a fresh id, returned as the `x-request-id` header (an id sent
 by the client is ignored), and its log lines carry the id, the method and the

@@ -3,6 +3,7 @@
 pub mod capture;
 pub mod check;
 pub mod output;
+pub mod post;
 pub mod scrub;
 pub mod session;
 pub mod spike;
@@ -27,6 +28,9 @@ pub enum CliError {
     /// The token set could not be handed over on stdout.
     #[error(transparent)]
     Output(#[from] output::OutputError),
+    /// The token set could not be posted to the relay.
+    #[error(transparent)]
+    Post(#[from] post::PostError),
     /// The session could not be set up or the login failed.
     #[error(transparent)]
     Session(#[from] session::SessionError),

@@ -454,6 +454,24 @@ impl StateLock {
         write_atomic(&self.store.binding_path(), &json).map(|_| ())
     }
 
+    /// Deletes the state file, keeping the binding, and syncs the directory;
+    /// returns whether there was a state file.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Io`] when the file or the directory sync fails.
+    pub fn remove(&self) -> Result<bool, StoreError> {
+        match fs::remove_file(&self.store.path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(err) => return Err(StoreError::Io(err)),
+        }
+        File::open(parent_dir(&self.store.path)?)
+            .and_then(|dir| dir.sync_all())
+            .map_err(StoreError::Io)?;
+        Ok(true)
+    }
+
     /// [`StateFile::snapshot`], read under the lock: consistent with writers,
     /// which replace the binding and the state while holding it.
     pub(crate) fn snapshot(&self) -> io::Result<Snapshot> {
