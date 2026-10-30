@@ -35,7 +35,7 @@ const MARGIN: StdDuration = StdDuration::from_secs(3600);
 
 fn manager(dir: &Path, server: &MockServer) -> TokenManager {
     let auth = AuthClient::new(common::http(), Url::parse(&server.uri()).unwrap());
-    TokenManager::new(account(ACCOUNT), state_file(dir), auth, MARGIN)
+    TokenManager::new(account(ACCOUNT), state_file(dir), Vec::new(), auth, MARGIN)
 }
 
 fn refresh_mock(refresh_token: &str) -> wiremock::MockBuilder {
@@ -834,6 +834,7 @@ fn manager_waiting(
     TokenManager::with_timing(
         account(ACCOUNT),
         state_file(dir),
+        Vec::new(),
         auth,
         MARGIN,
         clock.clock(),
@@ -1390,6 +1391,7 @@ async fn seed_during_a_refresh_lands_after_the_rotated_tokens() {
     let tokens = Arc::new(TokenManager::new(
         account(ACCOUNT),
         file.clone(),
+        Vec::new(),
         auth,
         MARGIN,
     ));
@@ -1705,6 +1707,7 @@ async fn assert_refused(dir: &Path, case: &'static str, reason: &str) {
         StateFile {
             path: dir.join("state.json"),
         },
+        Vec::new(),
         AuthClient::new(common::http(), server_url(&server)),
         MARGIN,
     );
@@ -1948,6 +1951,7 @@ async fn credential_events_carry_the_account() {
     let tokens = TokenManager::with_timing(
         account("bob"),
         file.clone(),
+        Vec::new(),
         AuthClient::new(common::http(), server_url(&server)),
         MARGIN,
         clock.clock(),
@@ -2011,6 +2015,7 @@ fn bob_manager(
     let tokens = TokenManager::with_timing(
         account("bob"),
         file.clone(),
+        Vec::new(),
         AuthClient::new(common::http(), server_url(server)),
         MARGIN,
         clock.clock(),
@@ -2415,6 +2420,7 @@ async fn binding_that_cannot_be_checked_fails_closed() {
     let tokens = TokenManager::new(
         account(ACCOUNT),
         file.clone(),
+        Vec::new(),
         AuthClient::new(common::http(), server_url(&server)),
         MARGIN,
     );
@@ -2476,4 +2482,298 @@ fn temp_cleanup_failures_name_the_account_directory() {
         .collect();
     assert_eq!(failures.len(), 1, "{output}");
     assert_eq!(failures[0]["directory"], "bob");
+}
+
+/// Account alice, bound to [`user`] and holding a state, and her peer bob,
+/// bound to `bob_user`, under `root`; alice's manager knows bob.
+fn alice_with_peer(
+    root: &Path,
+    server: &MockServer,
+    bob_user: &PelotonId,
+) -> (TokenManager, StateFile, StateFile) {
+    let alice = account_state_file(root, ACCOUNT, &user());
+    alice
+        .save(
+            &state("old-access", "old-refresh", Duration::hours(48)),
+            LOCK_WAIT,
+        )
+        .unwrap();
+    let bob = account_state_file(root, "bob", bob_user);
+    let tokens = TokenManager::new(
+        account(ACCOUNT),
+        alice.clone(),
+        vec![(account("bob"), bob.clone())],
+        AuthClient::new(common::http(), server_url(server)),
+        MARGIN,
+    );
+    (tokens, alice, bob)
+}
+
+#[tokio::test]
+async fn user_bound_to_a_peer_is_not_loaded() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let root = tempfile::tempdir().unwrap();
+    let (tokens, ..) = alice_with_peer(root.path(), &server, &user());
+
+    async {
+        for _ in 0..3 {
+            assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+            assert!(!tokens.is_ready());
+        }
+    }
+    .instrument(tracing::info_span!("case", name = "peer_same_user"))
+    .await;
+    assert_eq!(refresh_calls(&server).await, 0);
+
+    let output = logs.contents();
+    let refused = peer_refusals(&output, "peer_same_user", "bound_elsewhere", "bob");
+    assert_eq!(refused.len(), 1, "{output}");
+    assert_eq!(
+        logged(&output, "peer_same_user", "state_loaded"),
+        0,
+        "{output}"
+    );
+    for secret in ["old-access", "old-refresh", USER] {
+        assert!(!output.contains(secret), "log leaks {secret}: {output}");
+    }
+}
+
+#[tokio::test]
+async fn peer_bound_to_another_user_does_not_matter() {
+    let server = MockServer::start().await;
+    let root = tempfile::tempdir().unwrap();
+    let (tokens, ..) = alice_with_peer(root.path(), &server, &other_user());
+    tokens.bearer().await.unwrap();
+    assert!(tokens.is_ready());
+}
+
+#[tokio::test]
+async fn peer_without_a_binding_does_not_matter() {
+    let server = MockServer::start().await;
+    let root = tempfile::tempdir().unwrap();
+    let (tokens, _, bob) = alice_with_peer(root.path(), &server, &other_user());
+    fs::remove_file(bob.binding_path()).unwrap();
+    tokens.bearer().await.unwrap();
+    assert!(tokens.is_ready());
+}
+
+/// Lines of the case `case` that log `state_refused` with `reason` for alice
+/// and name the peer `peer`.
+fn peer_refusals(output: &str, case: &str, reason: &str, peer: &str) -> Vec<serde_json::Value> {
+    output
+        .lines()
+        .filter(|line| line.contains(case) && line.contains("state_refused"))
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|json| {
+            json["account"] == ACCOUNT && json["reason"] == reason && json["peer"] == peer
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn peer_binding_that_is_corrupt_fails_closed() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let root = tempfile::tempdir().unwrap();
+    let (tokens, _, bob) = alice_with_peer(root.path(), &server, &other_user());
+    fs::write(bob.binding_path(), "{").unwrap();
+
+    async {
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+        assert!(!tokens.is_ready());
+    }
+    .instrument(tracing::info_span!("case", name = "peer_corrupt"))
+    .await;
+
+    let output = logs.contents();
+    let refused = peer_refusals(&output, "peer_corrupt", "peer_binding_corrupt", "bob");
+    assert_eq!(refused.len(), 1, "{output}");
+    assert_eq!(logged(&output, "peer_corrupt", "state_file_unreadable"), 0);
+}
+
+#[tokio::test]
+async fn peer_binding_that_cannot_be_read_fails_closed_and_recovers() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let root = tempfile::tempdir().unwrap();
+    let (tokens, _, bob) = alice_with_peer(root.path(), &server, &other_user());
+    // A directory in place of the binding: reading it fails with EISDIR.
+    fs::remove_file(bob.binding_path()).unwrap();
+    fs::create_dir(bob.binding_path()).unwrap();
+
+    async {
+        for _ in 0..2 {
+            assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+            assert!(!tokens.is_ready());
+        }
+        fs::remove_dir(bob.binding_path()).unwrap();
+        tokens.bearer().await.unwrap();
+        assert!(tokens.is_ready());
+    }
+    .instrument(tracing::info_span!("case", name = "peer_unreadable"))
+    .await;
+
+    let output = logs.contents();
+    let refused = peer_refusals(&output, "peer_unreadable", "peer_binding_unreadable", "bob");
+    assert_eq!(refused.len(), 1, "{output}");
+    assert!(refused[0]["cause"].is_string(), "{output}");
+    assert_eq!(
+        logged(&output, "peer_unreadable", "state_file_unreadable"),
+        0
+    );
+    assert_eq!(
+        logged(&output, "peer_unreadable", "state_loaded"),
+        1,
+        "{output}"
+    );
+}
+
+#[tokio::test]
+async fn peer_bound_to_the_user_is_noticed_when_the_own_state_goes_missing() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let root = tempfile::tempdir().unwrap();
+    let (tokens, alice, bob) = alice_with_peer(root.path(), &server, &other_user());
+
+    async {
+        tokens.bearer().await.unwrap();
+        assert!(tokens.is_ready());
+        fs::remove_file(&alice.path).unwrap();
+        bob.lock(LOCK_WAIT).unwrap().bind(&user()).unwrap();
+        // The own binding is rewritten with the same user: only the peer
+        // check can refuse the credential in memory now.
+        alice.lock(LOCK_WAIT).unwrap().bind(&user()).unwrap();
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+        assert!(!tokens.is_ready());
+    }
+    .instrument(tracing::info_span!("case", name = "peer_recheck"))
+    .await;
+    assert_eq!(refresh_calls(&server).await, 0);
+
+    let output = logs.contents();
+    let refused = peer_refusals(&output, "peer_recheck", "bound_elsewhere", "bob");
+    assert_eq!(refused.len(), 1, "{output}");
+}
+
+#[tokio::test]
+async fn ready_manager_drops_a_state_replaced_by_a_peers_copy() {
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let root = tempfile::tempdir().unwrap();
+    let (tokens, alice, bob) = alice_with_peer(root.path(), &server, &other_user());
+
+    async {
+        tokens.bearer().await.unwrap();
+        assert!(tokens.is_ready());
+        // An operator copies bob's files over alice's, and bob is bound to
+        // alice's user: both accounts now name the same user.
+        bob.lock(LOCK_WAIT).unwrap().bind(&user()).unwrap();
+        alice
+            .save(
+                &state("new-access", "new-refresh", Duration::hours(48)),
+                LOCK_WAIT,
+            )
+            .unwrap();
+        assert!(matches!(tokens.bearer().await, Err(NotAuthenticated)));
+        assert!(!tokens.is_ready());
+    }
+    .instrument(tracing::info_span!("case", name = "peer_reload"))
+    .await;
+    assert_eq!(refresh_calls(&server).await, 0);
+
+    let output = logs.contents();
+    let refused = peer_refusals(&output, "peer_reload", "bound_elsewhere", "bob");
+    assert_eq!(refused.len(), 1, "{output}");
+    assert_eq!(
+        logged(&output, "peer_reload", "state_reloaded"),
+        0,
+        "{output}"
+    );
+}
+
+/// Opens the write end of the FIFO at `path`, which waits for a reader: the
+/// relay's read of the binding. A reader that never comes fails the test
+/// instead of hanging it.
+async fn open_fifo_writer(path: &Path) -> fs::File {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let fifo = path.to_path_buf();
+    thread::spawn(move || {
+        let _ = sender.send(fs::OpenOptions::new().write(true).open(fifo));
+    });
+    if let Ok(opened) = tokio::time::timeout(StdDuration::from_secs(10), receiver).await {
+        return opened.unwrap().unwrap();
+    }
+    // Let the opening thread finish before failing.
+    let fifo = path.to_path_buf();
+    thread::spawn(move || drop(fs::File::open(fifo)));
+    panic!("the relay did not read the peer's binding");
+}
+
+#[tokio::test]
+async fn peer_refusal_is_read_again_when_the_own_account_changed_meanwhile() {
+    use std::io::Write as _;
+
+    let logs = captured_logs();
+    let server = MockServer::start().await;
+    let root = tempfile::tempdir().unwrap();
+    let (tokens, alice, bob) = alice_with_peer(root.path(), &server, &other_user());
+    // Bob's binding is a FIFO, so the test decides what the relay's read of
+    // it returns, and when: after the relay read alice's own files.
+    fs::remove_file(bob.binding_path()).unwrap();
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(bob.binding_path())
+            .status()
+            .unwrap()
+            .success()
+    );
+    let tokens = Arc::new(tokens);
+    let bearer = tokio::spawn({
+        let tokens = Arc::clone(&tokens);
+        async move { tokens.bearer().await }
+            .instrument(tracing::info_span!("case", name = "peer_retry"))
+    });
+
+    // The relay saw alice bound to the first user and now reads bob's binding.
+    let mut first = open_fifo_writer(&bob.binding_path()).await;
+    // A seed with `--rebind` moves alice to the second user, and bob takes
+    // over the first one.
+    {
+        let lock = alice.lock(LOCK_WAIT).unwrap();
+        lock.bind(&other_user()).unwrap();
+        lock.save(&state_of(
+            &other_user(),
+            "second-access",
+            "second-refresh",
+            Duration::hours(48),
+        ))
+        .unwrap();
+    }
+    // Bob takes over the first user. Its binding becomes a regular file, so
+    // the relay's second read does not wait for the test; the read in
+    // progress keeps the FIFO it opened.
+    let bound_to_first = format!(r#"{{"user_id":"{USER}"}}"#);
+    fs::remove_file(bob.binding_path()).unwrap();
+    fs::write(bob.binding_path(), &bound_to_first).unwrap();
+    // The relay read bob bound to alice's old user: it must read alice's
+    // files again, not refuse.
+    first.write_all(bound_to_first.as_bytes()).unwrap();
+    drop(first);
+
+    let (access, owner) = tokio::time::timeout(StdDuration::from_secs(10), bearer)
+        .await
+        .expect("bearer did not finish")
+        .unwrap()
+        .unwrap();
+    assert_eq!(access.expose_secret(), "second-access");
+    assert_eq!(owner, other_user());
+    assert!(tokens.is_ready());
+    let output = logs.contents();
+    assert_eq!(
+        logged(&output, "peer_retry", "state_refused"),
+        0,
+        "{output}"
+    );
+    assert_eq!(logged(&output, "peer_retry", "state_loaded"), 1, "{output}");
 }

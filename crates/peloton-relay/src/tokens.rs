@@ -3,9 +3,14 @@
 //! A state file counts only while the account's binding (`binding.json` next
 //! to it) names its user: an unbound, mismatched or corrupt binding is
 //! refused (logged once as `event="state_refused"`), and a manager that was
-//! ready drops its credential rather than keep serving it. A refusal seen
-//! without the state lock is read again under it first, since a `seed`
-//! replaces the binding and the state one after the other under that lock.
+//! ready drops its credential rather than keep serving it. When the account's
+//! state loads or reloads, and when its credential is rechecked against the
+//! binding, the other accounts' bindings count too: a user another account is
+//! bound to, or a binding of another account that cannot be read, is refused
+//! as well, as `seed` would not have bound it. This is not checked
+//! continuously. A refusal seen without the state lock is read again under it
+//! first, since a `seed` replaces the binding and the state one after the
+//! other under that lock.
 //!
 //! All state sits behind one async mutex that stays locked across a refresh,
 //! so concurrent callers share a single refresh request (single-flight) and
@@ -45,7 +50,9 @@ use tracing::Instrument as _;
 use tracing::instrument::WithSubscriber as _;
 
 use crate::account::{AccountName, user_suffix};
-use crate::store::{FileId, Refusal, Snapshot, State, StateFile, StateLock, StoreError, Version};
+use crate::store::{
+    FileId, Refusal, Snapshot, State, StateFile, StateLock, StoreError, Version, peer_conflict,
+};
 
 /// Refresh this long before the access token expires.
 pub const DEFAULT_REFRESH_MARGIN: Duration = Duration::from_hours(1);
@@ -112,6 +119,8 @@ struct Shared {
     /// The account whose credential this is; every credential log names it.
     account: AccountName,
     store: StateFile,
+    /// The other accounts of the relay and their state files.
+    peers: Vec<(AccountName, StateFile)>,
     auth: AuthClient,
     refresh_margin: Duration,
     clock: MonotonicClock,
@@ -215,7 +224,7 @@ enum Persist {
     Pending,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum LoadProblem {
     Missing,
     Corrupt,
@@ -379,8 +388,8 @@ impl Inner {
 impl Reported {
     /// Logs `problem` unless it is the one logged last.
     fn load_problem(&mut self, account: &AccountName, problem: LoadProblem) {
-        if self.load_problem != Some(problem) {
-            match problem {
+        if self.load_problem.as_ref() != Some(&problem) {
+            match &problem {
                 LoadProblem::Missing => {
                     tracing::info!(event = "state_missing", account = %account, "no state file yet; run seed");
                 }
@@ -396,7 +405,9 @@ impl Reported {
                         event = "state_refused",
                         account = %account,
                         reason = refusal.as_str(),
-                        "the account's binding does not allow its state file; run seed"
+                        peer = refusal.peer().map(tracing::field::display),
+                        cause = refusal.cause().map(tracing::field::debug),
+                        "the bindings do not allow the account's state file; run seed"
                     );
                 }
                 LoadProblem::Unreadable(kind) => {
@@ -438,7 +449,10 @@ impl Reported {
 
 impl TokenManager {
     /// Creates a manager for the credential of `account` in `store`, the
-    /// account's state file.
+    /// account's state file. `peers` are the other accounts of the relay and
+    /// their state files (empty for a relay of one account): a state whose
+    /// user is bound to one of them, or whose binding cannot be read, is
+    /// refused like one the account's own binding does not allow.
     ///
     /// Does no I/O: the state file is read on the first [`Self::bearer`] call,
     /// so [`Self::is_ready`] is `false` until then.
@@ -446,12 +460,14 @@ impl TokenManager {
     pub fn new(
         account: AccountName,
         store: StateFile,
+        peers: Vec<(AccountName, StateFile)>,
         auth: AuthClient,
         refresh_margin: Duration,
     ) -> Self {
         Self::with_timing(
             account,
             store,
+            peers,
             auth,
             refresh_margin,
             MonotonicClock::system(),
@@ -465,6 +481,7 @@ impl TokenManager {
     pub fn with_timing(
         account: AccountName,
         store: StateFile,
+        peers: Vec<(AccountName, StateFile)>,
         auth: AuthClient,
         refresh_margin: Duration,
         clock: MonotonicClock,
@@ -474,6 +491,7 @@ impl TokenManager {
             shared: Arc::new(Shared {
                 account,
                 store,
+                peers,
                 auth,
                 refresh_margin,
                 clock,
@@ -702,19 +720,34 @@ impl Shared {
     }
 
     /// Keeps the credential of `user` in memory only while the binding,
-    /// confirmed under the state lock if it refuses, still names `user`;
+    /// confirmed under the state lock if it refuses, still names `user` and
+    /// no other account is bound to it;
     /// otherwise drops it (fail closed, also when the binding is unreadable).
     async fn recheck_binding(&self, inner: &mut Inner, held: Option<&StateLock>, user: &PelotonId) {
         if !matches!(inner.phase, Phase::Ready(_)) {
             return;
         }
         match self.binding_allows(held, user).await {
-            Ok(Ok(id)) => {
-                if let Phase::Ready(ready) = &mut inner.phase {
-                    // This version is checked: do not re-read it on every call.
-                    ready.binding_id = id;
+            Ok(Ok(id)) => match self.peer_refusal(user).await {
+                Ok(None) => {
+                    if let Phase::Ready(ready) = &mut inner.phase {
+                        // This version is checked: do not re-read it on every call.
+                        ready.binding_id = id;
+                    }
                 }
-            }
+                Ok(Some(refusal)) => {
+                    inner.phase = Phase::Empty;
+                    inner
+                        .reported
+                        .load_problem(&self.account, LoadProblem::Refused(refusal));
+                }
+                Err(err) => {
+                    inner.phase = Phase::Empty;
+                    inner
+                        .reported
+                        .load_problem(&self.account, LoadProblem::Unreadable(err.kind()));
+                }
+            },
             Ok(Err(refusal)) => {
                 inner.phase = Phase::Empty;
                 inner
@@ -767,6 +800,61 @@ impl Shared {
         }
     }
 
+    /// [`Self::own_snapshot`], refused when a peer account is bound to the
+    /// state's user or a peer's binding cannot be read (see
+    /// [`Self::peer_refusal`]).
+    ///
+    /// A peer refusal read while this account's own files changed since the
+    /// snapshot (a `seed` in flight) is read again once, with the files that
+    /// replaced them.
+    async fn snapshot(&self, held: Option<&StateLock>) -> io::Result<Snapshot> {
+        let mut retried = false;
+        loop {
+            let loaded = self.own_snapshot(held).await?;
+            let Snapshot::Valid(state, version) = loaded else {
+                return Ok(loaded);
+            };
+            match self.peer_refusal(&state.user_id).await? {
+                None => return Ok(Snapshot::Valid(state, version)),
+                Some(refusal) => {
+                    if !retried && self.version_changed(version).await {
+                        retried = true;
+                        continue;
+                    }
+                    return Ok(Snapshot::Refused(refusal));
+                }
+            }
+        }
+    }
+
+    /// Why the other accounts of the relay refuse `user`, if they do: one is
+    /// bound to `user`, or the binding of one cannot be read (fail closed).
+    /// Their bindings are read without a lock: writers that move a user hold
+    /// the bindings lock, which the server never takes.
+    async fn peer_refusal(&self, user: &PelotonId) -> io::Result<Option<Refusal>> {
+        if self.peers.is_empty() {
+            return Ok(None);
+        }
+        let peers = self.peers.clone();
+        let user = user.clone();
+        blocking(move || {
+            peer_conflict(&peers, &user).map(|(peer, conflict)| Refusal::of_peer(peer, &conflict))
+        })
+        .await
+    }
+
+    /// Whether this account's state file or binding is no longer the
+    /// version `version` read; true too when that cannot be told.
+    async fn version_changed(&self, version: Version) -> bool {
+        let store = self.store.clone();
+        let Ok((state, binding)) = blocking(move || (store.current_id(), store.binding_id())).await
+        else {
+            return true;
+        };
+        !matches!(state, Ok(Some(id)) if id == version.state)
+            || !matches!(binding, Ok(Some(id)) if id == version.binding)
+    }
+
     /// Reads the state file checked against the binding, under `held` if the
     /// caller holds the state lock.
     ///
@@ -774,7 +862,7 @@ impl Shared {
     /// and its state write, so it is read again under the lock before it
     /// counts. If the lock cannot be taken in time, the unlocked refusal
     /// stands: either way no credential is used.
-    async fn snapshot(&self, held: Option<&StateLock>) -> io::Result<Snapshot> {
+    async fn own_snapshot(&self, held: Option<&StateLock>) -> io::Result<Snapshot> {
         if let Some(lock) = held {
             let lock = lock.clone();
             return blocking(move || lock.snapshot()).await.and_then(|r| r);

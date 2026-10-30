@@ -14,6 +14,8 @@ use peloton::ids::PelotonId;
 use peloton::oauth::TokenSet;
 use serde::{Deserialize, Serialize};
 
+use crate::account::AccountName;
+
 /// Everything the relay needs to call Peloton on the owner's behalf.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct State {
@@ -105,7 +107,7 @@ pub(crate) struct Version {
 }
 
 /// Why a well-formed state is not used.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Refusal {
     /// The account has no binding yet.
     Unbound,
@@ -113,15 +115,53 @@ pub(crate) enum Refusal {
     UserMismatch,
     /// The binding file does not parse.
     BindingCorrupt,
+    /// The named other account is bound to the state's user.
+    BoundElsewhere(AccountName),
+    /// The binding of the named other account does not parse, so it is
+    /// unknown whether it names the state's user.
+    PeerBindingCorrupt(AccountName),
+    /// The binding of the named other account cannot be read.
+    PeerBindingUnreadable(AccountName, io::ErrorKind),
 }
 
 impl Refusal {
     /// The `reason` logged for this refusal.
-    pub(crate) fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Self::Unbound => "unbound",
             Self::UserMismatch => "user_mismatch",
             Self::BindingCorrupt => "binding_corrupt",
+            Self::BoundElsewhere(_) => "bound_elsewhere",
+            Self::PeerBindingCorrupt(_) => "peer_binding_corrupt",
+            Self::PeerBindingUnreadable(..) => "peer_binding_unreadable",
+        }
+    }
+
+    /// The refusal for `conflict` with the account `peer`.
+    pub(crate) fn of_peer(peer: &AccountName, conflict: &PeerConflict) -> Self {
+        let peer = peer.clone();
+        match conflict {
+            PeerConflict::BoundElsewhere => Self::BoundElsewhere(peer),
+            PeerConflict::Corrupt => Self::PeerBindingCorrupt(peer),
+            PeerConflict::Unreadable(err) => Self::PeerBindingUnreadable(peer, err.kind()),
+        }
+    }
+
+    /// The other account that caused this refusal, if any.
+    pub(crate) fn peer(&self) -> Option<&AccountName> {
+        match self {
+            Self::BoundElsewhere(peer)
+            | Self::PeerBindingCorrupt(peer)
+            | Self::PeerBindingUnreadable(peer, _) => Some(peer),
+            Self::Unbound | Self::UserMismatch | Self::BindingCorrupt => None,
+        }
+    }
+
+    /// The kind of I/O error that caused this refusal, if any.
+    pub(crate) fn cause(&self) -> Option<io::ErrorKind> {
+        match self {
+            Self::PeerBindingUnreadable(_, kind) => Some(*kind),
+            _ => None,
         }
     }
 }
@@ -151,6 +191,44 @@ impl BindingRead {
             Self::Bound(..) => Err(Refusal::UserMismatch),
         }
     }
+}
+
+/// Why a Peloton user may not be used by an account, because of another
+/// account.
+#[derive(Debug)]
+pub enum PeerConflict {
+    /// The other account is bound to the user.
+    BoundElsewhere,
+    /// The binding of the other account does not parse, so it is unknown
+    /// whether it names the user.
+    Corrupt,
+    /// The binding of the other account cannot be read.
+    Unreadable(io::Error),
+}
+
+/// The first of `peers`, the other accounts, that is bound to `user` or
+/// whose binding cannot be read (fail closed), and why. Takes no lock: each
+/// binding is only ever replaced by a rename, so a read sees one whole
+/// version. Writers hold the bindings lock around this.
+#[must_use]
+pub fn peer_conflict<'a>(
+    peers: &'a [(AccountName, StateFile)],
+    user: &PelotonId,
+) -> Option<(&'a AccountName, PeerConflict)> {
+    peers
+        .iter()
+        .find_map(|(name, file)| match file.read_binding() {
+            Ok(Some(binding)) if binding.user_id == *user => {
+                Some((name, PeerConflict::BoundElsewhere))
+            }
+            Ok(_) => None,
+            Err(StoreError::Corrupt) => Some((name, PeerConflict::Corrupt)),
+            Err(StoreError::Io(err)) => Some((name, PeerConflict::Unreadable(err))),
+            // `read_binding` takes no lock, so this cannot happen; fail closed.
+            Err(err @ StoreError::Locked) => {
+                Some((name, PeerConflict::Unreadable(io::Error::other(err))))
+            }
+        })
 }
 
 /// The JSON file holding the [`State`].
@@ -601,6 +679,7 @@ fn write_synced(path: &Path, contents: &[u8]) -> io::Result<FileId> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io;
     use std::os::unix::fs::PermissionsExt as _;
 
     use std::ffi::OsStr;
@@ -612,8 +691,11 @@ mod tests {
     use secrecy::SecretString;
     use time::OffsetDateTime;
 
+    use crate::account::{AccountName, Accounts};
+
     use super::{
-        Refusal, Snapshot, State, StateFile, is_temp_name, lock_name, temp_name, write_synced,
+        PeerConflict, Refusal, Snapshot, State, StateFile, is_temp_name, lock_name, peer_conflict,
+        temp_name, write_synced,
     };
 
     const WAIT: Duration = Duration::from_secs(5);
@@ -647,7 +729,7 @@ mod tests {
 
     fn refusal(snapshot: &Snapshot) -> Option<Refusal> {
         match snapshot {
-            Snapshot::Refused(refusal) => Some(*refusal),
+            Snapshot::Refused(refusal) => Some(refusal.clone()),
             _ => None,
         }
     }
@@ -709,6 +791,91 @@ mod tests {
         assert_eq!(Refusal::Unbound.as_str(), "unbound");
         assert_eq!(Refusal::UserMismatch.as_str(), "user_mismatch");
         assert_eq!(Refusal::BindingCorrupt.as_str(), "binding_corrupt");
+    }
+
+    fn name(text: &str) -> AccountName {
+        text.parse().unwrap()
+    }
+
+    /// Accounts alice, bob and carol under a fresh root, each bound to its own
+    /// user; returns the peers of alice.
+    fn peers_of_alice() -> (tempfile::TempDir, Accounts, Vec<(AccountName, StateFile)>) {
+        let root = tempfile::tempdir().unwrap();
+        let names = vec![name("alice"), name("bob"), name("carol")];
+        let accounts = Accounts::new(root.path().to_owned(), names.clone()).unwrap();
+        for (account, tail) in names.iter().zip(["a1", "b2", "c3"]) {
+            accounts.ensure_dir(account).unwrap();
+            let user: PelotonId = format!("000000000000000000000000000000{tail}")
+                .parse()
+                .unwrap();
+            accounts
+                .state_file(account)
+                .lock(Duration::from_secs(1))
+                .unwrap()
+                .bind(&user)
+                .unwrap();
+        }
+        let peers = accounts.peers_of(&name("alice"));
+        (root, accounts, peers)
+    }
+
+    fn user_of(tail: &str) -> PelotonId {
+        format!("000000000000000000000000000000{tail}")
+            .parse()
+            .unwrap()
+    }
+
+    #[test]
+    fn peer_conflict_finds_a_peer_bound_to_the_user() {
+        let (_root, _accounts, peers) = peers_of_alice();
+        assert!(peer_conflict(&peers, &user_of("a1")).is_none());
+        let (peer, conflict) = peer_conflict(&peers, &user_of("c3")).unwrap();
+        assert_eq!(peer, &name("carol"));
+        assert!(matches!(conflict, PeerConflict::BoundElsewhere));
+        assert!(peer_conflict(&[], &user_of("c3")).is_none());
+    }
+
+    #[test]
+    fn peer_conflict_ignores_a_peer_without_a_binding() {
+        let (_root, _accounts, peers) = peers_of_alice();
+        std::fs::remove_file(peers[1].1.binding_path()).unwrap();
+        assert!(peer_conflict(&peers, &user_of("c3")).is_none());
+    }
+
+    #[test]
+    fn peer_conflict_fails_closed_on_a_binding_it_cannot_use() {
+        let (_root, _accounts, peers) = peers_of_alice();
+        std::fs::write(peers[0].1.binding_path(), "{").unwrap();
+        let (peer, conflict) = peer_conflict(&peers, &user_of("a1")).unwrap();
+        assert_eq!(peer, &name("bob"));
+        assert!(matches!(conflict, PeerConflict::Corrupt));
+
+        std::fs::remove_file(peers[0].1.binding_path()).unwrap();
+        std::fs::create_dir(peers[0].1.binding_path()).unwrap();
+        let (peer, conflict) = peer_conflict(&peers, &user_of("a1")).unwrap();
+        assert_eq!(peer, &name("bob"));
+        assert!(matches!(conflict, PeerConflict::Unreadable(_)));
+    }
+
+    #[test]
+    fn peer_refusals_name_the_peer_and_the_cause() {
+        let bob: AccountName = "bob".parse().unwrap();
+        let cases = [
+            (PeerConflict::BoundElsewhere, "bound_elsewhere", None),
+            (PeerConflict::Corrupt, "peer_binding_corrupt", None),
+            (
+                PeerConflict::Unreadable(io::ErrorKind::PermissionDenied.into()),
+                "peer_binding_unreadable",
+                Some(io::ErrorKind::PermissionDenied),
+            ),
+        ];
+        for (conflict, reason, cause) in cases {
+            let refusal = Refusal::of_peer(&bob, &conflict);
+            assert_eq!(refusal.as_str(), reason);
+            assert_eq!(refusal.peer(), Some(&bob));
+            assert_eq!(refusal.cause(), cause);
+        }
+        assert_eq!(Refusal::UserMismatch.peer(), None);
     }
 
     #[test]

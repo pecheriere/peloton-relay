@@ -146,7 +146,10 @@ The state directory holds one directory per account:
 - An account bound to one user refuses a credential of another user unless
   `seed` is run with `--rebind`.
 - The server refuses a state file whose user does not match the binding
-  (logged as `state_refused`) and keeps the account unauthenticated.
+  (logged as `state_refused`) and keeps the account unauthenticated. It also
+  refuses a state whose user another account is bound to, and any state while
+  the binding of another account cannot be read (fail closed). These are
+  checked when the account's state loads or reloads, not continuously.
 
 Seed an account (see [Bootstrap](#bootstrap)):
 
@@ -324,11 +327,15 @@ refresh per 10 minutes, rather than rotating the credential on every request.
 A failure to save refreshed tokens is logged once per streak as
 `event="state_save_failed"`, and the next successful save as
 `event="state_save_recovered"`. A state file that does not match its account's
-binding is refused with `event="state_refused"`. When the running relay picks
-up a rebind (a seed with `--rebind` that moved an account to another Peloton
-user), it logs `event="account_rebound"`; the seed's own output goes to the
-operator's terminal, not to the log. A request that names no configured account
-logs `event="account_refused"` (the name only when it is a valid account name).
+binding is refused with `event="state_refused"`, whose `reason` is `unbound`,
+`user_mismatch` or `binding_corrupt` for the account's own binding, and
+`bound_elsewhere`, `peer_binding_corrupt` or `peer_binding_unreadable` when
+another account (named in `peer`) is bound to the user or its binding cannot
+be used. When the running relay picks up a rebind (a seed with `--rebind` that
+moved an account to another Peloton user), it logs `event="account_rebound"`;
+the seed's own output goes to the operator's terminal, not to the log. A
+request that names no configured account logs `event="account_refused"` (the
+name only when it is a valid account name).
 Each write logs `event="peloton_write"` (see [Security model](#security-model)).
 A panic is logged as `event="panic"` with its source location only.
 Every request gets a fresh id, returned as the `x-request-id` header (an id sent

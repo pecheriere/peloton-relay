@@ -127,6 +127,7 @@ fn context(
     let tokens = Arc::new(TokenManager::new(
         name,
         file,
+        Vec::new(),
         auth,
         StdDuration::from_secs(3600),
     ));
