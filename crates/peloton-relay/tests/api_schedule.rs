@@ -9,6 +9,7 @@ use peloton::graphql::ops;
 use peloton::ids::{OnDemandClassId, PelotonId};
 use peloton::upstream as wire;
 use peloton_relay::model;
+use peloton_relay_test_support::api;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::macros::datetime;
@@ -16,23 +17,11 @@ use tracing::Instrument as _;
 use wiremock::matchers::{body_partial_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod common;
-
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod api_common;
-
-use api_common::{
+use peloton_relay_test_support::api::{
     ACCESS, REFRESH, assert_error, bare, fixture_json, fixture_scheduled_id, mount_op, send,
     stack_with_one_class, with_json,
 };
-use common::captured_logs;
+use peloton_relay_test_support::common::captured_logs;
 
 /// The relay clock: a week before the fixtures' scheduled class.
 const NOW: OffsetDateTime = datetime!(2030-01-01 00:00 UTC);
@@ -56,7 +45,7 @@ fn expected<T: serde::Serialize>(value: &T) -> Value {
 }
 
 fn app(dir: &tempfile::TempDir, server: &MockServer) -> Router {
-    api_common::relay(dir, server, true, NOW)
+    api::relay(dir, server, true, NOW)
 }
 
 async fn upstream_hits(server: &MockServer) -> usize {
@@ -960,7 +949,7 @@ fn audit_events(case: &str) -> Vec<String> {
 async fn writes_log_peloton_write_event() {
     let logs = captured_logs();
     let server = MockServer::start().await;
-    api_common::mount_every_new_upstream(&server).await;
+    api::mount_every_new_upstream(&server).await;
     let (_, url_safe) = fixture_scheduled_id();
     let moved = scheduled_class("schedule_reschedule.json", "rescheduleClass")
         .id

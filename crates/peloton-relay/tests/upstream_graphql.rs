@@ -1,6 +1,7 @@
 //! Tests for the relay's GraphQL operations (schedule and Stack), against
 //! scrubbed fixtures and synthetic answers.
 
+use peloton_relay_test_support::{common, raw_http};
 use std::fs;
 use std::io::Write as _;
 use std::sync::Arc;
@@ -26,16 +27,10 @@ use url::Url;
 use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod common;
-mod gated;
-mod raw_http;
-
-use common::{ACCOUNT, LOCK_WAIT, account, captured_logs, http, state, state_file};
-use gated::GatedServer;
+use peloton_relay_test_support::common::{
+    ACCOUNT, LOCK_WAIT, account, captured_logs, http, state, state_file,
+};
+use peloton_relay_test_support::gated::GatedServer;
 
 /// The ride of every scrubbed schedule and Stack fixture.
 const FIXTURE_RIDE: &str = "00000000000000000000000000000f1d";

@@ -2,6 +2,7 @@
 //! account its `X-Peloton-Account` header names, and refused otherwise; each
 //! account's credential, upstream limit and Stack writes are its own.
 
+use peloton_relay_test_support::common;
 use std::collections::BTreeSet;
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
@@ -21,24 +22,12 @@ use tracing::Instrument as _;
 use wiremock::matchers::{any, body_string_contains, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod common;
-
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod api_common;
-
-use api_common::{
+use peloton_relay_test_support::api::{
     SAMPLE_CLASS, SAMPLE_ID, SAMPLE_SCHEDULED, V1_ROUTES, account_context, assert_error,
     fixture_json, fixture_scheduled_id, relay_with, request_as, router_of, sample_body, send,
     stack_with_one_class,
 };
-use common::{LOCK_WAIT, captured_logs};
+use peloton_relay_test_support::common::{LOCK_WAIT, captured_logs};
 
 /// The relay clock: a week before the samples' start time.
 const NOW: OffsetDateTime = datetime!(2030-01-01 00:00 UTC);

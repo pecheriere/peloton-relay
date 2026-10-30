@@ -5,25 +5,14 @@ use axum::http::StatusCode;
 use peloton::upstream as wire;
 use peloton_relay::api::openapi;
 use peloton_relay::model;
+use peloton_relay_test_support::api;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::macros::datetime;
 use wiremock::matchers::{header, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod common;
-
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod api_common;
-
-use api_common::{assert_error, bare, fixture, fixture_json, send};
+use peloton_relay_test_support::api::{assert_error, bare, fixture, fixture_json, send};
 
 const NOW: OffsetDateTime = datetime!(2030-01-01 00:00 UTC);
 const CLASS_TYPE: &str = "00000000000000000000000000000f10";
@@ -58,7 +47,7 @@ fn expected<T: serde::Serialize>(value: &T) -> Value {
 
 async fn get(server: &MockServer, uri: &str) -> (StatusCode, String) {
     let dir = tempfile::tempdir().unwrap();
-    let app = api_common::relay(&dir, server, true, NOW);
+    let app = api::relay(&dir, server, true, NOW);
     let (status, _, body) = send(&app, bare("GET", uri)).await;
     (status, body)
 }

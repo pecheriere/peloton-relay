@@ -1,5 +1,10 @@
 [graph]
 all-features = true
+# The test-support crate is a dev-only helper that the relay never ships.
+# Excluding it keeps its normal dependencies from counting as the relay's, so
+# the rule is: every dependency of that crate must also be a (dev-)dependency
+# of `peloton-relay` or `peloton`, which cargo deny still audits.
+exclude = ["peloton-relay-test-support"]
 # The default audit covers what the relay ships for. The macOS-only login
 # helper is audited separately with `--target aarch64-apple-darwin`; mixing
 # both would leak wry/tao's Linux GTK edges into the graph.

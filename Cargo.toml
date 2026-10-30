@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/peloton", "crates/peloton-relay", "crates/peloton-relay-login"]
+members = [
+    "crates/peloton",
+    "crates/peloton-relay",
+    "crates/peloton-relay-login",
+    "crates/peloton-relay-test-support",
+]
 
 [workspace.package]
 version = "0.4.0"
@@ -20,6 +25,8 @@ http-body-util = "0.1"
 maud = "0.27"
 muda = { version = "0.21", default-features = false }
 peloton = { path = "crates/peloton", version = "0.4.0" }
+peloton-relay = { path = "crates/peloton-relay", version = "0.4.0" }
+peloton-relay-test-support = { path = "crates/peloton-relay-test-support", version = "0.4.0" }
 proptest = "1.12.0"
 rand = "0.10"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "query"] }

@@ -1,6 +1,7 @@
 //! End-to-end tests of the `healthcheck` subcommand: the real binary against
 //! a server on the address it is configured to probe.
 
+use peloton_relay_test_support::api;
 use std::net::SocketAddr;
 use std::process::Output;
 
@@ -12,18 +13,6 @@ use time::macros::datetime;
 use tokio::net::TcpListener;
 use tokio::process::Command;
 use wiremock::MockServer;
-
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod common;
-
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod api_common;
 
 /// Serves `app` on a free loopback port.
 async fn serve(app: Router) -> SocketAddr {
@@ -53,7 +42,7 @@ fn stderr(output: &Output) -> String {
 async fn healthcheck_succeeds_against_a_healthy_server() {
     let upstream = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
-    let relay = api_common::relay(&dir, &upstream, true, datetime!(2030-01-01 00:00 UTC));
+    let relay = api::relay(&dir, &upstream, true, datetime!(2030-01-01 00:00 UTC));
     let addr = serve(relay).await;
     let output = healthcheck(addr).await;
     assert!(output.status.success(), "{}", stderr(&output));

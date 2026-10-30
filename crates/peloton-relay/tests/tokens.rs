@@ -1,5 +1,6 @@
 //! Tests for the state file and the refreshing token manager.
 
+use peloton_relay_test_support::common;
 use std::fs;
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::Path;
@@ -25,9 +26,7 @@ use url::Url;
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-mod common;
-
-use common::{
+use peloton_relay_test_support::common::{
     ACCOUNT, LOCK_WAIT, USER, account, account_state_file, captured_logs, state, state_file, user,
 };
 

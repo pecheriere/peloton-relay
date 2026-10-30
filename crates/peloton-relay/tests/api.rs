@@ -1,5 +1,6 @@
 //! Tests for the HTTP API, driving the router against a mock Peloton.
 
+use peloton_relay_test_support::{api, common};
 use std::sync::Arc;
 
 use axum::Router;
@@ -16,19 +17,9 @@ use tracing::Instrument as _;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod common;
-
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod api_common;
-
-use api_common::{ACCESS, REFRESH, assert_error, bare, fixture, send, with_json};
+use peloton_relay_test_support::api::{
+    ACCESS, REFRESH, assert_error, bare, fixture, send, with_json,
+};
 
 const WORKOUT: &str = "fedcba9876543210fedcba9876543210";
 /// The relay clock: these routes never read it.
@@ -39,7 +30,7 @@ fn json(body: String) -> ResponseTemplate {
 }
 
 fn app(dir: &tempfile::TempDir, server: &MockServer, seeded: bool) -> Router {
-    api_common::relay(dir, server, seeded, NOW)
+    api::relay(dir, server, seeded, NOW)
 }
 
 async fn get(app: &Router, uri: &str) -> (StatusCode, axum::http::HeaderMap, String) {
@@ -423,7 +414,7 @@ async fn readyz_is_ready_without_credentials() {
         let dir = tempfile::tempdir().unwrap();
         let (status, _, body) = send(
             &app(&dir, &server, seeded),
-            api_common::request_as(None, "GET", "/readyz", None),
+            api::request_as(None, "GET", "/readyz", None),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "seeded {seeded}: {body}");
@@ -456,7 +447,7 @@ fn openapi_documents_the_account_requirement() {
             }
         }
     }
-    assert_eq!(checked, api_common::V1_ROUTES.len());
+    assert_eq!(checked, api::V1_ROUTES.len());
     for probe in ["/healthz", "/readyz"] {
         assert!(document["paths"][probe]["get"].is_object(), "{probe}");
     }
@@ -528,7 +519,7 @@ async fn responses_never_contain_tokens() {
         .respond_with(json(fixture("ride_details-cycling-class.json")))
         .mount(&server)
         .await;
-    api_common::mount_every_new_upstream(&server).await;
+    api::mount_every_new_upstream(&server).await;
     let dir = tempfile::tempdir().unwrap();
     let app = app(&dir, &server, true);
     for request in new_route_requests() {
@@ -569,7 +560,7 @@ fn assert_no_tokens(uri: &str, headers: &axum::http::HeaderMap, body: &str) {
 /// One request to each library, schedule and Stack route, reads and writes,
 /// plus one rejected write.
 fn new_route_requests() -> Vec<Request<Body>> {
-    let (_, scheduled) = api_common::fixture_scheduled_id();
+    let (_, scheduled) = api::fixture_scheduled_id();
     let class = "00000000000000000000000000000f1d";
     let start = serde_json::json!("2030-01-07T12:00:00Z");
     let writes = [
@@ -815,7 +806,7 @@ async fn panic_log_and_500_carry_the_request_id_and_route() {
     common::captured_logs();
     let server = MockServer::start().await;
     let dir = tempfile::tempdir().unwrap();
-    let accounts = AccountRegistry::new(vec![api_common::alice(&dir, &server, true)]).unwrap();
+    let accounts = AccountRegistry::new(vec![api::alice(&dir, &server, true)]).unwrap();
     let app = peloton_relay::api::request_handling(
         Router::new().route("/boom/{id}", get(boom)),
         Arc::new(accounts),

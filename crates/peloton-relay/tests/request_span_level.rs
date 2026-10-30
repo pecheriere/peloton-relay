@@ -2,22 +2,11 @@
 //!
 //! In a binary of its own: the subscriber is global, with its own filter.
 
+use peloton_relay_test_support::{api, common};
 use time::macros::datetime;
 use tracing_subscriber::EnvFilter;
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod common;
-
-#[allow(
-    dead_code,
-    reason = "shared by several test crates, each using a subset of the helpers"
-)]
-mod api_common;
 
 #[tokio::test]
 async fn warning_carries_the_request_span_under_a_warn_filter() {
@@ -33,8 +22,8 @@ async fn warning_carries_the_request_span_under_a_warn_filter() {
         .mount(&server)
         .await;
     let dir = tempfile::tempdir().unwrap();
-    let app = api_common::relay(&dir, &server, true, datetime!(2030-01-01 00:00 UTC));
-    let (_, headers, _) = api_common::send(&app, api_common::bare("GET", "/v1/me")).await;
+    let app = api::relay(&dir, &server, true, datetime!(2030-01-01 00:00 UTC));
+    let (_, headers, _) = api::send(&app, api::bare("GET", "/v1/me")).await;
     let id = headers["x-request-id"].to_str().unwrap();
 
     let contents = logs.contents();
