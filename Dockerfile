@@ -26,15 +26,16 @@ RUN case "$TARGETARCH" in \
     esac \
     && CARGO_PROFILE_RELEASE_STRIP=true \
        cargo zigbuild --release --locked -p peloton-relay --target "$target" \
-    && install -D "target/$target/release/peloton-relay" /out/peloton-relay \
-    && install -d -m 0700 -o 65532 -g 65532 /out/state
+    && install -D -m 0755 "target/$target/release/peloton-relay" /out/rootfs/peloton-relay \
+    && install -d -m 0700 -o 65532 -g 65532 /out/rootfs/state
 
 # The clients trust the Mozilla root certificates compiled into the binary, so no CA
 # bundle is copied in.
 FROM scratch
 
-COPY --from=build /out/peloton-relay /peloton-relay
-COPY --from=build --chown=65532:65532 /out/state /state
+# Copied as one tree, which keeps each entry's owner and mode. Copying the
+# state directory on its own would recreate it with mode 0755.
+COPY --from=build /out/rootfs/ /
 
 USER 65532:65532
 ENV PELOTON_RELAY_STATE_DIR=/state
