@@ -244,7 +244,7 @@ async fn assert_tokens_unused(server: &MockServer) {
 
 fn assert_no_secrets(text: &str) {
     for secret in SECRETS {
-        assert!(!text.contains(secret), "leaks {secret}: {text}");
+        assert!(!text.contains(secret), "leaks a secret: {text}");
     }
 }
 
