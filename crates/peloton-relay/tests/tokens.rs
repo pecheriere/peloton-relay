@@ -340,7 +340,7 @@ async fn invalid_grant_logs_event_once() {
         .count();
     assert_eq!(failures, 1, "{output}");
     for secret in ["old-access", "old-refresh", "new-access", "rotated-refresh"] {
-        assert!(!output.contains(secret), "log leaks {secret}: {output}");
+        assert!(!output.contains(secret), "log leaks a secret: {output}");
     }
 }
 
@@ -1731,7 +1731,7 @@ async fn assert_refused(dir: &Path, case: &'static str, reason: &str) {
     assert_eq!(refused[0]["account"], ACCOUNT);
     assert_eq!(refused[0]["reason"], reason);
     for secret in ["old-access", "old-refresh", USER, OTHER_USER] {
-        assert!(!output.contains(secret), "log leaks {secret}: {output}");
+        assert!(!output.contains(secret), "log leaks a secret: {output}");
     }
 }
 
@@ -1857,7 +1857,7 @@ async fn rebound_state_is_adopted_and_audited() {
     assert_eq!(events[2]["account"], ACCOUNT);
     assert_eq!(events[2]["user"], "\u{2026}b0b2");
     for secret in [USER, OTHER_USER] {
-        assert!(!output.contains(secret), "log leaks {secret}: {output}");
+        assert!(!output.contains(secret), "log leaks a secret: {output}");
     }
 }
 
@@ -2534,7 +2534,7 @@ async fn user_bound_to_a_peer_is_not_loaded() {
         "{output}"
     );
     for secret in ["old-access", "old-refresh", USER] {
-        assert!(!output.contains(secret), "log leaks {secret}: {output}");
+        assert!(!output.contains(secret), "log leaks a secret: {output}");
     }
 }
 
