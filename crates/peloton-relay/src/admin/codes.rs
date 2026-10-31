@@ -246,7 +246,7 @@ mod tests {
         let second = codes.issue(&name("bob"), now);
         for code in [&first, &second] {
             let text = code.expose_secret();
-            assert_eq!(text.len(), 32, "{text}");
+            assert_eq!(text.len(), 32);
             assert!(text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
         }
         assert_ne!(first.expose_secret(), second.expose_secret());
