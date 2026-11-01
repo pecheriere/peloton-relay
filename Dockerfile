@@ -3,8 +3,8 @@
 # The builder always runs on the build host's platform and cross-compiles the
 # static musl binary for the requested target with zig as the C compiler and
 # linker, so multi-platform builds need no emulation. The Rust version tracks
-# rust-toolchain.toml (1.99.0).
-FROM --platform=$BUILDPLATFORM rust:1.99.0-alpine3.23@sha256:42c2519fdf75d9e34cc61a1aaf34b1a684da9bfd65fe5daefef98d92a801b001 AS build
+# rust-toolchain.toml (1.99).
+FROM --platform=$BUILDPLATFORM rust:1.99.1-alpine3.23@sha256:9bdc8babc876f1414b51b20ed3acf9432e543afafa9294c560cb59dafc377175 AS build
 
 ARG TARGETARCH
 
