@@ -89,3 +89,8 @@ jobs:
           # and the final stage only copies files, so no emulation is needed.
           platforms: linux/arm64,linux/amd64
           push: false
+          # Pull requests and main share one build cache. The release workflow's
+          # publish job never reads it, so a cache entry cannot reach a
+          # published image.
+          cache-from: type=gha,scope=docker-build
+          cache-to: type=gha,mode=max,scope=docker-build
