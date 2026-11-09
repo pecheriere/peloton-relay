@@ -208,6 +208,15 @@ Between steps 3 and 4 the account's `/v1` routes answer 503
 until the proxy sets `X-Peloton-Admin: 1` for the operator; to renew sign-ins
 from it, also set `PELOTON_RELAY_PUBLIC_URL`.
 
+**Upgrading from 0.4.0.** The state directory is unchanged: stop 0.4.0 and start
+0.4.1 on the same directory. Images up to 0.4.0 created `/state` with mode 0755
+instead of 0700, so any other user who could reach it could list the account
+names (each account's directory and files were already 0700 and 0600). Docker
+copies the image's mode into a named volume only when it creates the volume, so
+a volume created by one of those images keeps 0755. Set it to 0700 once, while
+the relay is stopped, for example with
+`docker run --rm -v peloton-relay-state:/state alpine chmod 0700 /state`.
+
 ## Admin page
 
 `GET /admin` is a small page for the operator: one card per account in
