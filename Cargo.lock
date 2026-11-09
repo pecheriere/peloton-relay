@@ -2222,7 +2222,7 @@ dependencies = [
 
 [[package]]
 name = "peloton"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "base64 0.23.1",
  "rand",
@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "peloton-relay"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aws-lc-rs",
  "axum",
@@ -2275,7 +2275,7 @@ dependencies = [
 
 [[package]]
 name = "peloton-relay-login"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "base64 0.23.1",
  "clap",
@@ -2302,7 +2302,7 @@ dependencies = [
 
 [[package]]
 name = "peloton-relay-test-support"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "axum",
  "http-body-util",
