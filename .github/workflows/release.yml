@@ -41,8 +41,12 @@ jobs:
   ci:
     needs: on-main
     uses: $/.github/workflows/ci.yml
+    # A called workflow's jobs get no more than this, and GitHub refuses to start
+    # one whose jobs ask for more, even jobs that will be skipped. ci.yml's
+    # report-red-main (main only) asks for issues: write; a tag skips it.
     permissions:
       contents: read
+      issues: write
 
   publish:
     needs: [on-main, crate-age, ci]

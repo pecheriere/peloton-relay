@@ -1,5 +1,7 @@
 # peloton-relay
 
+[![CI on main](https://github.com/pecheriere/peloton-relay/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pecheriere/peloton-relay/actions/workflows/ci.yml?query=branch%3Amain)
+
 A small HTTP relay for one or more Peloton accounts. The relay holds each
 account's Peloton credential and exposes a handful of typed endpoints, so that
 agents, scripts and dashboards can read workout data, search the class library
