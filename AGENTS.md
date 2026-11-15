@@ -79,9 +79,20 @@ Rules:
   GitHub Actions are pinned to a full commit SHA of a release at least 7 days
   old.
 - **No dead code or TODO comments.** Delete what is unused; track open work as
-  an issue.
+  a bead.
 - **Documentation moves with the code.** A change to an endpoint, a header, a
   log event or a variable updates the README in the same pull request.
+
+## Tracking work: beads
+
+Work in this repository is tracked with [beads](https://github.com/gastownhall/beads) (`bd`), prefix `pel-`, not GitHub issues. Pull requests name the bead they deliver.
+
+- `bd prime` loads the workflow; `bd ready` lists work with no blockers.
+- Create a bead before starting work, claim it (`bd update <id> --claim`) and close it when the change merges.
+- No markdown TODO lists or memory files: use beads, and `bd remember` for durable project knowledge.
+- GitHub issues stay open for reports from outside the project. Each one is triaged into a bead that links it.
+
+The database runs as a local Dolt server that `bd` starts on demand. Its data lives in `.beads/` in the main checkout and is never committed: worktrees use the main checkout's database.
 
 ## Commits and pull requests
 
